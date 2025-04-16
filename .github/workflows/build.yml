@@ -6,35 +6,54 @@ on:
       - 'v*' # v1.0.0 のような形式のタグがプッシュされたときに実行
   workflow_dispatch: # 手動実行のサポート
 
+# リリース作成権限を追加
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '20'
           cache: 'npm'
-      
+          cache-dependency-path: unity-mcp-ts/package-lock.json
+
       - name: Install dependencies
-        run: npm ci
-      
+        run: |
+          cd unity-mcp-ts
+          npm install
+
       - name: Build TypeScript
-        run: npm run build
-      
+        run: |
+          cd unity-mcp-ts
+          npm run build
+
       - name: Archive build artifacts
         run: |
-          zip -r unity-mcp-build.zip build package.json README.md LICENSE
-      
+          # ビルドフォルダの内容のみをアーカイブ
+          cd unity-mcp-ts
+          if [ -d "build" ]; then
+            # フォルダ内の内容を直接zipに追加
+            cd build
+            zip -r ../../unity-mcp-build.zip ./*
+            cd ../..
+          else
+            echo "Error: build directory not found!"
+            exit 1
+          fi
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
         if: startsWith(github.ref, 'refs/tags/')
-      
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
@@ -47,7 +66,7 @@ jobs:
             unity-mcp-build.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload artifact for manual workflow
         uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch'
