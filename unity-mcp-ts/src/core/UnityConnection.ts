@@ -17,6 +17,7 @@ export class UnityConnection extends EventEmitter {
     private reconnecting: boolean = false;
     private maxReconnectAttempts: number = 3;
     private reconnectDelay: number = 1000; // milliseconds
+    private connectionWarningEmitted: boolean = false;
 
     /**
      * Gets the singleton instance of the UnityConnection class.
@@ -31,6 +32,12 @@ export class UnityConnection extends EventEmitter {
     private constructor() {
         super();
         // Private constructor to enforce singleton pattern
+
+        // Add error event listener to prevent unhandled error events
+        this.on('error', (err) => {
+            // Error is already logged in the error event handler of the socket
+            // This prevents the error from being treated as an unhandled event
+        });
     }
 
     /**
@@ -79,16 +86,29 @@ export class UnityConnection extends EventEmitter {
 
             this.socket.on('error', (err) => {
                 console.error(`[ERROR] Socket error: ${err.message}`);
+                // Don't reject if we're not connected yet to allow retrying
+                // This is the key change - we don't propagate the error to cause process termination
                 if (!this.isConnected) {
                     reject(err);
                 }
+
+                // Emit error event, but it will be caught by our listener
                 this.emit('error', err);
+
+                // Close the socket to prevent multiple error events
+                if (this.socket) {
+                    this.socket.destroy();
+                    this.socket = null;
+                }
+
+                this.isConnected = false;
             });
 
             // Connect to Unity server
             this.socket.connect(this.port, this.host, () => {
                 console.error(`[INFO] Connected to Unity server at ${this.host}:${this.port}`);
                 this.isConnected = true;
+                this.connectionWarningEmitted = false;
                 this.emit('connected');
                 resolve();
             });
@@ -193,6 +213,11 @@ export class UnityConnection extends EventEmitter {
                 try {
                     await this.reconnect();
                 } catch (err) {
+                    // Only emit the warning once to avoid log spam
+                    if (!this.connectionWarningEmitted) {
+                        console.error(`[WARN] Unable to connect to Unity server. Some features may not be available.`);
+                        this.connectionWarningEmitted = true;
+                    }
                     return Promise.reject(new Error(`Failed to connect to Unity server: ${err instanceof Error ? err.message : String(err)}`));
                 }
             } else {

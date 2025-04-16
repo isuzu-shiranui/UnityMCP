@@ -10,7 +10,7 @@ async function main() {
     // Initialize MCP server with the official SDK
     const mcpServer = new McpServer({
       name: "unity-mcp",
-      version: "0.0.1"
+      version: "0.0.2"
     });
 
     // Initialize UnityConnection
@@ -27,13 +27,14 @@ async function main() {
     // Create handler discovery with Unity connection
     const handlerDiscovery = new HandlerDiscovery(handlerAdapter, unityConnection);
 
-    // Connect to Unity
+    // Try to connect to Unity but don't fail if connection fails
     try {
       await unityConnection.connect();
       console.error(`[INFO] Connected to Unity at ${unityHost}:${unityPort}`);
     } catch (err) {
-      console.error(`[WARN] Failed to connect to Unity: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('[INFO] Will continue without Unity connection. Some features may not work.');
+      console.error(`[WARN] Initial connection to Unity failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('[INFO] Will continue without Unity connection and attempt to reconnect when needed.');
+      // Continue execution, don't exit - the reconnection will be attempted when needed
     }
 
     // Discover and register handlers
@@ -66,6 +67,20 @@ process.on("SIGTERM", () => {
   const unityConnection = UnityConnection.getInstance();
   unityConnection.disconnect();
   process.exit(0);
+});
+
+// Handle uncaught exceptions to prevent crashing
+process.on('uncaughtException', (error) => {
+  console.error(`[ERROR] Uncaught exception: ${error.message}`);
+  console.error(error.stack);
+  // Do not exit the process
+});
+
+// Handle unhandled promise rejections to prevent crashing
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[ERROR] Unhandled Promise rejection at:', promise);
+  console.error('Reason:', reason);
+  // Do not exit the process
 });
 
 // Execute main function
