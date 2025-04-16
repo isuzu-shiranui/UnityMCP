@@ -1,0 +1,17 @@
+{
+  "name": "jp.shiranui-isuzu.unity-mcp",
+  "displayName": "Unity MCP",
+  "version": "0.0.1-preview.1",
+  "author": "Shiranui_Isuzu",
+  "unity": "2023.2",
+  "description": "A package that provides integration with the Model Context Protocol (MCP) for Unity.",
+  "keywords": [
+    "unity",
+    "mcp",
+    "claude",
+    "ai"
+  ],
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.1"
+  }
+}
