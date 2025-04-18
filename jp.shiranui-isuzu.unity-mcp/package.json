@@ -1,7 +1,7 @@
 {
   "name": "jp.shiranui-isuzu.unity-mcp",
   "displayName": "Unity MCP",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "author": "Shiranui_Isuzu",
   "unity": "2023.2",
   "description": "A package that provides integration with the Model Context Protocol (MCP) for Unity.",
@@ -13,5 +13,17 @@
   ],
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"
-  }
+  },
+  "samples": [
+    {
+      "displayName": "Unity MCP Handler Samples",
+      "description": "Collection of scenes showcasing different features of the Unity MCP Handler.",
+      "path": "Samples~/UnityMCPHandlerSamples"
+    },
+    {
+      "displayName": "Unity MCP Handler Samples JavaScript",
+      "description": "Collection of scenes showcasing different features of the Unity MCP Handler in JavaScript.",
+      "path": "Samples~/UnityMCPHandlerSamplesJS"
+    }
+  ]
 }

@@ -19,7 +19,8 @@ Unity と Model Context Protocol (MCP) を統合するための拡張可能な�
 
 - Unity 2023.2.19f1 以上
 - .NET/C# 9.0
-- Node.js と npm (TypeScript サーバー用)
+- Node.js 18.0.0 以上と npm（TypeScript サーバー用）
+   - [Node.js 公式サイト](https://nodejs.org/)からインストールしてください
 
 ## 🚀 はじめに
 
@@ -56,7 +57,7 @@ Unity と Model Context Protocol (MCP) を統合するための拡張可能な�
   }
 }
 ```
-※ `path/to/index.js` は実際のパスに置き換えてください（Windowsの場合はバックスラッシュをエスケープするか、フォワードスラッシュを使用）
+※ `path/to/index.js` は実際のパスに置き換えてください（Windowsの場合はバックスラッシュをエスケープ"\\\\"するか、フォワードスラッシュ"/"を使用）
 
 ## 🔌 アーキテクチャ
 
@@ -76,6 +77,25 @@ Unity MCP フレームワークは主に 2 つのコンポーネントで構成�
 - **HandlerDiscovery**: コマンドハンドラーの検出と登録
 - **UnityConnection**: Unity との TCP/IP 通信を管理
 - **BaseCommandHandler**: コマンドハンドラーを実装するためのベースクラス
+
+## 🔬 サンプルコード
+
+パッケージには以下のサンプルが含まれています：
+
+1. **Unity MCP Handler Samples**
+   - C#実装のサンプルコード
+   - そのままプロジェクトにインポートして使用可能
+
+2. **Unity MCP Handler Samples JavaScript**
+   - JavaScript実装のサンプルコード
+   - この中のJSファイルは`build/handlers`ディレクトリにコピーして使用してください
+
+> ⚠️ **注意**: サンプルコードには任意コード実行機能が含まれています。本番環境での使用には十分注意してください。
+
+サンプルのインポート方法:
+1. Unity パッケージマネージャーで本パッケージを選択
+2. 「Samples」タブをクリック
+3. 必要なサンプルの「Import」ボタンをクリック
 
 ## 🛠️ カスタムコマンドハンドラーの作成
 
@@ -215,6 +235,11 @@ TypeScript サーバーの環境変数:
 ### TypeScript
 
 - **MenuItemCommandHandler**: メニュー項目の実行を Unity に転送
+
+## ⚠️ セキュリティに関する注意
+
+1. **信頼できないハンドラーを実行しない**: 第三者が作成したハンドラーコードは、事前にセキュリティレビューを行ってから使用してください。
+
 
 ## 📄 ライセンス
 

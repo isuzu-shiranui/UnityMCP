@@ -18,6 +18,26 @@ export interface IMcpToolDefinition {
 }
 
 /**
+ * Defines the structure for MCP prompt definitions.
+ */
+export interface IMcpPromptDefinition {
+    /**
+     * Gets the description of the prompt.
+     */
+    description: string;
+
+    /**
+     * Gets the template text or content of the prompt.
+     */
+    template: string;
+
+    /**
+     * Optional additional properties for the prompt.
+     */
+    additionalProperties?: Record<string, z.ZodType<any>>;
+}
+
+/**
  * Interface for command handlers that process MCP requests.
  */
 export interface ICommandHandler {
@@ -62,5 +82,5 @@ export interface ICommandHandler {
      * Gets the prompt definitions supported by this handler.
      * @returns A map of prompt names to their definitions, or null if not supported.
      */
-    getPromptDefinitions?(): Map<string, any> | null;
+    getPromptDefinitions?(): Map<string, IMcpPromptDefinition> | null;
 }

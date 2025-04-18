@@ -96,12 +96,37 @@ export class HandlerAdapter {
      * @param handler The command handler.
      */
     private registerHandlerPrompts(handler: ICommandHandler): void {
-        // Implement prompt registration when needed
-        // Similar pattern as tools
+        // Skip if the handler doesn't support prompts
         if (!handler.getPromptDefinitions) {
             return;
         }
 
-        // Implement prompt registration here when needed
+        const promptDefinitions = handler.getPromptDefinitions();
+        if (!promptDefinitions) {
+            return;
+        }
+
+        // Register each prompt definition
+        for (const [promptName, definition] of promptDefinitions.entries()) {
+            this.server.prompt(
+                promptName,
+                definition.description,
+                async () => {
+                    return {
+                        messages: [
+                            {
+                                role: "assistant",
+                                content: {
+                                    type: "text",
+                                    text: definition.template
+                                }
+                            }
+                        ]
+                    };
+                }
+            );
+
+            console.error(`[INFO] Registered prompt: ${promptName}`);
+        }
     }
 }
