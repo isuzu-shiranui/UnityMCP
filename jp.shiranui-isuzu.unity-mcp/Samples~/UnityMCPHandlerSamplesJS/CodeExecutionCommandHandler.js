@@ -73,7 +73,7 @@ export class CodeExecutionCommandHandler extends BaseCommandHandler {
     getPromptDefinitions() {
         const prompts = new Map();
         // Add code execution prompt templates
-        prompts.set("unity_code_execution", {
+        prompts.set("code_execute", {
             description: "C# code template for Unity code execution",
             template: `Write C# code that follows these format guidelines to ensure proper execution in Unity:
 

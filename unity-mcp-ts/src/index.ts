@@ -10,7 +10,7 @@ async function main() {
     // Initialize MCP server with the official SDK
     const mcpServer = new McpServer({
       name: "unity-mcp",
-      version: "0.1.0"
+      version: "0.2.0"
     });
 
     // Initialize UnityConnection

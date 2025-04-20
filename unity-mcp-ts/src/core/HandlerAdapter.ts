@@ -1,4 +1,4 @@
-﻿import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+﻿import {McpServer, ResourceTemplate} from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ICommandHandler } from "./interfaces/ICommandHandler.js";
 
 /**
@@ -82,13 +82,69 @@ export class HandlerAdapter {
      * @param handler The command handler.
      */
     private registerHandlerResources(handler: ICommandHandler): void {
-        // Implement resource registration when needed
-        // Similar pattern as tools
+        // Skip if the handler doesn't support resources
         if (!handler.getResourceDefinitions) {
             return;
         }
 
-        // Implement resource registration here when needed
+        const resourceDefinitions = handler.getResourceDefinitions();
+        if (!resourceDefinitions) {
+            return;
+        }
+
+        // Register each resource definition
+        for (const [resourceName, definition] of resourceDefinitions.entries()) {
+            if (definition.template) {
+                // Register dynamic resource with template
+                this.server.resource(
+                    resourceName,
+                    new ResourceTemplate(definition.uriPattern, definition.parameters || {}),
+                    async (uri, params) => {
+                        try {
+                            // Extract the action based on resource type
+                            const action = definition.action || 'get';
+
+                            // Execute the command with parameters
+                            const result = await handler.execute(action, params);
+
+                            return {
+                                contents: [{
+                                    uri: uri.href,
+                                    text: JSON.stringify(result)
+                                }]
+                            };
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            throw new Error(`Error executing resource ${resourceName}: ${errorMessage}`);
+                        }
+                    }
+                );
+            } else {
+                // Register static resource
+                this.server.resource(
+                    resourceName,
+                    definition.uriPattern,
+                    async (uri) => {
+                        try {
+                            // Execute the command with minimal parameters
+                            const result = await handler.execute('get', { uri: uri.href });
+
+                            return {
+                                contents: [{
+                                    uri: uri.href,
+                                    text: JSON.stringify(result)
+                                }]
+                            };
+                        } catch (error) {
+                            const errorMessage = error instanceof Error ? error.message : String(error);
+                            throw new Error(`Error executing resource ${resourceName}: ${errorMessage}`);
+                        }
+                    }
+                );
+            }
+
+            console.error(`[INFO] Registered resource: ${resourceName}`);
+        }
     }
 
     /**
@@ -111,14 +167,15 @@ export class HandlerAdapter {
             this.server.prompt(
                 promptName,
                 definition.description,
-                async () => {
+                definition.additionalProperties || {},
+                (params) => {
                     return {
                         messages: [
                             {
-                                role: "assistant",
+                                role: "user",
                                 content: {
                                     type: "text",
-                                    text: definition.template
+                                    text: this.processTemplateWithParams(definition.template, params)
                                 }
                             }
                         ]
@@ -128,5 +185,25 @@ export class HandlerAdapter {
 
             console.error(`[INFO] Registered prompt: ${promptName}`);
         }
+    }
+
+    /**
+     * Processes a template string with parameters.
+     * @param template The template string with placeholders.
+     * @param params The parameters to inject.
+     * @returns The processed template.
+     */
+    private processTemplateWithParams(template: string, params: Record<string, any>): string {
+        let result = template;
+
+        // Replace placeholders like {paramName} with their values
+        if (params) {
+            Object.entries(params).forEach(([key, value]) => {
+                const regex = new RegExp(`\\{${key}\\}`, 'g');
+                result = result.replace(regex, String(value));
+            });
+        }
+
+        return result;
     }
 }

@@ -70,7 +70,6 @@ namespace UnityMCPHandlerSamples.Editor
             "UnityEngine.Audio",
             "UnityEngine.Rendering",
             "UnityEngine.Playables",
-            "UnityEngine.Timeline",
             "UnityEditor"
         };
 
