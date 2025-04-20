@@ -1,0 +1,116 @@
+﻿name: Auto Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Get version from package.json
+      - name: Get version
+        id: package-version
+        run: |
+          VERSION=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
+      # Check if tag already exists
+      - name: Check tag
+        id: check-tag
+        run: |
+          TAG="v${{ steps.package-version.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Existing tag $TAG found. No new release will be created."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Creating new release $TAG."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Set up Node.js
+      - name: Set up Node.js
+        if: steps.check-tag.outputs.exists != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: unity-mcp-ts/package-lock.json
+
+      # Install dependencies
+      - name: Install dependencies
+        if: steps.check-tag.outputs.exists != 'true'
+        run: |
+          cd unity-mcp-ts
+          npm install
+
+      # Build TypeScript
+      - name: Build TypeScript
+        if: steps.check-tag.outputs.exists != 'true'
+        run: |
+          cd unity-mcp-ts
+          npm run build
+
+      # Archive build artifacts
+      - name: Archive build artifacts
+        if: steps.check-tag.outputs.exists != 'true'
+        run: |
+          cd unity-mcp-ts
+          
+          # Copy necessary files
+          mkdir -p dist
+          cp -r build/* dist/
+          cp package.json dist/
+          
+          # Install production dependencies only
+          cd dist
+          npm install --omit=dev --no-package-lock
+          
+          # Create ZIP file
+          zip -r ../../unity-mcp-build.zip ./*
+          cd ../..
+
+      # Create tag
+      - name: Create tag
+        if: steps.check-tag.outputs.exists != 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag "v${{ steps.package-version.outputs.version }}"
+          git push origin "v${{ steps.package-version.outputs.version }}"
+
+      # Create release
+      - name: Create release
+        id: create_release
+        if: steps.check-tag.outputs.exists != 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: Release v${{ steps.package-version.outputs.version }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            unity-mcp-build.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upload artifact for manual workflow
+      - name: Upload artifact for manual workflow
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unity-mcp-build
+          path: unity-mcp-build.zip
