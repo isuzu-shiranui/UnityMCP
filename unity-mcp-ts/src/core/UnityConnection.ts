@@ -231,6 +231,7 @@ export class UnityConnection extends EventEmitter {
                 const id = (++this.requestId).toString();
                 const requestWithId: JObject = {
                     command: request.command,
+                    type: request.type || '',
                     params: request.params,
                     id
                 };

@@ -9,6 +9,7 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityMCP.Editor.Settings;
+using UnityMCP.Editor.Resources;
 
 namespace UnityMCP.Editor.Core
 {
@@ -30,6 +31,10 @@ namespace UnityMCP.Editor.Core
         // Dictionary for command handlers
         private readonly Dictionary<string, HandlerRegistration> commandHandlers = new();
 
+        // Dictionary for resource handlers
+        private readonly Dictionary<string, ResourceHandlerRegistration> resourceHandlers = new();
+        private readonly Dictionary<string, IMcpResourceHandler> resourceUriMap = new();
+
         // Queue for main thread execution
         private readonly Queue<Action> mainThreadQueue = new();
         private readonly object queueLock = new();
@@ -40,6 +45,7 @@ namespace UnityMCP.Editor.Core
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<EventArgs> ClientDisconnected;
         public event EventHandler<CommandExecutedEventArgs> CommandExecuted;
+        public event EventHandler<ResourceFetchedEventArgs> ResourceFetched;
 
         /// <summary>
         /// Gets a value indicating whether the server is currently running.
@@ -213,6 +219,170 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
+        /// Registers a resource handler with the server.
+        /// </summary>
+        /// <param name="handler">The resource handler to register.</param>
+        /// <param name="enabled">Whether the handler is enabled initially.</param>
+        /// <returns>True if registration succeeded, false if failed.</returns>
+        public bool RegisterResourceHandler(IMcpResourceHandler handler, bool enabled = true)
+        {
+            if (handler == null)
+            {
+                Debug.LogError("Cannot register null resource handler");
+                return false;
+            }
+
+            var resourceName = handler.ResourceName;
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                Debug.LogError($"Handler {handler.GetType().Name} has invalid resource name");
+                return false;
+            }
+
+            // Check if a handler for this resource already exists
+            if (this.resourceHandlers.ContainsKey(resourceName))
+            {
+                Debug.LogWarning($"Replacing existing handler for resource '{resourceName}'");
+                this.resourceHandlers.Remove(resourceName);
+            }
+
+            // Check settings for enabled state
+            if (McpSettings.instance.resourceHandlerEnabledStates.TryGetValue(resourceName, out var savedEnabled))
+            {
+                enabled = savedEnabled;
+            }
+
+            // Register with the resource name and URI maps
+            this.resourceHandlers[resourceName] = new ResourceHandlerRegistration(handler, enabled);
+
+            if (!string.IsNullOrEmpty(handler.ResourceUri))
+            {
+                this.resourceUriMap[handler.ResourceUri] = handler;
+            }
+
+            Debug.Log($"Registered resource handler: {resourceName} (URI: {handler.ResourceUri}, Enabled: {enabled})");
+
+            // Save the handler state to settings
+            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Enables or disables a resource handler.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource handler to enable or disable.</param>
+        /// <param name="enabled">Whether the handler should be enabled.</param>
+        /// <returns>true if the handler was found and its enabled state was set; otherwise, false.</returns>
+        public bool SetResourceHandlerEnabled(string resourceName, bool enabled)
+        {
+            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
+            {
+                Debug.LogWarning($"Resource handler for '{resourceName}' not found");
+                return false;
+            }
+
+            registration.Enabled = enabled;
+            Debug.Log($"Resource handler for '{resourceName}' is now {(enabled ? "enabled" : "disabled")}");
+
+            // Update settings
+            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if a resource handler is enabled.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource handler to check.</param>
+        /// <returns>true if the handler is found and enabled; otherwise, false.</returns>
+        public bool IsResourceHandlerEnabled(string resourceName)
+        {
+            return this.resourceHandlers.TryGetValue(resourceName, out var registration) && registration.Enabled;
+        }
+
+        /// <summary>
+        /// Gets all registered resource handlers.
+        /// </summary>
+        /// <returns>A dictionary of resource names and their handler registrations.</returns>
+        public IReadOnlyDictionary<string, ResourceHandlerRegistration> GetRegisteredResourceHandlers()
+        {
+            return this.resourceHandlers;
+        }
+
+        /// <summary>
+        /// Gets a resource handler by name.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource.</param>
+        /// <returns>The resource handler if found, null otherwise.</returns>
+        public IMcpResourceHandler GetResourceHandler(string resourceName)
+        {
+            return this.resourceHandlers.TryGetValue(resourceName, out var registration)
+                ? registration.Handler
+                : null;
+        }
+
+        /// <summary>
+        /// Gets a resource handler by URI.
+        /// </summary>
+        /// <param name="uri">The URI of the resource.</param>
+        /// <returns>The resource handler if found, null otherwise.</returns>
+        public IMcpResourceHandler GetResourceHandlerByUri(string uri)
+        {
+            return this.resourceUriMap.TryGetValue(uri, out var handler) ? handler : null;
+        }
+
+        /// <summary>
+        /// Fetches data from a resource handler.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource.</param>
+        /// <param name="parameters">The parameters for the resource.</param>
+        /// <returns>The resource data as a JObject, or an error if the resource is not found or disabled.</returns>
+        public JObject FetchResourceData(string resourceName, JObject parameters)
+        {
+            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Resource not found: {resourceName}"
+                };
+            }
+
+            if (!registration.Enabled)
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Resource '{resourceName}' is disabled"
+                };
+            }
+
+            try
+            {
+                var result = registration.Handler.FetchResource(parameters);
+
+                // Raise resource fetched event
+                this.OnResourceFetched(new ResourceFetchedEventArgs(resourceName, parameters, result));
+
+                return new JObject
+                {
+                    ["status"] = "success",
+                    ["result"] = result
+                };
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error fetching resource '{resourceName}': {ex.Message}");
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Error fetching resource: {ex.Message}"
+                };
+            }
+        }
+
+        /// <summary>
         /// Loads the enabled state of all handlers from McpSettings.
         /// </summary>
         private void LoadHandlerSettings()
@@ -221,7 +391,7 @@ namespace UnityMCP.Editor.Core
 
             if (DetailedLogs)
             {
-                Debug.Log($"[McpServer] Loading handler settings from McpSettings. Found {settings.handlerEnabledStates.Count} entries.");
+                Debug.Log($"[McpServer] Loading handler settings from McpSettings. Found {settings.handlerEnabledStates.Count} command entries and {settings.resourceHandlerEnabledStates.Count} resource entries.");
             }
         }
 
@@ -276,7 +446,7 @@ namespace UnityMCP.Editor.Core
                         Thread.Sleep(10); // Small delay to prevent high CPU usage
                         cancellationToken.ThrowIfCancellationRequested();
                     }
-                    catch (OperationCanceledException )
+                    catch (OperationCanceledException)
                     {
                         break;
                     }
@@ -319,8 +489,20 @@ namespace UnityMCP.Editor.Core
                     Debug.Log($"[McpServer] Received command: {command}");
                 }
 
-                // Execute the command
-                var response = this.ExecuteCommand(command);
+                // Process the command based on its type
+                var responseType = command["type"]?.ToString();
+                JObject response;
+
+                if (responseType == "resource")
+                {
+                    // Handle resource request
+                    response = this.ProcessResourceRequest(command);
+                }
+                else
+                {
+                    // Default to command execution
+                    response = this.ExecuteCommand(command);
+                }
 
                 // Send response
                 if (this.client is { Connected: true })
@@ -372,6 +554,99 @@ namespace UnityMCP.Editor.Core
 
                 this.incompleteData = ""; // Reset incomplete data
             }
+        }
+
+        /// <summary>
+        /// Processes a resource request.
+        /// </summary>
+        /// <param name="request">The resource request.</param>
+        /// <returns>The response to the request.</returns>
+        private JObject ProcessResourceRequest(JObject request)
+        {
+            var command = request["command"]?.ToString();
+            if (string.IsNullOrEmpty(command))
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = "Missing command in resource request"
+                };
+            }
+            var split = command.Split('.');
+            if (split.Length < 2)
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Invalid command format: {command}. Expected format: 'prefix.action'"
+                };
+            }
+            var resourceName = split[0];
+
+            var id = request["id"]?.ToString();
+            var parameters = request["params"] as JObject ?? new JObject();
+
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = "Missing resource name",
+                    ["id"] = id
+                };
+            }
+
+            // Execute the resource fetch in the main thread
+            JObject result = null;
+            var waitHandle = new ManualResetEvent(false);
+
+            // Queue the resource fetch for the main thread
+            this.ExecuteOnMainThread(() => {
+                try
+                {
+                    result = this.FetchResourceData(resourceName, parameters);
+                }
+                catch (Exception e)
+                {
+                    result = new JObject
+                    {
+                        ["status"] = "error",
+                        ["message"] = $"Error in {resourceName}: {e.Message}",
+                        ["id"] = id
+                    };
+                }
+                finally
+                {
+                    waitHandle.Set();
+                }
+            });
+
+            // Wait for the command to be executed on the main thread
+            // Timeout after 5 seconds to prevent hanging
+            if (!waitHandle.WaitOne(5000))
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = "Timed out waiting for resource fetch on main thread",
+                    ["id"] = id
+                };
+            }
+
+            // If result is still null, execution failed
+            if (result == null)
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = "Failed to fetch resource in main thread",
+                    ["id"] = id
+                };
+            }
+
+            // Add the ID to the result
+            result["id"] = id;
+            return result;
         }
 
         /// <summary>
@@ -554,6 +829,15 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
+        /// Raises the ResourceFetched event.
+        /// </summary>
+        /// <param name="e">The event arguments.</param>
+        private void OnResourceFetched(ResourceFetchedEventArgs e)
+        {
+            this.ResourceFetched?.Invoke(this, e);
+        }
+
+        /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
         /// </summary>
         public void Dispose()
@@ -597,6 +881,44 @@ namespace UnityMCP.Editor.Core
             /// <param name="handler">The command handler.</param>
             /// <param name="enabled">Whether the handler is enabled initially.</param>
             public HandlerRegistration(IMcpCommandHandler handler, bool enabled = true)
+            {
+                this.Handler = handler;
+                this.Enabled = enabled;
+                this.AssemblyName = handler.GetType().Assembly.GetName().Name;
+            }
+        }
+
+        /// <summary>
+        /// Represents a registered resource handler.
+        /// </summary>
+        public class ResourceHandlerRegistration
+        {
+            /// <summary>
+            /// Gets the resource handler.
+            /// </summary>
+            public IMcpResourceHandler Handler { get; }
+
+            /// <summary>
+            /// Gets or sets a value indicating whether the handler is enabled.
+            /// </summary>
+            public bool Enabled { get; set; }
+
+            /// <summary>
+            /// Gets the description of the handler.
+            /// </summary>
+            public string Description => this.Handler.Description;
+
+            /// <summary>
+            /// Gets the assembly name of the handler.
+            /// </summary>
+            public string AssemblyName { get; }
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="ResourceHandlerRegistration"/> class.
+            /// </summary>
+            /// <param name="handler">The resource handler.</param>
+            /// <param name="enabled">Whether the handler is enabled initially.</param>
+            public ResourceHandlerRegistration(IMcpResourceHandler handler, bool enabled = true)
             {
                 this.Handler = handler;
                 this.Enabled = enabled;
@@ -661,6 +983,40 @@ namespace UnityMCP.Editor.Core
         {
             this.Prefix = prefix;
             this.Action = action;
+            this.Parameters = parameters;
+            this.Result = result;
+        }
+    }
+
+    /// <summary>
+    /// Provides data for the ResourceFetched event.
+    /// </summary>
+    public class ResourceFetchedEventArgs : EventArgs
+    {
+        /// <summary>
+        /// Gets the resource name.
+        /// </summary>
+        public string ResourceName { get; }
+
+        /// <summary>
+        /// Gets the resource parameters.
+        /// </summary>
+        public JObject Parameters { get; }
+
+        /// <summary>
+        /// Gets the resource result.
+        /// </summary>
+        public JObject Result { get; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ResourceFetchedEventArgs"/> class.
+        /// </summary>
+        /// <param name="resourceName">The resource name.</param>
+        /// <param name="parameters">The resource parameters.</param>
+        /// <param name="result">The resource result.</param>
+        public ResourceFetchedEventArgs(string resourceName, JObject parameters, JObject result)
+        {
+            this.ResourceName = resourceName;
             this.Parameters = parameters;
             this.Result = result;
         }

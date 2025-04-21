@@ -1,8 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { HandlerAdapter } from "./core/HandlerAdapter.js";
-import { HandlerDiscovery } from "./core/HandlerDiscovery.js";
+import { HandlerDiscovery, HandlerType } from "./core/HandlerDiscovery.js";
 import { UnityConnection } from "./core/UnityConnection.js";
+import { CommandRegistry } from "./core/CommandRegistry.js";
+import { ResourceRegistry } from "./core/ResourceRegistry.js";
+import { PromptRegistry } from "./core/PromptRegistry.js";
 
 // Main function
 async function main() {
@@ -10,7 +13,7 @@ async function main() {
     // Initialize MCP server with the official SDK
     const mcpServer = new McpServer({
       name: "unity-mcp",
-      version: "0.2.0"
+      version: "0.1.0"
     });
 
     // Initialize UnityConnection
@@ -21,11 +24,22 @@ async function main() {
     const unityPort = parseInt(process.env.UNITY_PORT || '27182', 10);
     unityConnection.configure(unityHost, unityPort);
 
+    // Create registries
+    const commandRegistry = new CommandRegistry();
+    const resourceRegistry = new ResourceRegistry();
+    const promptRegistry = new PromptRegistry();
+
     // Create handler adapter
     const handlerAdapter = new HandlerAdapter(mcpServer);
 
-    // Create handler discovery with Unity connection
-    const handlerDiscovery = new HandlerDiscovery(handlerAdapter, unityConnection);
+    // Create handler discovery with Unity connection and registries
+    const handlerDiscovery = new HandlerDiscovery(
+        handlerAdapter,
+        unityConnection,
+        commandRegistry,
+        resourceRegistry,
+        promptRegistry
+    );
 
     // Try to connect to Unity but don't fail if connection fails
     try {
@@ -38,8 +52,11 @@ async function main() {
     }
 
     // Discover and register handlers
-    const count = await handlerDiscovery.discoverAndRegisterHandlers();
-    console.error(`[INFO] Discovered and registered ${count} command handlers`);
+    const counts = await handlerDiscovery.discoverAndRegisterHandlers();
+    console.error(`[INFO] Discovered and registered:
+      Command Handlers: ${counts[HandlerType.COMMAND]}
+      Resource Handlers: ${counts[HandlerType.RESOURCE]}
+      Prompt Handlers: ${counts[HandlerType.PROMPT]}`);
 
     // Create transport using standard I/O
     const transport = new StdioServerTransport();

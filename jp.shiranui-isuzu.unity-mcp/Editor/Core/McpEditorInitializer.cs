@@ -1,5 +1,6 @@
 ﻿using UnityEditor;
 using UnityEngine;
+using UnityMCP.Editor.Resources;
 using UnityMCP.Editor.Settings;
 
 namespace UnityMCP.Editor.Core
@@ -28,11 +29,20 @@ namespace UnityMCP.Editor.Core
             // Create and register the MCP server
             var settings = McpSettings.instance;
             var server = new McpServer();
-            McpServiceManager.Instance.RegisterService<McpServer>(server);
+            McpServiceManager.Instance.RegisterService(server);
 
             // Discover and register command handlers
-            var discovery = new McpHandlerDiscovery(server);
-            discovery.DiscoverAndRegisterHandlers();
+            var commandDiscovery = new McpHandlerDiscovery<IMcpCommandHandler>(handler => server.RegisterHandler(handler));
+            var commandCount = commandDiscovery.DiscoverAndRegister();
+
+            if (settings.detailedLogs)
+                Debug.Log($"Discovered and registered {commandCount} command handlers");
+
+            // Discover and register resource handlers
+            var resourceDiscovery = new McpHandlerDiscovery<IMcpResourceHandler>(handler => server.RegisterResourceHandler(handler));
+            var resourceCount = resourceDiscovery.DiscoverAndRegister();
+            if (settings.detailedLogs)
+                Debug.Log($"Discovered and registered {resourceCount} resource handlers");
 
             // Auto-start if configured
             if (settings.autoStartOnLaunch)
