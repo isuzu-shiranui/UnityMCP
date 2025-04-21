@@ -34,6 +34,8 @@ namespace UnityMCP.Editor.Core
         private readonly Queue<Action> mainThreadQueue = new();
         private readonly object queueLock = new();
 
+        private CancellationTokenSource cancellationTokenSource;
+
         // Events for tracking client connections
         public event EventHandler<ClientConnectedEventArgs> ClientConnected;
         public event EventHandler<EventArgs> ClientDisconnected;
@@ -80,13 +82,15 @@ namespace UnityMCP.Editor.Core
 
             try
             {
+                this.cancellationTokenSource = new CancellationTokenSource();
+
                 // Start server on a separate thread
                 this.serverThread = new Thread(this.RunServer)
                 {
                     IsBackground = true,
                     Name = "McpServerThread"
                 };
-                this.serverThread.Start();
+                this.serverThread.Start(this.cancellationTokenSource.Token);
                 this.running = true;
                 Debug.Log($"MCP server started on {this.host}:{this.port}");
             }
@@ -104,6 +108,8 @@ namespace UnityMCP.Editor.Core
         {
             this.running = false;
 
+            this.cancellationTokenSource?.Cancel();
+
             if (this.client != null)
             {
                 this.client.Close();
@@ -119,17 +125,6 @@ namespace UnityMCP.Editor.Core
             if (this.serverThread is { IsAlive: true })
             {
                 this.serverThread.Join(1000); // Wait for the thread to finish
-                if (this.serverThread.IsAlive)
-                {
-                    try
-                    {
-                        this.serverThread.Interrupt();
-                    }
-                    catch (ThreadStateException)
-                    {
-                        // Ignore thread state exception
-                    }
-                }
                 this.serverThread = null;
             }
 
@@ -233,15 +228,17 @@ namespace UnityMCP.Editor.Core
         /// <summary>
         /// Main server execution loop.
         /// </summary>
-        private void RunServer()
+        private void RunServer(object token)
         {
+            var cancellationToken = (CancellationToken)token;
+
             try
             {
                 var ipAddress = IPAddress.Parse(this.host);
                 this.listener = new TcpListener(ipAddress, this.port);
                 this.listener.Start();
 
-                while (this.running)
+                while (this.running && !cancellationToken.IsCancellationRequested)
                 {
                     // Accept client connections
                     if (this.listener.Pending())
@@ -267,19 +264,27 @@ namespace UnityMCP.Editor.Core
                             this.ProcessData(data);
                         }
                     }
-                    else if (this.client != null && !this.client.Connected)
+                    else if (this.client is { Connected: false })
                     {
                         // Client disconnected
                         this.OnClientDisconnected(EventArgs.Empty);
                         this.client = null;
                     }
 
-                    Thread.Sleep(10); // Small delay to prevent high CPU usage
+                    try
+                    {
+                        Thread.Sleep(10); // Small delay to prevent high CPU usage
+                        cancellationToken.ThrowIfCancellationRequested();
+                    }
+                    catch (OperationCanceledException )
+                    {
+                        break;
+                    }
                 }
             }
-            catch (ThreadInterruptedException)
+            catch (OperationCanceledException)
             {
-                // Thread was interrupted, just exit
+                // Expected cancellation, just exit
             }
             catch (Exception e)
             {
