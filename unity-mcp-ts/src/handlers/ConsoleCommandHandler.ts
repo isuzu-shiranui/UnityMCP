@@ -58,19 +58,38 @@ export abstract class ConsoleCommandHandler extends BaseCommandHandler {
             parameterSchema: {
                 startRow: z.number().optional().describe("The starting row index (defaults to 0)"),
                 count: z.number().optional().describe("The maximum number of logs to retrieve (defaults to 100)")
+            },
+            annotations: {
+                title: "Get Console Logs",
+                readOnlyHint: true,
+                openWorldHint: false
             }
         });
 
         // Add console_getCount tool
         tools.set("console_getCount", {
             description: "Gets the count of logs by type",
-            parameterSchema: {}
+            parameterSchema: {},
+            annotations: {
+                title: "Get Log Count",
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            }
         });
 
         // Add console_clear tool
         tools.set("console_clear", {
             description: "Clears all logs from the console",
-            parameterSchema: {}
+            parameterSchema: {},
+            annotations: {
+                title: "Clear Console",
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false
+            }
         });
 
         // Add console_setFilter tool
@@ -78,6 +97,13 @@ export abstract class ConsoleCommandHandler extends BaseCommandHandler {
             description: "Sets a filter on the console logs",
             parameterSchema: {
                 filter: z.string().describe("The filter text to apply")
+            },
+            annotations: {
+                title: "Set Console Filter",
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
             }
         });
 

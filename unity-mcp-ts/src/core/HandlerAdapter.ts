@@ -1,6 +1,7 @@
 ﻿import { ICommandHandler } from "./interfaces/ICommandHandler.js";
 import { IResourceHandler } from "./interfaces/IResourceHandler.js";
 import { IPromptHandler } from "./interfaces/IPromptHandler.js";
+import { McpErrorCode } from "../types/ErrorCodes.js"
 import {McpServer, ResourceTemplate} from "@modelcontextprotocol/sdk/server/mcp.js";
 import {undefined} from "zod";
 
@@ -176,6 +177,16 @@ export class HandlerAdapter {
                         // Execute the command and await the result
                         const result = await handler.execute(action, params);
 
+                        if (result.success === false && result.error) {
+                            return {
+                                isError: true,
+                                content: [{
+                                    type: "text",
+                                    text: `Error: ${result.error}`
+                                }]
+                            };
+                        }
+
                         // Convert the result to a text response
                         return {
                             content: [{
@@ -184,10 +195,22 @@ export class HandlerAdapter {
                             }]
                         };
                     } catch (error) {
-                        const errorMessage = error instanceof Error ? error.message : String(error);
-                        throw new Error(`Error executing tool ${toolName}: ${errorMessage}`);
+                        console.error(`[ERROR] Tool execution [${toolName}]: ${error instanceof Error ? error.message : String(error)}`);
+                        return {
+                            isError: true,
+                            content: [{
+                                type: "text",
+                                text: `Error: ${error instanceof Error ? error.message : String(error)}`
+                            }],
+                            errorDetails: {
+                                type: "execution_error",
+                                timestamp: new Date().toISOString(),
+                                command: `${toolName}`
+                            }
+                        };
                     }
                 }
+                // definition.annotations -- SDK not support annotations yet
             );
 
             console.error(`[INFO] Registered tool: ${toolName}`);

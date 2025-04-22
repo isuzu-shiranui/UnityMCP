@@ -2,6 +2,9 @@
 import { JObject } from "../types/index.js";
 import { UnityConnection } from "./UnityConnection.js";
 import { URL } from "url";
+import {
+    McpErrorCode
+} from "../types/ErrorCodes.js";
 
 /**
  * Base class for resource handlers providing common functionality.
@@ -67,7 +70,12 @@ export abstract class BaseResourceHandler implements IResourceHandler {
         } catch (ex) {
             const errorMessage = ex instanceof Error ? ex.message : String(ex);
             console.error(`Error fetching resource ${this.resourceName}: ${errorMessage}`);
-            throw ex;
+
+            const error = new Error(`Resource fetch failed: ${errorMessage}`);
+            (error as any).code = McpErrorCode.ResourceNotFound;
+            (error as any).resourceName = this.resourceName;
+            (error as any).uri = uri.href;
+            throw error;
         }
     }
 

@@ -50,7 +50,12 @@ export abstract class BaseCommandHandler implements ICommandHandler {
 
             return {
                 success: false,
-                error: errorMessage
+                error: errorMessage,
+                errorDetails: {
+                    command: `${this.commandPrefix}.${action}`,
+                    timestamp: new Date().toISOString(),
+                    type: ex instanceof Error ? ex.name || "Error" : "UnknownError"
+                }
             };
         }
     }

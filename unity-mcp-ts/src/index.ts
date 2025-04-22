@@ -88,15 +88,22 @@ process.on("SIGTERM", () => {
 
 // Handle uncaught exceptions to prevent crashing
 process.on('uncaughtException', (error) => {
-  console.error(`[ERROR] Uncaught exception: ${error.message}`);
+  const errorCode = 'code' in error ? `[Code: ${(error as any).code}] ` : '';
+  console.error(`[ERROR] Uncaught exception: ${errorCode}${error.message}`);
   console.error(error.stack);
   // Do not exit the process
 });
 
 // Handle unhandled promise rejections to prevent crashing
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[ERROR] Unhandled Promise rejection at:', promise);
-  console.error('Reason:', reason);
+  if (reason instanceof Error) {
+    const errorCode = 'code' in reason ? `[Code: ${(reason as any).code}] ` : '';
+    console.error(`[ERROR] Unhandled Promise rejection: ${errorCode}${reason.message}`);
+    console.error(reason.stack);
+  } else {
+    console.error('[ERROR] Unhandled Promise rejection at:', promise);
+    console.error('Reason:', reason);
+  }
   // Do not exit the process
 });
 

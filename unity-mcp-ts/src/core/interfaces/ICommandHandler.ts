@@ -15,6 +15,36 @@ export interface IMcpToolDefinition {
      * Gets the zod schema for the tool parameters.
      */
     parameterSchema: Record<string, z.ZodType<any>>;
+
+    /**
+     * Optional annotations about the tool's behavior.
+     */
+    annotations?: {
+        /**
+         * Human-readable title for the tool
+         */
+        title?: string;
+
+        /**
+         * If true, indicates the tool does not modify its environment
+         */
+        readOnlyHint?: boolean;
+
+        /**
+         * If true, the tool may perform destructive updates
+         */
+        destructiveHint?: boolean;
+
+        /**
+         * If true, calling the tool repeatedly with the same arguments has no additional effect
+         */
+        idempotentHint?: boolean;
+
+        /**
+         * If true, the tool may interact with external entities
+         */
+        openWorldHint?: boolean;
+    };
 }
 
 /**

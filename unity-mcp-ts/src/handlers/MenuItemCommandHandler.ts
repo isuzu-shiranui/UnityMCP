@@ -50,6 +50,13 @@ export abstract class MenuItemCommandHandler extends BaseCommandHandler {
             description: "Executes a Unity Editor menu item",
             parameterSchema: {
                 menuItem: z.string().describe("The menu item path to execute")
+            },
+            annotations: {
+                title: "Execute Menu Item",
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: false
             }
         });
 

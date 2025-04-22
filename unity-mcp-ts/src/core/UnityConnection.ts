@@ -1,6 +1,7 @@
 ﻿import * as net from 'net';
 import { EventEmitter } from 'events';
 import { JObject } from '../types/index.js';
+import { McpErrorCode } from "../types/ErrorCodes.js";
 
 /**
  * Handles TCP/IP communication between the TypeScript MCP server and Unity Editor.
@@ -186,7 +187,9 @@ export class UnityConnection extends EventEmitter {
 
         this.reconnecting = false;
         this.emit('reconnectFailed');
-        throw new Error(`Failed to reconnect after ${attempts} attempts`);
+        const error = new Error(`Failed to reconnect after ${attempts} attempts`);
+        (error as any).code = McpErrorCode.ConnectionError;
+        throw error;
     }
 
     /**
@@ -218,10 +221,14 @@ export class UnityConnection extends EventEmitter {
                         console.error(`[WARN] Unable to connect to Unity server. Some features may not be available.`);
                         this.connectionWarningEmitted = true;
                     }
-                    return Promise.reject(new Error(`Failed to connect to Unity server: ${err instanceof Error ? err.message : String(err)}`));
+                    const error = new Error(`Failed to connect to Unity server: ${err instanceof Error ? err.message : String(err)}`);
+                    (error as any).code = McpErrorCode.ConnectionError;
+                    throw error;
                 }
             } else {
-                return Promise.reject(new Error('Not connected to Unity server'));
+                const error = new Error('Not connected to Unity server');
+                (error as any).code = McpErrorCode.ConnectionError;
+                throw error;
             }
         }
 
