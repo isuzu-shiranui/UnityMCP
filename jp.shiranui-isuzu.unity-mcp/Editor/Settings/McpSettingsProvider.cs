@@ -106,6 +106,15 @@ namespace UnityMCP.Editor.Settings
             settings.host = EditorGUILayout.TextField("Host", settings.host);
             settings.port = EditorGUILayout.IntField("Port", settings.port);
 
+            EditorGUILayout.Space(5);
+
+            // UDP Discovery settings
+            EditorGUILayout.LabelField("Connection Method", this.subHeaderStyle);
+            settings.useUdpDiscovery = EditorGUILayout.Toggle("Use UDP Discovery", settings.useUdpDiscovery);
+            settings.udpDiscoveryPort = EditorGUILayout.IntField("UDP Discovery Port", settings.udpDiscoveryPort);
+
+            EditorGUILayout.HelpBox("UDP Discovery allows the MCP server to automatically find Unity when it starts. Disable this if you experience connection issues.", MessageType.Info);
+
             EditorGUILayout.Space(10);
 
             // Auto-start options
@@ -316,6 +325,7 @@ namespace UnityMCP.Editor.Settings
 
         /// <summary>
         /// Draws the connection status section of the settings UI.
+        /// With privacy-focused updates.
         /// </summary>
         private void DrawConnectionStateSection()
         {
@@ -363,10 +373,10 @@ namespace UnityMCP.Editor.Settings
                 }
                 EditorGUILayout.EndHorizontal();
 
-                // Project details
+                // Project details - simplified for privacy
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label("Project:", GUILayout.Width(120));
-                GUILayout.Label($"{Application.companyName}/{Application.productName}");
+                GUILayout.Label($"{Application.productName}");
                 EditorGUILayout.EndHorizontal();
 
                 // Unity version

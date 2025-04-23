@@ -19,8 +19,8 @@ namespace UnityMCP.Editor.Core
     internal sealed class McpServer : IDisposable
     {
         // Server configuration
-        private readonly string host;
-        private readonly int port;
+        private string host;
+        private int port;
         private bool running;
         private TcpClient client;
         private Thread clientThread;
@@ -50,13 +50,17 @@ namespace UnityMCP.Editor.Core
         private readonly int maxReconnectDelay = 60000; // 1 minute
         private int currentReconnectDelay;
 
+        // Project information (minimal for privacy)
         private readonly string productName = Application.productName;
-        private readonly string companyName = Application.companyName;
         private readonly string unityVersion = Application.unityVersion;
-        private readonly string deviceName = SystemInfo.deviceName;
-        private readonly string platform = Application.platform.ToString();
         private readonly bool isEditor = Application.isEditor;
         private readonly string projectPath = Application.dataPath;
+
+        // UDP Broadcast receiver
+        private UdpClient udpListener;
+        private readonly int broadcastPort = 27183; // Port for receiving TS server broadcasts
+        private bool isUdpListening = false;
+        private readonly object udpLock = new object();
 
         // Events for tracking client connections
         public event EventHandler<EventArgs> Connected;
@@ -97,6 +101,7 @@ namespace UnityMCP.Editor.Core
             this.port = port > 0 ? port : settings.port;
             this.clientId = this.GenerateClientId();
             this.currentReconnectDelay = this.reconnectDelay;
+            this.broadcastPort = settings.udpDiscoveryPort;
 
             // Load handler settings from McpSettings
             this.LoadHandlerSettings();
@@ -108,28 +113,32 @@ namespace UnityMCP.Editor.Core
             {
                 Debug.Log($"[McpServer] Initialized with host={this.host}, port={this.port}, clientId={this.clientId}");
             }
+
+            // Start UDP listener if enabled in settings
+            if (settings.useUdpDiscovery)
+            {
+                this.StartUdpListener();
+            }
         }
 
         /// <summary>
         /// Generates a unique client ID based on project information.
+        /// Privacy-focused: only uses project info, no device/user specific data.
         /// </summary>
         private string GenerateClientId()
         {
-            // Get project information
+            // Project information only
             var productName = this.productName;
-            var companyName = this.companyName;
 
-            // Get additional information
-            var deviceName = this.deviceName;
-            var isEditor = this.isEditor;
-            var editorMode = isEditor ? "Editor" : "Player";
-
-            // Get a unique identifier for this project instance
+            // Generate hash from project path instead of using full path
             var projectPath = this.projectPath;
-            var projectPathHash = Math.Abs(projectPath.GetHashCode()) % 10000;
+            var projectPathHash = Math.Abs(projectPath.GetHashCode());
 
-            // Create a unique identifier
-            return $"{productName}-{companyName}-{editorMode}-{deviceName}-{projectPathHash}";
+            // Include editor/player mode as it's useful for classification
+            var editorMode = this.isEditor ? "Editor" : "Player";
+
+            // Create a unique identifier with minimal personal information
+            return $"{productName}-{editorMode}-{projectPathHash}";
         }
 
         /// <summary>
@@ -184,7 +193,184 @@ namespace UnityMCP.Editor.Core
                 this.clientThread = null;
             }
 
+            // Stop UDP listener
+            this.StopUdpListener();
+
             Debug.Log("MCP client stopped");
+        }
+
+        /// <summary>
+        /// Starts the UDP listener for TS server broadcasts.
+        /// </summary>
+        private void StartUdpListener()
+        {
+            lock (this.udpLock)
+            {
+                if (this.isUdpListening)
+                {
+                    return;
+                }
+
+                try
+                {
+                    this.udpListener = new UdpClient();
+                    this.udpListener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                    this.udpListener.Client.Bind(new IPEndPoint(IPAddress.Any, this.broadcastPort));
+                    this.isUdpListening = true;
+
+                    // Start receiving UDP packets asynchronously
+                    this.udpListener.BeginReceive(this.ReceiveCallback, this.udpListener);
+
+                    Debug.Log($"[McpServer] Started UDP listener on port {this.broadcastPort}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[McpServer] Failed to start UDP listener: {ex.Message}");
+                    this.isUdpListening = false;
+                    this.udpListener?.Close();
+                    this.udpListener = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Stops the UDP listener.
+        /// </summary>
+        private void StopUdpListener()
+        {
+            lock (this.udpLock)
+            {
+                if (!this.isUdpListening)
+                {
+                    return;
+                }
+
+                try
+                {
+                    this.udpListener?.Close();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[McpServer] Error closing UDP listener: {ex.Message}");
+                }
+                finally
+                {
+                    this.isUdpListening = false;
+                    this.udpListener = null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Callback for receiving UDP broadcast packets.
+        /// </summary>
+        private void ReceiveCallback(IAsyncResult ar)
+        {
+            UdpClient client = (UdpClient)ar.AsyncState;
+            IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
+            byte[] data = null;
+
+            // Try to receive data
+            try
+            {
+                lock (this.udpLock)
+                {
+                    if (!this.isUdpListening || client == null)
+                    {
+                        return;
+                    }
+
+                    data = client.EndReceive(ar, ref remoteEP);
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // UDP client has been closed, do nothing
+                this.isUdpListening = false;
+                return;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[McpServer] Error receiving UDP data: {ex.Message}");
+            }
+
+            // Continue receiving packets (even after errors)
+            try
+            {
+                lock (this.udpLock)
+                {
+                    if (this.isUdpListening && client != null)
+                    {
+                        client.BeginReceive(this.ReceiveCallback, client);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[McpServer] Error continuing UDP receive: {ex.Message}");
+                this.isUdpListening = false;
+            }
+
+            // Process received data
+            if (data != null && data.Length > 0)
+            {
+                try
+                {
+                    string jsonStr = Encoding.UTF8.GetString(data);
+
+                    if (DetailedLogs)
+                    {
+                        Debug.Log($"[McpServer] Received UDP broadcast from {remoteEP}: {jsonStr}");
+                    }
+
+                    // Parse JSON
+                    JObject serverInfo = JObject.Parse(jsonStr);
+                    string messageType = serverInfo["type"]?.ToString();
+
+                    // Verify this is an MCP server announcement
+                    if (messageType == "mcp_server_announce")
+                    {
+                        string host = serverInfo["host"]?.ToString();
+                        int port = serverInfo["port"]?.Value<int>() ?? 0;
+                        string version = serverInfo["version"]?.ToString();
+
+                        if (!string.IsNullOrEmpty(host) && port > 0)
+                        {
+                            // Execute on main thread
+                            this.ExecuteOnMainThread(() => {
+                                // Skip if already connected
+                                if (this.IsConnected)
+                                {
+                                    if (DetailedLogs)
+                                    {
+                                        Debug.Log($"[McpServer] Already connected to MCP server, ignoring broadcast");
+                                    }
+                                    return;
+                                }
+
+                                // Try connecting if not already connecting
+                                if (!this.isConnecting)
+                                {
+                                    Debug.Log($"[McpServer] Detected MCP TypeScript server at {host}:{port} (v{version}), connecting...");
+
+                                    // Update host and port from broadcast
+                                    this.host = host;
+                                    this.port = port;
+                                    this.TryConnect();
+                                }
+                                else if (DetailedLogs)
+                                {
+                                    Debug.Log($"[McpServer] Connection already in progress, ignoring broadcast");
+                                }
+                            });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[McpServer] Failed to process UDP broadcast: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>
@@ -320,6 +506,7 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Sends client registration information to the MCP TypeScript server.
+        /// Updated to respect privacy concerns.
         /// </summary>
         private void SendClientRegistration()
         {
@@ -332,14 +519,9 @@ namespace UnityMCP.Editor.Core
                     ["clientInfo"] = new JObject
                     {
                         ["productName"] = this.productName,
-                        ["companyName"] = this.companyName,
                         ["unityVersion"] = this.unityVersion,
-                        ["deviceName"] = this.deviceName,
-                        ["platformName"] = this.platform,
                         ["isEditor"] = this.isEditor,
-                        ["dataPath"] = this.projectPath,
-                        ["projectPath"] = this.projectPath.Replace("/Assets", ""),
-                        ["projectPathHash"] = Math.Abs(this.projectPath.GetHashCode()) % 10000
+                        ["projectPathHash"] = Math.Abs(this.projectPath.GetHashCode())
                     }
                 };
 
@@ -351,7 +533,7 @@ namespace UnityMCP.Editor.Core
 
                 if (DetailedLogs)
                 {
-                    Debug.Log($"Sent client registration: {registrationInfo}");
+                    Debug.Log($"[McpServer] Sent client registration: {registrationInfo}");
                 }
             }
             catch (Exception e)
@@ -1161,6 +1343,20 @@ namespace UnityMCP.Editor.Core
                 this.Parameters = parameters;
                 this.Result = result;
             }
+        }
+
+        /// <summary>
+        /// Server announcement data from TS broadcast
+        /// </summary>
+        [Serializable]
+        private class ServerAnnouncement
+        {
+            public string type;
+            public string host;
+            public int port;
+            public string version;
+            public string protocol;
+            public long timestamp;
         }
     }
 }

@@ -1,4 +1,5 @@
 ﻿import * as net from 'net';
+import * as dgram from 'dgram';
 import { EventEmitter } from 'events';
 import { JObject } from '../types/index.js';
 import { McpErrorCode } from "../types/ErrorCodes.js";
@@ -18,6 +19,10 @@ export class UnityConnection extends EventEmitter {
     private requestId: number = 0;
     private clientDataBuffers: Map<string, string> = new Map();
     private clientInfoMap: Map<string, any> = new Map();
+
+    // UDP broadcast related fields
+    private broadcastSocket: dgram.Socket | null = null;
+    private broadcastPort = 27183; // UDP broadcast port
 
     /**
      * Gets the singleton instance of the UnityConnection class.
@@ -127,6 +132,10 @@ export class UnityConnection extends EventEmitter {
                 this.server.listen(this.port, this.host, () => {
                     console.error(`[INFO] MCP server listening on ${this.host}:${this.port}`);
                     this.emit('serverStarted', { host: this.host, port: this.port });
+
+                    // Send a single broadcast when server starts
+                    this.sendInitialBroadcast();
+
                     resolve();
                 });
             } catch (err) {
@@ -134,6 +143,76 @@ export class UnityConnection extends EventEmitter {
                 reject(err);
             }
         });
+    }
+
+    /**
+     * Sends a single initial broadcast to announce the server
+     */
+    private sendInitialBroadcast(): void {
+        try {
+            // Create UDP socket for a single broadcast
+            const socket = dgram.createSocket('udp4');
+
+            socket.on('error', (err) => {
+                console.error(`[ERROR] Broadcast socket error: ${err.message}`);
+                try {
+                    socket.close();
+                } catch (e) {
+                    // Ignore close errors
+                }
+            });
+
+            socket.bind(0, () => {
+                try {
+                    // Enable broadcasting
+                    socket.setBroadcast(true);
+
+                    // Create server info message
+                    const serverInfo = {
+                        type: "mcp_server_announce",
+                        host: this.host,
+                        port: this.port,
+                        version: "0.2.0",
+                        protocol: "unity-mcp",
+                        timestamp: Date.now()
+                    };
+
+                    const message = Buffer.from(JSON.stringify(serverInfo));
+
+                    // Send the broadcast
+                    socket.send(
+                        message,
+                        0,
+                        message.length,
+                        this.broadcastPort,
+                        '255.255.255.255',
+                        (err) => {
+                            if (err) {
+                                console.error(`[ERROR] Broadcast failed: ${err instanceof Error ? err.message : String(err)}`);
+                            } else {
+                                console.error('[INFO] Initial MCP server broadcast sent');
+                            }
+
+                            // Close the socket after sending regardless of success/failure
+                            try {
+                                socket.close();
+                            } catch (e) {
+                                // Ignore close errors
+                            }
+                        }
+                    );
+                } catch (err) {
+                    console.error(`[ERROR] Failed to send broadcast: ${err instanceof Error ? err.message : String(err)}`);
+                    try {
+                        socket.close();
+                    } catch (e) {
+                        // Ignore close errors
+                    }
+                }
+            });
+        } catch (err) {
+            console.error(`[ERROR] Failed to create broadcast socket: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     /**
@@ -256,7 +335,8 @@ export class UnityConnection extends EventEmitter {
         // Store client info
         this.clientInfoMap.set(newClientId, clientInfo);
 
-        console.error(`[INFO] Client registered: ${newClientId} (${(clientInfo as any)?.productName || 'Unknown'})`);
+        // Log with minimal information (privacy-focused)
+        console.error(`[INFO] Unity project registered: ${newClientId} (${(clientInfo as any)?.productName || 'Unknown'})`);
 
         // Update active client if needed
         if (this.activeClientId === clientId) {

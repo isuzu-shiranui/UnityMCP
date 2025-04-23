@@ -13,7 +13,7 @@ export function registerUnityClientTools(server: McpServer): void {
     // List all connected Unity clients
     server.tool(
         "unity_listClients",
-        "Lists all connected Unity clients",
+        "Lists all connected Unity projects",
         {},
         async () => {
             const clients = connection.getConnectedClients();
@@ -21,7 +21,7 @@ export function registerUnityClientTools(server: McpServer): void {
             // Filter out clients with invalid/unknown information
             const validClients = clients.filter(client => {
                 const info = client.info || {};
-                // Consider a client valid if it has at least a product name
+                // Consider a client valid if it has a valid project name
                 return info.productName && info.productName !== "Unknown" &&
                     info.productName !== "UnknownProject";
             });
@@ -30,24 +30,21 @@ export function registerUnityClientTools(server: McpServer): void {
                 return {
                     content: [{
                         type: "text",
-                        text: "No valid Unity clients are currently connected."
+                        text: "No Unity projects are currently connected."
                     }]
                 };
             }
 
-            // Format client list as text
-            let responseText = "Connected Unity clients:\n\n";
+            // Focus on project information in the display
+            let responseText = "Connected Unity projects:\n\n";
 
             validClients.forEach((client, index) => {
                 const info = client.info || {};
                 responseText += `${index + 1}. ${client.isActive ? '✓ ' : ''}${info.productName || 'Unknown Project'}\n`;
                 responseText += `   ID: ${client.id}\n`;
-                responseText += `   Project: ${info.companyName || 'Unknown'}/${info.productName || 'Unknown'}\n`;
-                responseText += `   Unity: ${info.unityVersion || 'Unknown'} on ${info.platformName || 'Unknown Platform'}\n`;
-                responseText += `   Device: ${info.deviceName || 'Unknown Device'}\n`;
-                if (info.projectPath) {
-                    responseText += `   Path: ${info.projectPath}\n`;
-                }
+                responseText += `   Unity: ${info.unityVersion || 'Unknown'}\n`;
+                responseText += `   Mode: ${info.isEditor ? 'Editor' : 'Player'}\n`;
+                responseText += `   Project Hash: ${info.projectPathHash || 'Unknown'}\n`;
                 responseText += '\n';
             });
 
@@ -63,7 +60,7 @@ export function registerUnityClientTools(server: McpServer): void {
     // Set active client by ID
     server.tool(
         "unity_setActiveClient",
-        "Sets the active Unity client",
+        "Sets the active Unity project",
         {
             clientId: z.string().describe("The ID of the client to set as active")
         },
@@ -87,7 +84,7 @@ export function registerUnityClientTools(server: McpServer): void {
             return {
                 content: [{
                     type: "text",
-                    text: `Successfully set ${info.productName || params.clientId} as the active client`
+                    text: `Successfully set ${info.productName || params.clientId} as the active project`
                 }]
             };
         }
@@ -142,7 +139,7 @@ export function registerUnityClientTools(server: McpServer): void {
             return {
                 content: [{
                     type: "text",
-                    text: `Successfully connected to "${client.info?.productName}" (${client.info?.isEditor ? 'Editor' : 'Player'}) on ${client.info?.deviceName || 'unknown device'}`
+                    text: `Successfully connected to "${client.info?.productName}" (${client.info?.isEditor ? 'Editor' : 'Player'})`
                 }]
             };
         }
@@ -151,14 +148,14 @@ export function registerUnityClientTools(server: McpServer): void {
     // Get active client info
     server.tool(
         "unity_getActiveClient",
-        "Get information about the currently active Unity client",
+        "Get information about the currently active Unity project",
         {},
         async () => {
             if (!connection.hasConnectedClients()) {
                 return {
                     content: [{
                         type: "text",
-                        text: "No Unity clients are currently connected."
+                        text: "No Unity projects are currently connected."
                     }]
                 };
             }
@@ -168,7 +165,7 @@ export function registerUnityClientTools(server: McpServer): void {
                 return {
                     content: [{
                         type: "text",
-                        text: "No active Unity client is selected."
+                        text: "No active Unity project is selected."
                     }]
                 };
             }
@@ -197,18 +194,12 @@ export function registerUnityClientTools(server: McpServer): void {
                 };
             }
 
-            // Format active client info as text
-            let responseText = "Active Unity client:\n\n";
+            // Format active client info with focus on project information
+            let responseText = "Active Unity project:\n\n";
             responseText += `Project: ${info.productName}\n`;
-            responseText += `Company: ${info.companyName || 'Unknown'}\n`;
             responseText += `Unity Version: ${info.unityVersion || 'Unknown'}\n`;
-            responseText += `Platform: ${info.platformName || 'Unknown Platform'}\n`;
             responseText += `Mode: ${info.isEditor ? 'Editor' : 'Player'}\n`;
-            responseText += `Device: ${info.deviceName || 'Unknown Device'}\n`;
-
-            if (info.projectPath) {
-                responseText += `Project Path: ${info.projectPath}\n`;
-            }
+            responseText += `Project Hash: ${info.projectPathHash || 'Unknown'}\n`;
 
             return {
                 content: [{

@@ -41,6 +41,18 @@ namespace UnityMCP.Editor.Settings
         public bool detailedLogs = true;
 
         /// <summary>
+        /// Gets or sets whether to use UDP broadcast discovery.
+        /// </summary>
+        [SerializeField]
+        public bool useUdpDiscovery = true;
+
+        /// <summary>
+        /// Gets or sets the UDP broadcast port.
+        /// </summary>
+        [SerializeField]
+        public int udpDiscoveryPort = 27183;
+
+        /// <summary>
         /// Gets or sets the dictionary of command handlers and their enabled states.
         /// </summary>
         [SerializeField]
