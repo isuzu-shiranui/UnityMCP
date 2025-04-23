@@ -26,7 +26,7 @@ namespace UnityMCP.Editor.Settings
         /// Gets or sets whether to auto-start the server when Unity starts.
         /// </summary>
         [SerializeField]
-        public bool autoStartOnLaunch = false;
+        public bool autoStartOnLaunch = true;
 
         /// <summary>
         /// Gets or sets whether to auto-restart the server when play mode changes.
@@ -38,13 +38,31 @@ namespace UnityMCP.Editor.Settings
         /// Gets or sets whether to store detailed logs.
         /// </summary>
         [SerializeField]
-        public bool detailedLogs = false;
+        public bool detailedLogs = true;
+
+        /// <summary>
+        /// Gets or sets whether to use UDP broadcast discovery.
+        /// </summary>
+        [SerializeField]
+        public bool useUdpDiscovery = true;
+
+        /// <summary>
+        /// Gets or sets the UDP broadcast port.
+        /// </summary>
+        [SerializeField]
+        public int udpDiscoveryPort = 27183;
 
         /// <summary>
         /// Gets or sets the dictionary of command handlers and their enabled states.
         /// </summary>
         [SerializeField]
-        public Dictionary<string, bool> handlerEnabledStates = new();
+        public Dictionary<string, bool> handlerEnabledStates = new Dictionary<string, bool>();
+
+        /// <summary>
+        /// Gets or sets the dictionary of resource handlers and their enabled states.
+        /// </summary>
+        [SerializeField]
+        public Dictionary<string, bool> resourceHandlerEnabledStates = new Dictionary<string, bool>();
 
         /// <summary>
         /// Saves the settings to disk.
@@ -82,6 +100,36 @@ namespace UnityMCP.Editor.Settings
         public Dictionary<string, bool> GetAllHandlerEnabledStates()
         {
             return new Dictionary<string, bool>(this.handlerEnabledStates);
+        }
+
+        /// <summary>
+        /// Updates the enabled state of a resource handler.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource handler.</param>
+        /// <param name="enabled">Whether the handler is enabled.</param>
+        public void UpdateResourceHandlerEnabledState(string resourceName, bool enabled)
+        {
+            this.resourceHandlerEnabledStates[resourceName] = enabled;
+            this.Save();
+        }
+
+        /// <summary>
+        /// Gets the enabled state of a resource handler.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource handler.</param>
+        /// <returns>true if the handler is enabled; otherwise, false.</returns>
+        public bool GetResourceHandlerEnabledState(string resourceName)
+        {
+            return this.resourceHandlerEnabledStates.TryGetValue(resourceName, out var enabled) ? enabled : true;
+        }
+
+        /// <summary>
+        /// Gets all resource handler enabled states.
+        /// </summary>
+        /// <returns>A dictionary of resource names and their enabled states.</returns>
+        public Dictionary<string, bool> GetAllResourceHandlerEnabledStates()
+        {
+            return new Dictionary<string, bool>(this.resourceHandlerEnabledStates);
         }
     }
 }

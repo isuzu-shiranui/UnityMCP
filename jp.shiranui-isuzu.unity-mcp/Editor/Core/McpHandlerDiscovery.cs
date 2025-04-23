@@ -1,35 +1,33 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
-using UnityEditor;
 using UnityEngine;
 
 namespace UnityMCP.Editor.Core
 {
     /// <summary>
-    /// Provides automatic discovery and registration of MCP command handlers.
+    /// Generic discovery class for finding and registering MCP handlers and resources.
     /// </summary>
-    internal sealed class McpHandlerDiscovery
+    /// <typeparam name="T">The type of handler to discover.</typeparam>
+    internal sealed class McpHandlerDiscovery<T> where T : class
     {
-        private readonly McpServer server;
+        private readonly Action<T> registerAction;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="McpHandlerDiscovery"/> class.
+        /// Initializes a new instance of the <see cref="McpHandlerDiscovery{T}"/> class.
         /// </summary>
-        /// <param name="server">The MCP server to register handlers with.</param>
-        public McpHandlerDiscovery(McpServer server)
+        /// <param name="registerAction">The action to perform for registering discovered instances.</param>
+        public McpHandlerDiscovery(Action<T> registerAction)
         {
-            this.server = server ?? throw new ArgumentNullException(nameof(server));
+            this.registerAction = registerAction ?? throw new ArgumentNullException(nameof(registerAction));
         }
 
         /// <summary>
-        /// Discovers and registers all command handlers in the current domain.
+        /// Discovers and registers all implementations of type T in the current domain.
         /// </summary>
-        /// <returns>The number of handlers registered.</returns>
-        public int DiscoverAndRegisterHandlers()
+        /// <returns>The number of instances registered.</returns>
+        public int DiscoverAndRegister()
         {
-            int count = 0;
+            var count = 0;
 
             try
             {
@@ -49,9 +47,9 @@ namespace UnityMCP.Editor.Core
 
                     try
                     {
-                        // Find all non-abstract classes that implement IMcpCommandHandler
+                        // Find all non-abstract classes that implement T
                         var handlerTypes = assembly.GetTypes()
-                            .Where(t => typeof(IMcpCommandHandler).IsAssignableFrom(t) &&
+                            .Where(t => typeof(T).IsAssignableFrom(t) &&
                                   !t.IsInterface &&
                                   !t.IsAbstract)
                             .ToArray();
@@ -61,13 +59,13 @@ namespace UnityMCP.Editor.Core
                             try
                             {
                                 // Create instance and register
-                                var handler = (IMcpCommandHandler)Activator.CreateInstance(handlerType);
-                                this.server.RegisterHandler(handler);
+                                var instance = (T)Activator.CreateInstance(handlerType);
+                                this.registerAction(instance);
                                 count++;
                             }
                             catch (Exception ex)
                             {
-                                Debug.LogError($"Failed to create instance of handler type {handlerType.Name}: {ex.Message}");
+                                Debug.LogError($"Failed to create instance of type {handlerType.Name}: {ex.Message}");
                             }
                         }
                     }
@@ -77,11 +75,11 @@ namespace UnityMCP.Editor.Core
                     }
                 }
 
-                Debug.Log($"Discovered and registered {count} MCP command handlers");
+                Debug.Log($"Discovered and registered {count} instances of {typeof(T).Name}");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error in handler discovery: {ex.Message}");
+                Debug.LogError($"Error in discovery process: {ex.Message}");
             }
 
             return count;

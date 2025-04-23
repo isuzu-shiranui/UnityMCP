@@ -15,26 +15,36 @@ export interface IMcpToolDefinition {
      * Gets the zod schema for the tool parameters.
      */
     parameterSchema: Record<string, z.ZodType<any>>;
-}
-
-/**
- * Defines the structure for MCP prompt definitions.
- */
-export interface IMcpPromptDefinition {
-    /**
-     * Gets the description of the prompt.
-     */
-    description: string;
 
     /**
-     * Gets the template text or content of the prompt.
+     * Optional annotations about the tool's behavior.
      */
-    template: string;
+    annotations?: {
+        /**
+         * Human-readable title for the tool
+         */
+        title?: string;
 
-    /**
-     * Optional additional properties for the prompt.
-     */
-    additionalProperties?: Record<string, z.ZodType<any>>;
+        /**
+         * If true, indicates the tool does not modify its environment
+         */
+        readOnlyHint?: boolean;
+
+        /**
+         * If true, the tool may perform destructive updates
+         */
+        destructiveHint?: boolean;
+
+        /**
+         * If true, calling the tool repeatedly with the same arguments has no additional effect
+         */
+        idempotentHint?: boolean;
+
+        /**
+         * If true, the tool may interact with external entities
+         */
+        openWorldHint?: boolean;
+    };
 }
 
 /**
@@ -71,16 +81,4 @@ export interface ICommandHandler {
      * @returns A map of tool names to their definitions, or null if not supported.
      */
     getToolDefinitions?(): Map<string, IMcpToolDefinition> | null;
-
-    /**
-     * Gets the resource definitions supported by this handler.
-     * @returns A map of resource names to their definitions, or null if not supported.
-     */
-    getResourceDefinitions?(): Map<string, any> | null;
-
-    /**
-     * Gets the prompt definitions supported by this handler.
-     * @returns A map of prompt names to their definitions, or null if not supported.
-     */
-    getPromptDefinitions?(): Map<string, IMcpPromptDefinition> | null;
 }

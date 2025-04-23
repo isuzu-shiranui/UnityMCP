@@ -50,7 +50,12 @@ export abstract class BaseCommandHandler implements ICommandHandler {
 
             return {
                 success: false,
-                error: errorMessage
+                error: errorMessage,
+                errorDetails: {
+                    command: `${this.commandPrefix}.${action}`,
+                    timestamp: new Date().toISOString(),
+                    type: ex instanceof Error ? ex.name || "Error" : "UnknownError"
+                }
             };
         }
     }
@@ -71,7 +76,6 @@ export abstract class BaseCommandHandler implements ICommandHandler {
 
     /**
      * Ensures there is a valid connection to Unity before executing a command.
-     * Attempts to reconnect if not connected.
      * @returns A Promise that resolves when connected or rejects with an error.
      * @throws Error if the connection cannot be established.
      */
@@ -82,7 +86,8 @@ export abstract class BaseCommandHandler implements ICommandHandler {
 
         if (!this.unityConnection.isUnityConnected()) {
             try {
-                await this.unityConnection.reconnect();
+                // In server mode, we just ensure the connection is available
+                await this.unityConnection.ensureConnected();
             } catch (err) {
                 throw new Error(`Failed to connect to Unity: ${err instanceof Error ? err.message : String(err)}`);
             }
