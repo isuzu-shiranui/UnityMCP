@@ -119,40 +119,10 @@ namespace UnityMCP.Editor.Settings
 
             EditorGUILayout.Space(10);
 
-            // Server control buttons
-            EditorGUILayout.BeginHorizontal();
-            GUI.enabled = this.mcpServer != null;
+            // Connection status section
+            this.DrawConnectionStateSection();
 
-            if (this.mcpServer is { IsRunning: true })
-            {
-                GUI.backgroundColor = new Color(0.9f, 0.6f, 0.6f);
-                if (GUILayout.Button("Stop Server - Now Running", GUILayout.Height(30)))
-                {
-                    this.mcpServer.Stop();
-                }
-                GUI.backgroundColor = this.defaultBackgroundColor;
-            }
-            else
-            {
-                GUI.backgroundColor = new Color(0.6f, 0.9f, 0.6f);
-                if (GUILayout.Button("Start Server - Now Stopped", GUILayout.Height(30)))
-                {
-                    if (this.mcpServer == null)
-                    {
-                        // Create and register the server if it doesn't exist
-                        this.mcpServer = new McpServer(settings.port);
-                        McpServiceManager.Instance.RegisterService<McpServer>(this.mcpServer);
-                    }
-
-                    this.mcpServer.Start();
-                }
-                GUI.backgroundColor = this.defaultBackgroundColor;
-            }
-
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(20);
+            EditorGUILayout.Space(10);
 
             this.handlersRootScrollPosition = EditorGUILayout.BeginScrollView(this.handlersRootScrollPosition);
 
@@ -338,6 +308,130 @@ namespace UnityMCP.Editor.Settings
                     // Description
                     EditorGUILayout.LabelField(handler.Value.Description, this.descriptionStyle);
                     EditorGUILayout.EndHorizontal();
+                }
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// Draws the connection status section of the settings UI.
+        /// </summary>
+        private void DrawConnectionStateSection()
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+            GUILayout.Label("Connection Status", this.headerStyle);
+
+            if (this.mcpServer != null)
+            {
+                var connected = this.mcpServer.IsConnected;
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Status:", GUILayout.Width(120));
+
+                var oldColor = GUI.color;
+                if (connected)
+                {
+                    GUI.color = Color.green;
+                    GUILayout.Label("● Connected", EditorStyles.boldLabel);
+                }
+                else if (this.mcpServer.IsRunning)
+                {
+                    GUI.color = new Color(1.0f, 0.7f, 0.0f); // Orange
+                    GUILayout.Label("● Connecting...", EditorStyles.boldLabel);
+                }
+                else
+                {
+                    GUI.color = Color.red;
+                    GUILayout.Label("● Disconnected", EditorStyles.boldLabel);
+                }
+                GUI.color = oldColor;
+                EditorGUILayout.EndHorizontal();
+
+                // Show Client ID
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Client ID:", GUILayout.Width(120));
+
+                // Truncate ID for display and add copy button
+                var clientId = this.mcpServer.ClientId;
+                var shortId = clientId.Length > 40 ? clientId.Substring(0, 37) + "..." : clientId;
+                GUILayout.Label(shortId);
+
+                if (GUILayout.Button("Copy", GUILayout.Width(70)))
+                {
+                    EditorGUIUtility.systemCopyBuffer = clientId;
+                }
+                EditorGUILayout.EndHorizontal();
+
+                // Project details
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Project:", GUILayout.Width(120));
+                GUILayout.Label($"{Application.companyName}/{Application.productName}");
+                EditorGUILayout.EndHorizontal();
+
+                // Unity version
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Unity Version:", GUILayout.Width(120));
+                GUILayout.Label(Application.unityVersion);
+                EditorGUILayout.EndHorizontal();
+
+                // Connected since timestamp
+                if (connected)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Label("Connected Since:", GUILayout.Width(120));
+                    GUILayout.Label(this.mcpServer.ConnectedSince.ToString("yyyy-MM-dd HH:mm:ss"));
+                    EditorGUILayout.EndHorizontal();
+                }
+
+                EditorGUILayout.Space(10);
+
+                // Connection controls
+                EditorGUILayout.BeginHorizontal();
+
+                if (connected)
+                {
+                    // Disconnect button
+                    GUI.backgroundColor = new Color(0.9f, 0.6f, 0.6f); // Light red
+                    if (GUILayout.Button("Disconnect", GUILayout.Height(25)))
+                    {
+                        this.mcpServer.Stop();
+                    }
+                    GUI.backgroundColor = this.defaultBackgroundColor;
+                }
+                else if (this.mcpServer.IsRunning)
+                {
+                    // Cancel connection button
+                    GUI.backgroundColor = new Color(0.9f, 0.8f, 0.5f); // Light yellow
+                    if (GUILayout.Button("Cancel Connection Attempt", GUILayout.Height(25)))
+                    {
+                        this.mcpServer.Stop();
+                    }
+                    GUI.backgroundColor = this.defaultBackgroundColor;
+                }
+                else
+                {
+                    // Connect button
+                    GUI.backgroundColor = new Color(0.6f, 0.9f, 0.6f); // Light green
+                    if (GUILayout.Button("Connect", GUILayout.Height(25)))
+                    {
+                        this.mcpServer.Start();
+                    }
+                    GUI.backgroundColor = this.defaultBackgroundColor;
+                }
+
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("MCP client not initialized", MessageType.Warning);
+
+                // Initialize button
+                if (GUILayout.Button("Initialize MCP Client"))
+                {
+                    // Create and register the client
+                    this.mcpServer = new McpServer();
+                    McpServiceManager.Instance.RegisterService<McpServer>(this.mcpServer);
                 }
             }
 

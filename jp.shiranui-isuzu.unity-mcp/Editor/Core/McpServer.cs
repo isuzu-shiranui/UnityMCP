@@ -14,19 +14,20 @@ using UnityMCP.Editor.Resources;
 namespace UnityMCP.Editor.Core
 {
     /// <summary>
-    /// Represents the server that handles MCP (Model Context Protocol) commands.
+    /// Represents the client that communicates with the MCP TypeScript server.
     /// </summary>
     internal sealed class McpServer : IDisposable
     {
         // Server configuration
-        private string host;
-        private int port;
+        private readonly string host;
+        private readonly int port;
         private bool running;
-        private TcpListener listener;
         private TcpClient client;
-        private Thread serverThread;
+        private Thread clientThread;
         private readonly byte[] buffer = new byte[8192];
         private string incompleteData = "";
+        private readonly string clientId;
+        private DateTime connectedSince;
 
         // Dictionary for command handlers
         private readonly Dictionary<string, HandlerRegistration> commandHandlers = new();
@@ -41,9 +42,25 @@ namespace UnityMCP.Editor.Core
 
         private CancellationTokenSource cancellationTokenSource;
 
+        // Connection state
+        private bool isConnecting;
+        private bool isReconnecting;
+        private DateTime lastConnectionAttempt = DateTime.MinValue;
+        private readonly int reconnectDelay = 5000; // 5 seconds
+        private readonly int maxReconnectDelay = 60000; // 1 minute
+        private int currentReconnectDelay;
+
+        private readonly string productName = Application.productName;
+        private readonly string companyName = Application.companyName;
+        private readonly string unityVersion = Application.unityVersion;
+        private readonly string deviceName = SystemInfo.deviceName;
+        private readonly string platform = Application.platform.ToString();
+        private readonly bool isEditor = Application.isEditor;
+        private readonly string projectPath = Application.dataPath;
+
         // Events for tracking client connections
-        public event EventHandler<ClientConnectedEventArgs> ClientConnected;
-        public event EventHandler<EventArgs> ClientDisconnected;
+        public event EventHandler<EventArgs> Connected;
+        public event EventHandler<EventArgs> Disconnected;
         public event EventHandler<CommandExecutedEventArgs> CommandExecuted;
         public event EventHandler<ResourceFetchedEventArgs> ResourceFetched;
 
@@ -51,6 +68,21 @@ namespace UnityMCP.Editor.Core
         /// Gets a value indicating whether the server is currently running.
         /// </summary>
         public bool IsRunning => this.running;
+
+        /// <summary>
+        /// Gets a value indicating whether the client is currently connected.
+        /// </summary>
+        public bool IsConnected => this.client is { Connected: true };
+
+        /// <summary>
+        /// Gets the client ID.
+        /// </summary>
+        public string ClientId => this.clientId;
+
+        /// <summary>
+        /// Gets the time when the connection was established.
+        /// </summary>
+        public DateTime ConnectedSince => this.connectedSince;
 
         private static bool DetailedLogs => McpSettings.instance.detailedLogs;
 
@@ -63,6 +95,8 @@ namespace UnityMCP.Editor.Core
             var settings = McpSettings.instance;
             this.host = settings.host;
             this.port = port > 0 ? port : settings.port;
+            this.clientId = this.GenerateClientId();
+            this.currentReconnectDelay = this.reconnectDelay;
 
             // Load handler settings from McpSettings
             this.LoadHandlerSettings();
@@ -72,12 +106,34 @@ namespace UnityMCP.Editor.Core
 
             if (DetailedLogs)
             {
-                Debug.Log($"[McpServer] Initialized with host={this.host}, port={this.port}");
+                Debug.Log($"[McpServer] Initialized with host={this.host}, port={this.port}, clientId={this.clientId}");
             }
         }
 
         /// <summary>
-        /// Starts the MCP server.
+        /// Generates a unique client ID based on project information.
+        /// </summary>
+        private string GenerateClientId()
+        {
+            // Get project information
+            var productName = this.productName;
+            var companyName = this.companyName;
+
+            // Get additional information
+            var deviceName = this.deviceName;
+            var isEditor = this.isEditor;
+            var editorMode = isEditor ? "Editor" : "Player";
+
+            // Get a unique identifier for this project instance
+            var projectPath = this.projectPath;
+            var projectPathHash = Math.Abs(projectPath.GetHashCode()) % 10000;
+
+            // Create a unique identifier
+            return $"{productName}-{companyName}-{editorMode}-{deviceName}-{projectPathHash}";
+        }
+
+        /// <summary>
+        /// Starts the MCP client connection.
         /// </summary>
         public void Start()
         {
@@ -90,25 +146,25 @@ namespace UnityMCP.Editor.Core
             {
                 this.cancellationTokenSource = new CancellationTokenSource();
 
-                // Start server on a separate thread
-                this.serverThread = new Thread(this.RunServer)
+                // Start client on a separate thread
+                this.clientThread = new Thread(this.RunClient)
                 {
                     IsBackground = true,
-                    Name = "McpServerThread"
+                    Name = "McpClientThread"
                 };
-                this.serverThread.Start(this.cancellationTokenSource.Token);
+                this.clientThread.Start(this.cancellationTokenSource.Token);
                 this.running = true;
-                Debug.Log($"MCP server started on {this.host}:{this.port}");
+                Debug.Log($"MCP client started, connecting to {this.host}:{this.port}");
             }
             catch (Exception e)
             {
-                Debug.LogError($"Failed to start MCP server: {e.Message}");
+                Debug.LogError($"Failed to start MCP client: {e.Message}");
                 this.Stop();
             }
         }
 
         /// <summary>
-        /// Stops the MCP server.
+        /// Stops the MCP client.
         /// </summary>
         public void Stop()
         {
@@ -122,328 +178,42 @@ namespace UnityMCP.Editor.Core
                 this.client = null;
             }
 
-            if (this.listener != null)
+            if (this.clientThread is { IsAlive: true })
             {
-                this.listener.Stop();
-                this.listener = null;
+                this.clientThread.Join(1000); // Wait for the thread to finish
+                this.clientThread = null;
             }
 
-            if (this.serverThread is { IsAlive: true })
-            {
-                this.serverThread.Join(1000); // Wait for the thread to finish
-                this.serverThread = null;
-            }
-
-            Debug.Log("MCP server stopped");
+            Debug.Log("MCP client stopped");
         }
 
         /// <summary>
-        /// Registers a command handler with the server.
+        /// Main client execution loop.
         /// </summary>
-        /// <param name="handler">The command handler to register.</param>
-        /// <param name="enabled">Whether the handler is enabled initially.</param>
-        public void RegisterHandler(IMcpCommandHandler handler, bool enabled = true)
-        {
-            if (handler == null)
-            {
-                Debug.LogError("Cannot register null handler");
-                return;
-            }
-
-            var commandPrefix = handler.CommandPrefix;
-            if (string.IsNullOrEmpty(commandPrefix))
-            {
-                Debug.LogError($"Handler {handler.GetType().Name} has invalid command prefix");
-                return;
-            }
-
-            // Check if a handler for this command already exists
-            if (this.commandHandlers.ContainsKey(commandPrefix))
-            {
-                Debug.LogWarning($"Replacing existing handler for command '{commandPrefix}'");
-            }
-
-            // Check settings for enabled state
-            if (McpSettings.instance.handlerEnabledStates.TryGetValue(commandPrefix, out var savedEnabled))
-            {
-                enabled = savedEnabled;
-            }
-
-            this.commandHandlers[commandPrefix] = new HandlerRegistration(handler, enabled);
-            Debug.Log($"Registered handler for command: {commandPrefix} (Enabled: {enabled})");
-
-            // Save the handler state to settings
-            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
-        }
-
-        /// <summary>
-        /// Enables or disables a command handler.
-        /// </summary>
-        /// <param name="commandPrefix">The prefix of the command handler to enable or disable.</param>
-        /// <param name="enabled">Whether the handler should be enabled.</param>
-        /// <returns>true if the handler was found and its enabled state was set; otherwise, false.</returns>
-        public bool SetHandlerEnabled(string commandPrefix, bool enabled)
-        {
-            if (!this.commandHandlers.TryGetValue(commandPrefix, out var registration))
-            {
-                Debug.LogWarning($"Handler for command '{commandPrefix}' not found");
-                return false;
-            }
-
-            registration.Enabled = enabled;
-            Debug.Log($"Handler for '{commandPrefix}' is now {(enabled ? "enabled" : "disabled")}");
-
-            // Update settings
-            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
-
-            return true;
-        }
-
-        /// <summary>
-        /// Checks if a command handler is enabled.
-        /// </summary>
-        /// <param name="commandPrefix">The prefix of the command handler to check.</param>
-        /// <returns>true if the handler is found and enabled; otherwise, false.</returns>
-        public bool IsHandlerEnabled(string commandPrefix)
-        {
-            return this.commandHandlers.TryGetValue(commandPrefix, out var registration) && registration.Enabled;
-        }
-
-        /// <summary>
-        /// Gets all registered command handlers.
-        /// </summary>
-        /// <returns>A dictionary of command prefixes and their handler registrations.</returns>
-        public IReadOnlyDictionary<string, HandlerRegistration> GetRegisteredHandlers()
-        {
-            return this.commandHandlers;
-        }
-
-        /// <summary>
-        /// Registers a resource handler with the server.
-        /// </summary>
-        /// <param name="handler">The resource handler to register.</param>
-        /// <param name="enabled">Whether the handler is enabled initially.</param>
-        /// <returns>True if registration succeeded, false if failed.</returns>
-        public bool RegisterResourceHandler(IMcpResourceHandler handler, bool enabled = true)
-        {
-            if (handler == null)
-            {
-                Debug.LogError("Cannot register null resource handler");
-                return false;
-            }
-
-            var resourceName = handler.ResourceName;
-            if (string.IsNullOrEmpty(resourceName))
-            {
-                Debug.LogError($"Handler {handler.GetType().Name} has invalid resource name");
-                return false;
-            }
-
-            // Check if a handler for this resource already exists
-            if (this.resourceHandlers.ContainsKey(resourceName))
-            {
-                Debug.LogWarning($"Replacing existing handler for resource '{resourceName}'");
-                this.resourceHandlers.Remove(resourceName);
-            }
-
-            // Check settings for enabled state
-            if (McpSettings.instance.resourceHandlerEnabledStates.TryGetValue(resourceName, out var savedEnabled))
-            {
-                enabled = savedEnabled;
-            }
-
-            // Register with the resource name and URI maps
-            this.resourceHandlers[resourceName] = new ResourceHandlerRegistration(handler, enabled);
-
-            if (!string.IsNullOrEmpty(handler.ResourceUri))
-            {
-                this.resourceUriMap[handler.ResourceUri] = handler;
-            }
-
-            Debug.Log($"Registered resource handler: {resourceName} (URI: {handler.ResourceUri}, Enabled: {enabled})");
-
-            // Save the handler state to settings
-            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
-
-            return true;
-        }
-
-        /// <summary>
-        /// Enables or disables a resource handler.
-        /// </summary>
-        /// <param name="resourceName">The name of the resource handler to enable or disable.</param>
-        /// <param name="enabled">Whether the handler should be enabled.</param>
-        /// <returns>true if the handler was found and its enabled state was set; otherwise, false.</returns>
-        public bool SetResourceHandlerEnabled(string resourceName, bool enabled)
-        {
-            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
-            {
-                Debug.LogWarning($"Resource handler for '{resourceName}' not found");
-                return false;
-            }
-
-            registration.Enabled = enabled;
-            Debug.Log($"Resource handler for '{resourceName}' is now {(enabled ? "enabled" : "disabled")}");
-
-            // Update settings
-            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
-
-            return true;
-        }
-
-        /// <summary>
-        /// Checks if a resource handler is enabled.
-        /// </summary>
-        /// <param name="resourceName">The name of the resource handler to check.</param>
-        /// <returns>true if the handler is found and enabled; otherwise, false.</returns>
-        public bool IsResourceHandlerEnabled(string resourceName)
-        {
-            return this.resourceHandlers.TryGetValue(resourceName, out var registration) && registration.Enabled;
-        }
-
-        /// <summary>
-        /// Gets all registered resource handlers.
-        /// </summary>
-        /// <returns>A dictionary of resource names and their handler registrations.</returns>
-        public IReadOnlyDictionary<string, ResourceHandlerRegistration> GetRegisteredResourceHandlers()
-        {
-            return this.resourceHandlers;
-        }
-
-        /// <summary>
-        /// Gets a resource handler by name.
-        /// </summary>
-        /// <param name="resourceName">The name of the resource.</param>
-        /// <returns>The resource handler if found, null otherwise.</returns>
-        public IMcpResourceHandler GetResourceHandler(string resourceName)
-        {
-            return this.resourceHandlers.TryGetValue(resourceName, out var registration)
-                ? registration.Handler
-                : null;
-        }
-
-        /// <summary>
-        /// Gets a resource handler by URI.
-        /// </summary>
-        /// <param name="uri">The URI of the resource.</param>
-        /// <returns>The resource handler if found, null otherwise.</returns>
-        public IMcpResourceHandler GetResourceHandlerByUri(string uri)
-        {
-            return this.resourceUriMap.TryGetValue(uri, out var handler) ? handler : null;
-        }
-
-        /// <summary>
-        /// Fetches data from a resource handler.
-        /// </summary>
-        /// <param name="resourceName">The name of the resource.</param>
-        /// <param name="parameters">The parameters for the resource.</param>
-        /// <returns>The resource data as a JObject, or an error if the resource is not found or disabled.</returns>
-        public JObject FetchResourceData(string resourceName, JObject parameters)
-        {
-            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
-            {
-                return new JObject
-                {
-                    ["status"] = "error",
-                    ["message"] = $"Resource not found: {resourceName}"
-                };
-            }
-
-            if (!registration.Enabled)
-            {
-                return new JObject
-                {
-                    ["status"] = "error",
-                    ["message"] = $"Resource '{resourceName}' is disabled"
-                };
-            }
-
-            try
-            {
-                var result = registration.Handler.FetchResource(parameters);
-
-                // Raise resource fetched event
-                this.OnResourceFetched(new ResourceFetchedEventArgs(resourceName, parameters, result));
-
-                return new JObject
-                {
-                    ["status"] = "success",
-                    ["result"] = result
-                };
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error fetching resource '{resourceName}': {ex.Message}");
-                return new JObject
-                {
-                    ["status"] = "error",
-                    ["message"] = $"Error fetching resource: {ex.Message}"
-                };
-            }
-        }
-
-        /// <summary>
-        /// Loads the enabled state of all handlers from McpSettings.
-        /// </summary>
-        private void LoadHandlerSettings()
-        {
-            var settings = McpSettings.instance;
-
-            if (DetailedLogs)
-            {
-                Debug.Log($"[McpServer] Loading handler settings from McpSettings. Found {settings.handlerEnabledStates.Count} command entries and {settings.resourceHandlerEnabledStates.Count} resource entries.");
-            }
-        }
-
-        /// <summary>
-        /// Main server execution loop.
-        /// </summary>
-        private void RunServer(object token)
+        private void RunClient(object token)
         {
             var cancellationToken = (CancellationToken)token;
 
             try
             {
-                var ipAddress = IPAddress.Parse(this.host);
-                this.listener = new TcpListener(ipAddress, this.port);
-                this.listener.Start();
-
                 while (this.running && !cancellationToken.IsCancellationRequested)
                 {
-                    // Accept client connections
-                    if (this.listener.Pending())
+                    // Check connection state
+                    if (!this.IsConnected && !this.isConnecting)
                     {
-                        this.client?.Close();
-                        this.client = this.listener.AcceptTcpClient();
-                        var clientEndPoint = (IPEndPoint)this.client.Client.RemoteEndPoint;
-                        Debug.Log($"Client connected: {clientEndPoint.Address}");
-
-                        // Raise client connected event
-                        this.OnClientConnected(new ClientConnectedEventArgs(clientEndPoint));
+                        // Try to connect if not already connecting
+                        this.TryConnect();
+                    }
+                    else if (this.IsConnected)
+                    {
+                        // Process incoming data
+                        this.ProcessIncomingData();
                     }
 
-                    // Process client data
-                    if (this.client is { Connected: true, Available: > 0 })
-                    {
-                        var stream = this.client.GetStream();
-                        var bytesRead = stream.Read(this.buffer, 0, this.buffer.Length);
-
-                        if (bytesRead > 0)
-                        {
-                            var data = Encoding.UTF8.GetString(this.buffer, 0, bytesRead);
-                            this.ProcessData(data);
-                        }
-                    }
-                    else if (this.client is { Connected: false })
-                    {
-                        // Client disconnected
-                        this.OnClientDisconnected(EventArgs.Empty);
-                        this.client = null;
-                    }
-
+                    // Small delay to prevent high CPU usage
                     try
                     {
-                        Thread.Sleep(10); // Small delay to prevent high CPU usage
+                        Thread.Sleep(10);
                         cancellationToken.ThrowIfCancellationRequested();
                     }
                     catch (OperationCanceledException)
@@ -464,15 +234,168 @@ namespace UnityMCP.Editor.Core
             {
                 this.client?.Close();
                 this.client = null;
-                this.listener?.Stop();
-                this.listener = null;
             }
         }
 
         /// <summary>
-        /// Process incoming data from the client.
+        /// Tries to connect to the MCP TypeScript server.
         /// </summary>
-        /// <param name="data">The data received from the client.</param>
+        private void TryConnect()
+        {
+            // Check if we need to wait before reconnecting
+            if (this.isReconnecting)
+            {
+                var elapsed = (DateTime.Now - this.lastConnectionAttempt).TotalMilliseconds;
+                if (elapsed < this.currentReconnectDelay)
+                {
+                    return;
+                }
+            }
+
+            this.isConnecting = true;
+            this.lastConnectionAttempt = DateTime.Now;
+
+            try
+            {
+                // Close any existing connection
+                if (this.client != null)
+                {
+                    this.client.Close();
+                    this.client = null;
+                }
+
+                // Create new client
+                this.client = new TcpClient();
+
+                // Try to connect with timeout
+                var result = this.client.BeginConnect(this.host, this.port, null, null);
+                var success = result.AsyncWaitHandle.WaitOne(5000); // 5 second timeout
+
+                if (success && this.client.Connected)
+                {
+                    // Connected successfully
+                    this.client.EndConnect(result);
+
+                    // Reset reconnect delay after successful connection
+                    this.currentReconnectDelay = this.reconnectDelay;
+                    this.isReconnecting = false;
+                    this.connectedSince = DateTime.Now;
+
+                    Debug.Log($"Connected to MCP TypeScript server at {this.host}:{this.port}");
+
+                    // Send client registration
+                    this.SendClientRegistration();
+
+                    // Raise connected event on main thread
+                    this.ExecuteOnMainThread(() => this.OnConnected(EventArgs.Empty));
+                }
+                else
+                {
+                    // Connection failed
+                    this.client.Close();
+                    this.client = null;
+
+                    if (!this.isReconnecting)
+                    {
+                        Debug.LogWarning($"Failed to connect to MCP TypeScript server at {this.host}:{this.port}. Will retry...");
+                        this.isReconnecting = true;
+                    }
+
+                    // Increase reconnect delay with exponential backoff (capped)
+                    this.currentReconnectDelay = Math.Min(this.currentReconnectDelay * 2, this.maxReconnectDelay);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error connecting to MCP TypeScript server: {e.Message}");
+                this.client?.Close();
+                this.client = null;
+                this.isReconnecting = true;
+            }
+            finally
+            {
+                this.isConnecting = false;
+            }
+        }
+
+        /// <summary>
+        /// Sends client registration information to the MCP TypeScript server.
+        /// </summary>
+        private void SendClientRegistration()
+        {
+            try
+            {
+                var registrationInfo = new JObject
+                {
+                    ["type"] = "registration",
+                    ["clientId"] = this.clientId,
+                    ["clientInfo"] = new JObject
+                    {
+                        ["productName"] = this.productName,
+                        ["companyName"] = this.companyName,
+                        ["unityVersion"] = this.unityVersion,
+                        ["deviceName"] = this.deviceName,
+                        ["platformName"] = this.platform,
+                        ["isEditor"] = this.isEditor,
+                        ["dataPath"] = this.projectPath,
+                        ["projectPath"] = this.projectPath.Replace("/Assets", ""),
+                        ["projectPathHash"] = Math.Abs(this.projectPath.GetHashCode()) % 10000
+                    }
+                };
+
+                // Send registration
+                var responseJson = JsonConvert.SerializeObject(registrationInfo);
+                var responseBytes = Encoding.UTF8.GetBytes(responseJson + "\n");
+                var stream = this.client.GetStream();
+                stream.Write(responseBytes, 0, responseBytes.Length);
+
+                if (DetailedLogs)
+                {
+                    Debug.Log($"Sent client registration: {registrationInfo}");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error sending client registration: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Processes incoming data from the MCP TypeScript server.
+        /// </summary>
+        private void ProcessIncomingData()
+        {
+            try
+            {
+                // Check if there's data available
+                var stream = this.client.GetStream();
+                if (!stream.DataAvailable) return;
+
+                // Read available data
+                var bytesRead = stream.Read(this.buffer, 0, this.buffer.Length);
+                if (bytesRead > 0)
+                {
+                    var data = Encoding.UTF8.GetString(this.buffer, 0, bytesRead);
+                    this.ProcessData(data);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error processing incoming data: {e.Message}");
+
+                // Close connection on error
+                this.client?.Close();
+                this.client = null;
+
+                // Notify disconnection on main thread
+                this.ExecuteOnMainThread(() => this.OnDisconnected(EventArgs.Empty));
+            }
+        }
+
+        /// <summary>
+        /// Process incoming data from the TypeScript server.
+        /// </summary>
+        /// <param name="data">The data received.</param>
         private void ProcessData(string data)
         {
             // Add incoming data to any incomplete data from previous receives
@@ -486,7 +409,7 @@ namespace UnityMCP.Editor.Core
 
                 if (DetailedLogs)
                 {
-                    Debug.Log($"[McpServer] Received command: {command}");
+                    Debug.Log($"[McpClient] Received command: {command}");
                 }
 
                 // Process the command based on its type
@@ -505,17 +428,16 @@ namespace UnityMCP.Editor.Core
                 }
 
                 // Send response
-                if (this.client is { Connected: true })
-                {
-                    var responseJson = JsonConvert.SerializeObject(response);
-                    var responseBytes = Encoding.UTF8.GetBytes(responseJson);
-                    var stream = this.client.GetStream();
-                    stream.Write(responseBytes, 0, responseBytes.Length);
+                if (!this.IsConnected) return;
 
-                    if (DetailedLogs)
-                    {
-                        Debug.Log($"[McpServer] Sent response: {responseJson}");
-                    }
+                var responseJson = JsonConvert.SerializeObject(response);
+                var responseBytes = Encoding.UTF8.GetBytes(responseJson + "\n");
+                var stream = this.client.GetStream();
+                stream.Write(responseBytes, 0, responseBytes.Length);
+
+                if (DetailedLogs)
+                {
+                    Debug.Log($"[McpClient] Sent response: {responseJson}");
                 }
             }
             catch (JsonReaderException)
@@ -525,7 +447,7 @@ namespace UnityMCP.Editor.Core
 
                 if (DetailedLogs)
                 {
-                    Debug.Log($"[McpServer] Received incomplete JSON data, buffering for next receive");
+                    Debug.Log($"[McpClient] Received incomplete JSON data, buffering for next receive");
                 }
             }
             catch (Exception e)
@@ -533,7 +455,7 @@ namespace UnityMCP.Editor.Core
                 Debug.LogError($"Error processing command: {e.Message}");
 
                 // Send error response
-                if (this.client is { Connected: true })
+                if (this.IsConnected)
                 {
                     var errorResponse = new JObject
                     {
@@ -542,13 +464,13 @@ namespace UnityMCP.Editor.Core
                     };
 
                     var errorJson = JsonConvert.SerializeObject(errorResponse);
-                    var errorBytes = Encoding.UTF8.GetBytes(errorJson);
+                    var errorBytes = Encoding.UTF8.GetBytes(errorJson + "\n");
                     var stream = this.client.GetStream();
                     stream.Write(errorBytes, 0, errorBytes.Length);
 
                     if (DetailedLogs)
                     {
-                        Debug.Log($"[McpServer] Sent error response: {errorJson}");
+                        Debug.Log($"[McpClient] Sent error response: {errorJson}");
                     }
                 }
 
@@ -572,6 +494,7 @@ namespace UnityMCP.Editor.Core
                     ["message"] = "Missing command in resource request"
                 };
             }
+
             var split = command.Split('.');
             if (split.Length < 2)
             {
@@ -581,6 +504,7 @@ namespace UnityMCP.Editor.Core
                     ["message"] = $"Invalid command format: {command}. Expected format: 'prefix.action'"
                 };
             }
+
             var resourceName = split[0];
 
             var id = request["id"]?.ToString();
@@ -601,7 +525,8 @@ namespace UnityMCP.Editor.Core
             var waitHandle = new ManualResetEvent(false);
 
             // Queue the resource fetch for the main thread
-            this.ExecuteOnMainThread(() => {
+            this.ExecuteOnMainThread(() =>
+            {
                 try
                 {
                     result = this.FetchResourceData(resourceName, parameters);
@@ -709,7 +634,8 @@ namespace UnityMCP.Editor.Core
             var waitHandle = new ManualResetEvent(false);
 
             // Queue the command execution for the main thread
-            this.ExecuteOnMainThread(() => {
+            this.ExecuteOnMainThread(() =>
+            {
                 try
                 {
                     // Parse command format: "prefix.action"
@@ -802,21 +728,237 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
-        /// Raises the ClientConnected event.
+        /// Fetches data from a resource handler.
         /// </summary>
-        /// <param name="e">The event arguments.</param>
-        private void OnClientConnected(ClientConnectedEventArgs e)
+        /// <param name="resourceName">The name of the resource.</param>
+        /// <param name="parameters">The parameters for the resource.</param>
+        /// <returns>The resource data as a JObject, or an error if the resource is not found or disabled.</returns>
+        public JObject FetchResourceData(string resourceName, JObject parameters)
         {
-            this.ClientConnected?.Invoke(this, e);
+            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Resource not found: {resourceName}"
+                };
+            }
+
+            if (!registration.Enabled)
+            {
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Resource '{resourceName}' is disabled"
+                };
+            }
+
+            try
+            {
+                var result = registration.Handler.FetchResource(parameters);
+
+                // Raise resource fetched event
+                this.OnResourceFetched(new ResourceFetchedEventArgs(resourceName, parameters, result));
+
+                return new JObject
+                {
+                    ["status"] = "success",
+                    ["result"] = result
+                };
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error fetching resource '{resourceName}': {ex.Message}");
+                return new JObject
+                {
+                    ["status"] = "error",
+                    ["message"] = $"Error fetching resource: {ex.Message}"
+                };
+            }
         }
 
         /// <summary>
-        /// Raises the ClientDisconnected event.
+        /// Loads the enabled state of all handlers from McpSettings.
+        /// </summary>
+        private void LoadHandlerSettings()
+        {
+            var settings = McpSettings.instance;
+
+            if (DetailedLogs)
+            {
+                Debug.Log($"[McpServer] Loading handler settings from McpSettings. Found {settings.handlerEnabledStates.Count} command entries and {settings.resourceHandlerEnabledStates.Count} resource entries.");
+            }
+        }
+
+        /// <summary>
+        /// Registers a command handler with the server.
+        /// </summary>
+        /// <param name="handler">The command handler to register.</param>
+        /// <param name="enabled">Whether the handler is enabled initially.</param>
+        public void RegisterHandler(IMcpCommandHandler handler, bool enabled = true)
+        {
+            if (handler == null)
+            {
+                Debug.LogError("Cannot register null handler");
+                return;
+            }
+
+            var commandPrefix = handler.CommandPrefix;
+            if (string.IsNullOrEmpty(commandPrefix))
+            {
+                Debug.LogError($"Handler {handler.GetType().Name} has invalid command prefix");
+                return;
+            }
+
+            // Check if a handler for this command already exists
+            if (this.commandHandlers.ContainsKey(commandPrefix))
+            {
+                Debug.LogWarning($"Replacing existing handler for command '{commandPrefix}'");
+            }
+
+            // Check settings for enabled state
+            if (McpSettings.instance.handlerEnabledStates.TryGetValue(commandPrefix, out var savedEnabled))
+            {
+                enabled = savedEnabled;
+            }
+
+            this.commandHandlers[commandPrefix] = new HandlerRegistration(handler, enabled);
+            Debug.Log($"Registered handler for command: {commandPrefix} (Enabled: {enabled})");
+
+            // Save the handler state to settings
+            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
+        }
+
+        /// <summary>
+        /// Enables or disables a command handler.
+        /// </summary>
+        /// <param name="commandPrefix">The prefix of the command handler to enable or disable.</param>
+        /// <param name="enabled">Whether the handler should be enabled.</param>
+        /// <returns>true if the handler was found and its enabled state was set; otherwise, false.</returns>
+        public bool SetHandlerEnabled(string commandPrefix, bool enabled)
+        {
+            if (!this.commandHandlers.TryGetValue(commandPrefix, out var registration))
+            {
+                Debug.LogWarning($"Handler for command '{commandPrefix}' not found");
+                return false;
+            }
+
+            registration.Enabled = enabled;
+            Debug.Log($"Handler for '{commandPrefix}' is now {(enabled ? "enabled" : "disabled")}");
+
+            // Update settings
+            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Gets all registered command handlers.
+        /// </summary>
+        /// <returns>A dictionary of command prefixes and their handler registrations.</returns>
+        public IReadOnlyDictionary<string, HandlerRegistration> GetRegisteredHandlers()
+        {
+            return this.commandHandlers;
+        }
+
+        /// <summary>
+        /// Registers a resource handler with the server.
+        /// </summary>
+        /// <param name="handler">The resource handler to register.</param>
+        /// <param name="enabled">Whether the handler is enabled initially.</param>
+        /// <returns>True if registration succeeded, false if failed.</returns>
+        public bool RegisterResourceHandler(IMcpResourceHandler handler, bool enabled = true)
+        {
+            if (handler == null)
+            {
+                Debug.LogError("Cannot register null resource handler");
+                return false;
+            }
+
+            var resourceName = handler.ResourceName;
+            if (string.IsNullOrEmpty(resourceName))
+            {
+                Debug.LogError($"Handler {handler.GetType().Name} has invalid resource name");
+                return false;
+            }
+
+            // Check if a handler for this resource already exists
+            if (this.resourceHandlers.ContainsKey(resourceName))
+            {
+                Debug.LogWarning($"Replacing existing handler for resource '{resourceName}'");
+                this.resourceHandlers.Remove(resourceName);
+            }
+
+            // Check settings for enabled state
+            if (McpSettings.instance.resourceHandlerEnabledStates.TryGetValue(resourceName, out var savedEnabled))
+            {
+                enabled = savedEnabled;
+            }
+
+            // Register with the resource name and URI maps
+            this.resourceHandlers[resourceName] = new ResourceHandlerRegistration(handler, enabled);
+
+            if (!string.IsNullOrEmpty(handler.ResourceUri))
+            {
+                this.resourceUriMap[handler.ResourceUri] = handler;
+            }
+
+            Debug.Log($"Registered resource handler: {resourceName} (URI: {handler.ResourceUri}, Enabled: {enabled})");
+
+            // Save the handler state to settings
+            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Enables or disables a resource handler.
+        /// </summary>
+        /// <param name="resourceName">The name of the resource handler to enable or disable.</param>
+        /// <param name="enabled">Whether the handler should be enabled.</param>
+        /// <returns>true if the handler was found and its enabled state was set; otherwise, false.</returns>
+        public bool SetResourceHandlerEnabled(string resourceName, bool enabled)
+        {
+            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
+            {
+                Debug.LogWarning($"Resource handler for '{resourceName}' not found");
+                return false;
+            }
+
+            registration.Enabled = enabled;
+            Debug.Log($"Resource handler for '{resourceName}' is now {(enabled ? "enabled" : "disabled")}");
+
+            // Update settings
+            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Gets all registered resource handlers.
+        /// </summary>
+        /// <returns>A dictionary of resource names and their handler registrations.</returns>
+        public IReadOnlyDictionary<string, ResourceHandlerRegistration> GetRegisteredResourceHandlers()
+        {
+            return this.resourceHandlers;
+        }
+
+        /// <summary>
+        /// Raises the Connected event.
         /// </summary>
         /// <param name="e">The event arguments.</param>
-        private void OnClientDisconnected(EventArgs e)
+        private void OnConnected(EventArgs e)
         {
-            this.ClientDisconnected?.Invoke(this, e);
+            this.Connected?.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Raises the Disconnected event.
+        /// </summary>
+        /// <param name="e">The event arguments.</param>
+        private void OnDisconnected(EventArgs e)
+        {
+            this.Disconnected?.Invoke(this, e);
         }
 
         /// <summary>
@@ -925,100 +1067,100 @@ namespace UnityMCP.Editor.Core
                 this.AssemblyName = handler.GetType().Assembly.GetName().Name;
             }
         }
-    }
-
-    /// <summary>
-    /// Provides data for the ClientConnected event.
-    /// </summary>
-    public class ClientConnectedEventArgs : EventArgs
-    {
-        /// <summary>
-        /// Gets the client's IP endpoint.
-        /// </summary>
-        public IPEndPoint ClientEndPoint { get; }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="ClientConnectedEventArgs"/> class.
+        /// Provides data for the ClientConnected event.
         /// </summary>
-        /// <param name="clientEndPoint">The client's IP endpoint.</param>
-        public ClientConnectedEventArgs(IPEndPoint clientEndPoint)
+        public class ClientConnectedEventArgs : EventArgs
         {
-            this.ClientEndPoint = clientEndPoint;
+            /// <summary>
+            /// Gets the client's IP endpoint.
+            /// </summary>
+            public IPEndPoint ClientEndPoint { get; }
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="ClientConnectedEventArgs"/> class.
+            /// </summary>
+            /// <param name="clientEndPoint">The client's IP endpoint.</param>
+            public ClientConnectedEventArgs(IPEndPoint clientEndPoint)
+            {
+                this.ClientEndPoint = clientEndPoint;
+            }
         }
-    }
-
-    /// <summary>
-    /// Provides data for the CommandExecuted event.
-    /// </summary>
-    public class CommandExecutedEventArgs : EventArgs
-    {
-        /// <summary>
-        /// Gets the command prefix.
-        /// </summary>
-        public string Prefix { get; }
 
         /// <summary>
-        /// Gets the command action.
+        /// Provides data for the CommandExecuted event.
         /// </summary>
-        public string Action { get; }
-
-        /// <summary>
-        /// Gets the command parameters.
-        /// </summary>
-        public JObject Parameters { get; }
-
-        /// <summary>
-        /// Gets the command result.
-        /// </summary>
-        public JObject Result { get; }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="CommandExecutedEventArgs"/> class.
-        /// </summary>
-        /// <param name="prefix">The command prefix.</param>
-        /// <param name="action">The command action.</param>
-        /// <param name="parameters">The command parameters.</param>
-        /// <param name="result">The command result.</param>
-        public CommandExecutedEventArgs(string prefix, string action, JObject parameters, JObject result)
+        public class CommandExecutedEventArgs : EventArgs
         {
-            this.Prefix = prefix;
-            this.Action = action;
-            this.Parameters = parameters;
-            this.Result = result;
+            /// <summary>
+            /// Gets the command prefix.
+            /// </summary>
+            public string Prefix { get; }
+
+            /// <summary>
+            /// Gets the command action.
+            /// </summary>
+            public string Action { get; }
+
+            /// <summary>
+            /// Gets the command parameters.
+            /// </summary>
+            public JObject Parameters { get; }
+
+            /// <summary>
+            /// Gets the command result.
+            /// </summary>
+            public JObject Result { get; }
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="CommandExecutedEventArgs"/> class.
+            /// </summary>
+            /// <param name="prefix">The command prefix.</param>
+            /// <param name="action">The command action.</param>
+            /// <param name="parameters">The command parameters.</param>
+            /// <param name="result">The command result.</param>
+            public CommandExecutedEventArgs(string prefix, string action, JObject parameters, JObject result)
+            {
+                this.Prefix = prefix;
+                this.Action = action;
+                this.Parameters = parameters;
+                this.Result = result;
+            }
         }
-    }
-
-    /// <summary>
-    /// Provides data for the ResourceFetched event.
-    /// </summary>
-    public class ResourceFetchedEventArgs : EventArgs
-    {
-        /// <summary>
-        /// Gets the resource name.
-        /// </summary>
-        public string ResourceName { get; }
 
         /// <summary>
-        /// Gets the resource parameters.
+        /// Provides data for the ResourceFetched event.
         /// </summary>
-        public JObject Parameters { get; }
-
-        /// <summary>
-        /// Gets the resource result.
-        /// </summary>
-        public JObject Result { get; }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="ResourceFetchedEventArgs"/> class.
-        /// </summary>
-        /// <param name="resourceName">The resource name.</param>
-        /// <param name="parameters">The resource parameters.</param>
-        /// <param name="result">The resource result.</param>
-        public ResourceFetchedEventArgs(string resourceName, JObject parameters, JObject result)
+        public class ResourceFetchedEventArgs : EventArgs
         {
-            this.ResourceName = resourceName;
-            this.Parameters = parameters;
-            this.Result = result;
+            /// <summary>
+            /// Gets the resource name.
+            /// </summary>
+            public string ResourceName { get; }
+
+            /// <summary>
+            /// Gets the resource parameters.
+            /// </summary>
+            public JObject Parameters { get; }
+
+            /// <summary>
+            /// Gets the resource result.
+            /// </summary>
+            public JObject Result { get; }
+
+            /// <summary>
+            /// Initializes a new instance of the <see cref="ResourceFetchedEventArgs"/> class.
+            /// </summary>
+            /// <param name="resourceName">The resource name.</param>
+            /// <param name="parameters">The resource parameters.</param>
+            /// <param name="result">The resource result.</param>
+            public ResourceFetchedEventArgs(string resourceName, JObject parameters, JObject result)
+            {
+                this.ResourceName = resourceName;
+                this.Parameters = parameters;
+                this.Result = result;
+            }
         }
     }
 }

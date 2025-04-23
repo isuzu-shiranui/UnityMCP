@@ -6,23 +6,27 @@ import { UnityConnection } from "./core/UnityConnection.js";
 import { CommandRegistry } from "./core/CommandRegistry.js";
 import { ResourceRegistry } from "./core/ResourceRegistry.js";
 import { PromptRegistry } from "./core/PromptRegistry.js";
+import { registerUnityClientTools } from "./core/UnityClientHandler.js";
 
-// Main function
+/**
+ * Main entry point for the MCP server application.
+ * This server acts as a bridge between LLMs and Unity clients.
+ */
 async function main() {
   try {
     // Initialize MCP server with the official SDK
     const mcpServer = new McpServer({
       name: "unity-mcp",
-      version: "0.1.0"
+      version: "0.2.0"
     });
 
-    // Initialize UnityConnection
+    // Initialize UnityConnection in server mode
     const unityConnection = UnityConnection.getInstance();
 
     // Configure from environment variables or defaults
-    const unityHost = process.env.UNITY_HOST || '127.0.0.1';
-    const unityPort = parseInt(process.env.UNITY_PORT || '27182', 10);
-    unityConnection.configure(unityHost, unityPort);
+    const host = process.env.MCP_HOST || '127.0.0.1';
+    const port = parseInt(process.env.MCP_PORT || '27182', 10);
+    unityConnection.configure(host, port);
 
     // Create registries
     const commandRegistry = new CommandRegistry();
@@ -41,15 +45,18 @@ async function main() {
         promptRegistry
     );
 
-    // Try to connect to Unity but don't fail if connection fails
+    // Start the unity connection server
     try {
-      await unityConnection.connect();
-      console.error(`[INFO] Connected to Unity at ${unityHost}:${unityPort}`);
+      await unityConnection.start();
+      console.error(`[INFO] Started MCP server on ${host}:${port}, waiting for Unity clients to connect`);
     } catch (err) {
-      console.error(`[WARN] Initial connection to Unity failed: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('[INFO] Will continue without Unity connection and attempt to reconnect when needed.');
-      // Continue execution, don't exit - the reconnection will be attempted when needed
+      console.error(`[ERROR] Failed to start Unity connection server: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('[WARN] Continuing execution, but Unity functionality may be limited');
+      // Continue execution - Unity clients will attempt to connect
     }
+
+    // Register unity client management tools
+    registerUnityClientTools(mcpServer);
 
     // Discover and register handlers
     const counts = await handlerDiscovery.discoverAndRegisterHandlers();
@@ -58,7 +65,25 @@ async function main() {
       Resource Handlers: ${counts[HandlerType.RESOURCE]}
       Prompt Handlers: ${counts[HandlerType.PROMPT]}`);
 
-    // Create transport using standard I/O
+    // Register connection status change events
+    unityConnection.on('clientConnected', (client) => {
+      console.error(`[INFO] Unity client connected: ${client.clientId}`);
+    });
+
+    unityConnection.on('clientDisconnected', (client) => {
+      console.error(`[INFO] Unity client disconnected: ${client.clientId}`);
+    });
+
+    unityConnection.on('clientRegistered', (client) => {
+      console.error(`[INFO] Unity client registered: ${client.clientId}`);
+      console.error(`[INFO] Client info: ${JSON.stringify(client.info)}`);
+    });
+
+    unityConnection.on('activeClientChanged', (client) => {
+      console.error(`[INFO] Active Unity client changed to: ${client.clientId}`);
+    });
+
+    // Create transport using standard I/O for MCP communication
     const transport = new StdioServerTransport();
 
     // Connect the server to the transport
@@ -75,14 +100,14 @@ async function main() {
 process.on("SIGINT", () => {
   console.error("[INFO] Shutting down...");
   const unityConnection = UnityConnection.getInstance();
-  unityConnection.disconnect();
+  unityConnection.stop();
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
   console.error("[INFO] Shutting down...");
   const unityConnection = UnityConnection.getInstance();
-  unityConnection.disconnect();
+  unityConnection.stop();
   process.exit(0);
 });
 

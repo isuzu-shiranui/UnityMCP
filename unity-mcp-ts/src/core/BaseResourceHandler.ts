@@ -89,7 +89,6 @@ export abstract class BaseResourceHandler implements IResourceHandler {
 
     /**
      * Ensures there is a valid connection to Unity before fetching a resource.
-     * Attempts to reconnect if not connected.
      * @returns A Promise that resolves when connected or rejects with an error.
      * @throws Error if the connection cannot be established.
      */
@@ -100,7 +99,8 @@ export abstract class BaseResourceHandler implements IResourceHandler {
 
         if (!this.unityConnection.isUnityConnected()) {
             try {
-                await this.unityConnection.reconnect();
+                // In server mode, we just ensure a connection is available
+                await this.unityConnection.ensureConnected();
             } catch (err) {
                 throw new Error(`Failed to connect to Unity: ${err instanceof Error ? err.message : String(err)}`);
             }
