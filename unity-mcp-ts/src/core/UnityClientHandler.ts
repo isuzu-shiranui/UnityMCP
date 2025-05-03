@@ -16,6 +16,14 @@ export function registerUnityClientTools(server: McpServer): void {
         "Lists all connected Unity projects",
         {},
         async () => {
+
+            connection.clearClients();
+
+            connection.sendInitialBroadcast("listClients");
+
+            // Wait for the clients
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
             const clients = connection.getConnectedClients();
 
             // Filter out clients with invalid/unknown information
