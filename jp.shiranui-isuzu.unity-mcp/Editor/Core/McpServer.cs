@@ -164,6 +164,12 @@ namespace UnityMCP.Editor.Core
                 this.clientThread.Start(this.cancellationTokenSource.Token);
                 this.running = true;
                 Debug.Log($"MCP client started, connecting to {this.host}:{this.port}");
+
+                // Start UDP listener if enabled in settings
+                if (McpSettings.instance.useUdpDiscovery)
+                {
+                    this.StartUdpListener();
+                }
             }
             catch (Exception e)
             {
@@ -266,8 +272,8 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         private void ReceiveCallback(IAsyncResult ar)
         {
-            UdpClient client = (UdpClient)ar.AsyncState;
-            IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
+            var client = (UdpClient)ar.AsyncState;
+            var remoteEP = new IPEndPoint(IPAddress.Any, 0);
             byte[] data = null;
 
             // Try to receive data
@@ -312,32 +318,47 @@ namespace UnityMCP.Editor.Core
             }
 
             // Process received data
-            if (data != null && data.Length > 0)
+            if (data == null || data.Length <= 0) return;
+
+            try
             {
-                try
+                var jsonStr = Encoding.UTF8.GetString(data);
+
+                if (DetailedLogs)
                 {
-                    string jsonStr = Encoding.UTF8.GetString(data);
+                    Debug.Log($"[McpServer] Received UDP broadcast from {remoteEP}: {jsonStr}");
+                }
 
-                    if (DetailedLogs)
+                // Parse JSON
+                var serverInfo = JObject.Parse(jsonStr);
+                var messageType = serverInfo["type"]?.ToString();
+
+                switch (messageType)
+                {
+                    case "listClients":
                     {
-                        Debug.Log($"[McpServer] Received UDP broadcast from {remoteEP}: {jsonStr}");
+                        var host = serverInfo["host"]?.ToString();
+                        var port = serverInfo["port"]?.Value<int>() ?? 0;
+                        this.ExecuteOnMainThread(() =>
+                        {
+                            this.host = host;
+                            this.port = port;
+                            this.TryConnect();
+                        });
+                        return;
                     }
-
-                    // Parse JSON
-                    JObject serverInfo = JObject.Parse(jsonStr);
-                    string messageType = serverInfo["type"]?.ToString();
-
                     // Verify this is an MCP server announcement
-                    if (messageType == "mcp_server_announce")
+                    case "mcp_server_announce":
                     {
-                        string host = serverInfo["host"]?.ToString();
-                        int port = serverInfo["port"]?.Value<int>() ?? 0;
-                        string version = serverInfo["version"]?.ToString();
+                        var host = serverInfo["host"]?.ToString();
+                        var port = serverInfo["port"]?.Value<int>() ?? 0;
+                        var version = serverInfo["version"]?.ToString();
 
                         if (!string.IsNullOrEmpty(host) && port > 0)
                         {
                             // Execute on main thread
-                            this.ExecuteOnMainThread(() => {
+                            this.ExecuteOnMainThread(() =>
+                            {
                                 // Skip if already connected
                                 if (this.IsConnected)
                                 {
@@ -345,6 +366,7 @@ namespace UnityMCP.Editor.Core
                                     {
                                         Debug.Log($"[McpServer] Already connected to MCP server, ignoring broadcast");
                                     }
+
                                     return;
                                 }
 
@@ -364,12 +386,14 @@ namespace UnityMCP.Editor.Core
                                 }
                             });
                         }
+
+                        break;
                     }
                 }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[McpServer] Failed to process UDP broadcast: {ex.Message}");
-                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[McpServer] Failed to process UDP broadcast: {ex.Message}");
             }
         }
 

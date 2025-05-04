@@ -134,7 +134,7 @@ export class UnityConnection extends EventEmitter {
                     this.emit('serverStarted', { host: this.host, port: this.port });
 
                     // Send a single broadcast when server starts
-                    this.sendInitialBroadcast();
+                    this.sendInitialBroadcast("mcp_server_announce");
 
                     resolve();
                 });
@@ -148,7 +148,7 @@ export class UnityConnection extends EventEmitter {
     /**
      * Sends a single initial broadcast to announce the server
      */
-    private sendInitialBroadcast(): void {
+    sendInitialBroadcast(type: string): void {
         try {
             // Create UDP socket for a single broadcast
             const socket = dgram.createSocket('udp4');
@@ -169,10 +169,10 @@ export class UnityConnection extends EventEmitter {
 
                     // Create server info message
                     const serverInfo = {
-                        type: "mcp_server_announce",
+                        type: type,
                         host: this.host,
                         port: this.port,
-                        version: "0.2.0",
+                        version: "1.1.0",
                         protocol: "unity-mcp",
                         timestamp: Date.now()
                     };
@@ -357,6 +357,16 @@ export class UnityConnection extends EventEmitter {
             isActive: id === this.activeClientId,
             info: this.clientInfoMap.get(id) || {}
         }));
+    }
+
+    /**
+     * Clears all connected Unity clients.
+     */
+    public clearClients(): void {
+        // Clear all client data
+        this.clients.clear();
+        this.clientDataBuffers.clear();
+        this.clientInfoMap.clear();
     }
 
     /**

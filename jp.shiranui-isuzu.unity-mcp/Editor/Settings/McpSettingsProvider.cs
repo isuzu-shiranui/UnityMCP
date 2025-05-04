@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 using UnityMCP.Editor.Core;
+using UnityMCP.Editor.Installer;
 
 namespace UnityMCP.Editor.Settings
 {
@@ -96,6 +97,12 @@ namespace UnityMCP.Editor.Settings
         public override void OnGUI(string searchContext)
         {
             EditorGUI.BeginChangeCheck();
+
+            GUILayout.Label("TypeScript MCP Settings", this.headerStyle);
+            if (GUILayout.Button("Open Installer Window", GUILayout.Height(25)))
+            {
+                EditorWindow.GetWindow<McpInstallerWindow>();
+            }
 
             GUILayout.Label("Server Configuration", this.headerStyle);
             EditorGUILayout.Space(5);

@@ -169,6 +169,7 @@ export class HandlerAdapter {
                 toolName,
                 definition.description,
                 definition.parameterSchema,
+                definition.annotations || {},
                 async (params) => {
                     try {
                         // Extract the action from the tool name (e.g., "menu_execute" -> "execute")
@@ -210,7 +211,6 @@ export class HandlerAdapter {
                         };
                     }
                 }
-                // definition.annotations -- SDK not support annotations yet
             );
 
             console.error(`[INFO] Registered tool: ${toolName}`);

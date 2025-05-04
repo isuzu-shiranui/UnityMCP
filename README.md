@@ -1,9 +1,11 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Unity](https://img.shields.io/badge/Unity-2022.3.22--Unity6-black.svg)
+![Unity](https://img.shields.io/badge/Unity-2022.3.22--Unity6.1-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
+
+[English Version](./README.en.md)
 
 Unity と Model Context Protocol (MCP) を統合するための拡張可能なフレームワークです。このフレームワークにより、Claude などの AI 言語モデルがスケーラブルなハンドラーアーキテクチャを通じて Unity エディタと直接対話することができます。
 
@@ -18,8 +20,8 @@ Unity と Model Context Protocol (MCP) を統合するための拡張可能な�
 
 ## 📋 必要条件
 
-- Unity 2022.3.22f1 以上（Unity6 にも対応）
-   - 2022.3.22f1, 2023.2.19f1, 6000.0.35f1で動作確認
+- Unity 2022.3.22f1 以上（Unity6.1 にも対応）
+   - 2022.3.22f1, 2023.2.19f1, 6000.0.35f1, 6000.1.0f1で動作確認
 - .NET/C# 9.0
 - Node.js 18.0.0 以上と npm（TypeScript サーバー用）
    - [Node.js 公式サイト](https://nodejs.org/)からインストールしてください
@@ -41,6 +43,28 @@ Unity と Model Context Protocol (MCP) を統合するための拡張可能な�
 3. 「Connect」ボタンをクリックして接続の待ち受けを開始
 
 ### Claude Desktop との連携
+
+#### インストーラーを使う場合
+
+Unity MCPにはTypeScriptクライアントの簡単なインストールと設定のためのツールが含まれています。
+
+1. Unityエディタで、「Edit > Preferences > Unity MCP」に移動します
+2. 「Open Installer Window」ボタンをクリックしてTypeScriptクライアントインストーラーを開きます
+3. インストーラーの指示に従って操作します：
+   - Node.jsがインストールされていることを確認します（インストールされていない場合はダウンロードリンクが表示されます）
+   - 最新バージョンを取得するには「Latest」ボタンをクリックします
+   - インストール先フォルダを選択し、「Download and Install TypeScript Client」ボタンをクリックします
+   - インストールが完了したら、「Configuration Preview」セクションを開いて設定JSONをクリップボードにコピーします
+4. Claude Desktopの設定を行います：
+   - Claude Desktopを開きます
+   - 「Claude」メニューをクリックし、「Settings...」を選択します
+   - 「Developer」タブをクリックし、「Edit Config」ボタンをクリックします
+   - コピーした設定を貼り付けて保存します
+5. Claude Desktopを再起動すると設定が適用されます
+
+これで、Claude Desktopが自動的にUnity MCPクライアントに接続し、Unity Editorとのシームレスな連携が可能になります。
+
+#### 手動でインストールする場合
 
 1. リリースページから最新のZIPファイルをダウンロードして解凍します
 2. `build/index.js` ファイルのフルパスを控えておきます
