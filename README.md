@@ -44,6 +44,28 @@ Unity と Model Context Protocol (MCP) を統合するための拡張可能な�
 
 ### Claude Desktop との連携
 
+#### インストーラーを使う場合
+
+Unity MCPにはTypeScriptクライアントの簡単なインストールと設定のためのツールが含まれています。
+
+1. Unityエディタで、「Edit > Preferences > Unity MCP」に移動します
+2. 「Open Installer Window」ボタンをクリックしてTypeScriptクライアントインストーラーを開きます
+3. インストーラーの指示に従って操作します：
+   - Node.jsがインストールされていることを確認します（インストールされていない場合はダウンロードリンクが表示されます）
+   - 最新バージョンを取得するには「Latest」ボタンをクリックします
+   - インストール先フォルダを選択し、「Download and Install TypeScript Client」ボタンをクリックします
+   - インストールが完了したら、「Configuration Preview」セクションを開いて設定JSONをクリップボードにコピーします
+4. Claude Desktopの設定を行います：
+   - Claude Desktopを開きます
+   - 「Claude」メニューをクリックし、「Settings...」を選択します
+   - 「Developer」タブをクリックし、「Edit Config」ボタンをクリックします
+   - コピーした設定を貼り付けて保存します
+5. Claude Desktopを再起動すると設定が適用されます
+
+これで、Claude Desktopが自動的にUnity MCPクライアントに接続し、Unity Editorとのシームレスな連携が可能になります。
+
+#### 手動でインストールする場合
+
 1. リリースページから最新のZIPファイルをダウンロードして解凍します
 2. `build/index.js` ファイルのフルパスを控えておきます
 3. Claude Desktop の設定ファイル `claude_desktop_config.json` を開きます
