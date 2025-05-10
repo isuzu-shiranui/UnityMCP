@@ -8,8 +8,14 @@ namespace UnityMCP.Editor.Settings
     /// Stores and manages Unity MCP settings.
     /// </summary>
     [FilePath("UserSettings/UnityMcpSettings.asset", FilePathAttribute.Location.PreferencesFolder)]
-    internal sealed class McpSettings : ScriptableSingleton<McpSettings>
+    public sealed class McpSettings : ScriptableSingleton<McpSettings>
     {
+        /// <summary>
+        /// Gets or sets the path to the client installation.
+        /// </summary>
+        [SerializeField]
+        public string clientInstallationPath = string.Empty;
+
         /// <summary>
         /// Gets or sets the host address to bind the server to.
         /// </summary>

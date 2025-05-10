@@ -359,31 +359,12 @@ namespace UnityMCP.Editor.Core
                             // Execute on main thread
                             this.ExecuteOnMainThread(() =>
                             {
-                                // Skip if already connected
-                                if (this.IsConnected)
-                                {
-                                    if (DetailedLogs)
-                                    {
-                                        Debug.Log($"[McpServer] Already connected to MCP server, ignoring broadcast");
-                                    }
+                                Debug.Log($"[McpServer] Detected MCP TypeScript server at {host}:{port} (v{version}), connecting...");
 
-                                    return;
-                                }
-
-                                // Try connecting if not already connecting
-                                if (!this.isConnecting)
-                                {
-                                    Debug.Log($"[McpServer] Detected MCP TypeScript server at {host}:{port} (v{version}), connecting...");
-
-                                    // Update host and port from broadcast
-                                    this.host = host;
-                                    this.port = port;
-                                    this.TryConnect();
-                                }
-                                else if (DetailedLogs)
-                                {
-                                    Debug.Log($"[McpServer] Connection already in progress, ignoring broadcast");
-                                }
+                                // Update host and port from broadcast
+                                this.host = host;
+                                this.port = port;
+                                this.TryConnect();
                             });
                         }
 
