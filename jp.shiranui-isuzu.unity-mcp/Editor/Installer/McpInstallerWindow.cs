@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using UnityMCP.Editor.Settings;
 
 namespace UnityMCP.Editor.Installer
 {
@@ -53,11 +54,13 @@ namespace UnityMCP.Editor.Installer
         /// </summary>
         private void OnEnable()
         {
+            this.installPath = McpSettings.instance.clientInstallationPath;
+
             // Set default install path to Documents/UnityMCP folder
             if (string.IsNullOrEmpty(this.installPath))
             {
                 var documentsFolder = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                this.installPath = Path.Combine(documentsFolder, "UnityMCP");
+                this.installPath = documentsFolder;
             }
 
             // Check for Node.js installation
@@ -65,6 +68,8 @@ namespace UnityMCP.Editor.Installer
             {
                 this.isNodeInstalled = McpInstallHelper.IsNodeInstalled();
             });
+
+            this.FetchLatestVersion();
 
             // Initialize styles in OnGUI to ensure EditorStyles are initialized
         }
@@ -206,7 +211,13 @@ namespace UnityMCP.Editor.Installer
             // Installation path
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label("Install Path:", GUILayout.Width(70));
+
             this.installPath = EditorGUILayout.TextField(this.installPath);
+            if (McpSettings.instance.clientInstallationPath != this.installPath)
+            {
+                McpSettings.instance.clientInstallationPath = this.installPath;
+                McpSettings.instance.Save();
+            }
 
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
@@ -257,7 +268,8 @@ namespace UnityMCP.Editor.Installer
             GUILayout.Label("3. MCP Configuration", this.subHeaderStyle);
 
             // Path to index.js
-            var clientJsPath = Path.Combine(this.installPath, "build/index.js").Replace("/", "\\");
+            var installDir = Path.Combine(this.installPath, "UnityMCP/build");
+            var clientJsPath = Path.Combine(installDir, "index.js").Replace("/", "\\");
             var displayPath = clientJsPath;
 
             // Highlight the path for better visibility
@@ -266,7 +278,7 @@ namespace UnityMCP.Editor.Installer
 
             var pathStyle = new GUIStyle(EditorStyles.textField);
             pathStyle.fontStyle = FontStyle.Bold;
-            GUILayout.TextField(displayPath, pathStyle);
+            GUILayout.TextField(displayPath.Replace("\\", @"\\"), pathStyle);
 
             if (GUILayout.Button("Copy Path", GUILayout.Width(80)))
             {
@@ -345,19 +357,21 @@ namespace UnityMCP.Editor.Installer
 
             try
             {
+                var installDir = Path.Combine(this.installPath, "UnityMCP/build");
                 // Download and extract the client
-                var success = await McpInstallHelper.DownloadAndExtractClient(this.version, this.installPath,
-                                                                              progress => {
-                                                                                  this.downloadProgress = progress;
-                                                                                  this.Repaint();
-                                                                              });
+                var success = await McpInstallHelper.DownloadAndExtractClient(this.version, installDir,
+                    progress => {
+                        this.downloadProgress = progress;
+                        this.Repaint();
+                    }
+                );
 
                 if (success)
                 {
-                    this.statusMessage = $"TypeScript client v{this.version} successfully installed to {this.installPath}";
+                    this.statusMessage = $"TypeScript client v{this.version} successfully installed to {installDir}";
 
                     // Check if index.js exists in the expected location
-                    var indexJsPath = Path.Combine(this.installPath, "build/index.js");
+                    var indexJsPath = Path.Combine(installDir, "/index.js");
                     if (!File.Exists(indexJsPath))
                     {
                         this.statusMessage += "\nWarning: index.js not found at the expected location. The installation may be incomplete.";
