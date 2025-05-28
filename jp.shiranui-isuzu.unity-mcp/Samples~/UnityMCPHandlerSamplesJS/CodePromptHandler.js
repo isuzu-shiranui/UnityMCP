@@ -67,38 +67,6 @@ namespace CodeExecutionContainer
     }
 }`
         });
-        // Add UI component creation template
-        prompts.set("create_ui_component", {
-            description: "Template for creating Unity UI components",
-            template: `Create a Unity UI component that follows these guidelines:
-
-1. Use Unity's UI system (UnityEngine.UI)
-2. Components should be modular and reusable
-3. Consider performance implications
-4. Add comments to explain complex logic
-5. Follow Unity's recommended practices
-
-Example structure:
-\`\`\`csharp
-// Set up references
-RectTransform rectTransform = GetComponent<RectTransform>();
-Image backgroundImage = GetComponent<Image>();
-
-// Configure the component
-backgroundImage.color = new Color(0.2f, 0.2f, 0.2f, 0.8f);
-rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
-rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
-rectTransform.sizeDelta = new Vector2(200, 100);
-
-// Add event listeners
-Button button = GetComponent<Button>();
-button.onClick.AddListener(() => {
-    Debug.Log("Button clicked!");
-});
-\`\`\`
-
-For more complex UI components, consider using a proper MonoBehaviour class structure.`
-        });
         return prompts;
     }
     /**
