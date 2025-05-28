@@ -172,7 +172,7 @@ export class UnityConnection extends EventEmitter {
                         type: type,
                         host: this.host,
                         port: this.port,
-                        version: "1.1.1",
+                        version: "1.1.2",
                         protocol: "unity-mcp",
                         timestamp: Date.now()
                     };
