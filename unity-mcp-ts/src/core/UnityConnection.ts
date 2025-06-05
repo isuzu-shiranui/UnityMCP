@@ -129,9 +129,11 @@ export class UnityConnection extends EventEmitter {
                 });
 
                 // Start listening
-                this.server.listen(this.port, this.host, () => {
-                    console.error(`[INFO] MCP server listening on ${this.host}:${this.port}`);
-                    this.emit('serverStarted', { host: this.host, port: this.port });
+                // 環境変数MCP_BIND_ALLが設定されていれば全インターフェースでリッスン（WSL対応）
+                const bindAddress = process.env.MCP_BIND_ALL === 'true' ? '0.0.0.0' : this.host;
+                this.server.listen(this.port, bindAddress, () => {
+                    console.error(`[INFO] MCP server listening on ${bindAddress}:${this.port}`);
+                    this.emit('serverStarted', { host: bindAddress, port: this.port });
 
                     // Send a single broadcast when server starts
                     this.sendInitialBroadcast("mcp_server_announce");
