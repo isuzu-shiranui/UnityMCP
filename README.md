@@ -85,6 +85,31 @@ Unity MCPにはTypeScriptクライアントの簡単なインストールと設�
 ```
 ※ `path/to/index.js` は実際のパスに置き換えてください（Windowsの場合はバックスラッシュをエスケープ"\\\\"するか、フォワードスラッシュ"/"を使用）
 
+### WSL環境からの使用
+
+WSL（Windows Subsystem for Linux）環境からUnity MCPを使用する場合、以下の設定が必要です：
+
+1. **環境変数の設定**
+
+WSL側で環境変数を設定します（`.bashrc`または`.zshrc`に追加）:
+```bash
+# Windows側のIPを自動取得して環境変数に設定
+export UNITY_MCP_HOST=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}')
+export MCP_BIND_ALL=true
+```
+
+2. **Windowsファイアウォールの設定**
+
+PowerShell（管理者権限）で以下を実行:
+```powershell
+# TCP 27182ポートを開放
+New-NetFirewallRule -DisplayName "Unity MCP TCP" -Direction Inbound -Protocol TCP -LocalPort 27182 -Action Allow
+```
+
+3. **Claude Desktopの設定**
+
+通常の手順と同じくClaude Desktopを設定しますが、TypeScriptサーバーはWSL内から起動します。
+
 ## 🔌 アーキテクチャ
 
 Unity MCP フレームワークは主に 2 つのコンポーネントで構成されています:
