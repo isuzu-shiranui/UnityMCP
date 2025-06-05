@@ -97,7 +97,11 @@ namespace UnityMCP.Editor.Core
         public McpServer(int port = 0)
         {
             var settings = McpSettings.instance;
-            this.host = settings.host;
+            
+            // 環境変数からホストを取得（WSL対応）
+            var envHost = Environment.GetEnvironmentVariable("UNITY_MCP_HOST");
+            this.host = !string.IsNullOrEmpty(envHost) ? envHost : settings.host;
+            
             this.port = port > 0 ? port : settings.port;
             this.clientId = this.GenerateClientId();
             this.currentReconnectDelay = this.reconnectDelay;

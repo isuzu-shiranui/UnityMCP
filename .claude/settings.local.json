@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run lint)",
+      "Bash(git checkout:*)",
+      "Bash(find:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth:*)",
+      "Bash(git config:*)",
+      "Bash(git commit:*)",
+      "Bash(git pull:*)",
+      "Bash(gh pr create:*)",
+      "Bash(dotnet --version)",
+      "mcp__unity-mcp__unity_getActiveClient",
+      "mcp__unity-mcp__unity_listClients",
+      "mcp__unity-mcp__unity_connectToProject",
+      "mcp__unity-mcp__menu_execute",
+      "Bash(dotnet test:*)",
+      "Bash(touch:*)",
+      "Bash(git fetch:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": []
+  }
+}
