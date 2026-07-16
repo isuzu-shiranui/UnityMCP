@@ -9,6 +9,7 @@ import { PromptRegistry } from "./core/PromptRegistry.js";
 import { ProjectRegistry } from "./core/ProjectRegistry.js";
 import { ProjectApi } from "./core/ProjectApi.js";
 import { registerUnityClientTools } from "./core/UnityClientHandler.js";
+import { UnhandledErrorTracker } from "./core/TaskResilience.js";
 
 /**
  * Main entry point for the MCP server application.
@@ -121,11 +122,17 @@ process.on("SIGTERM", () => {
   process.exit(0);
 });
 
+// The process intentionally survives unhandled errors (killing it would drop
+// the MCP stdio connection), but repeated errors indicate a degraded server.
+// Track them in a sliding window and warn so the operator can restart (#9).
+const unhandledErrorTracker = new UnhandledErrorTracker();
+
 // Handle uncaught exceptions to prevent crashing
 process.on('uncaughtException', (error) => {
   const errorCode = 'code' in error ? `[Code: ${(error as any).code}] ` : '';
   console.error(`[ERROR] Uncaught exception: ${errorCode}${error.message}`);
   console.error(error.stack);
+  unhandledErrorTracker.record();
 });
 
 // Handle unhandled promise rejections to prevent crashing
@@ -138,6 +145,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('[ERROR] Unhandled Promise rejection at:', promise);
     console.error('Reason:', reason);
   }
+  unhandledErrorTracker.record();
 });
 
 // Execute main function
