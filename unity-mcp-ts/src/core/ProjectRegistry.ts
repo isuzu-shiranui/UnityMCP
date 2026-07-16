@@ -6,6 +6,7 @@ import {
     UnityInstanceState,
 } from './UnityConnection.js';
 import { extractErrorCode, Idempotency } from './retryableFetch.js';
+import { computeBackoffDelayMs, ConsecutiveFailureMonitor } from './TaskResilience.js';
 
 export interface ProjectRegistryOptions {
     udpPort?: number;
@@ -50,6 +51,10 @@ export class ProjectRegistry extends EventEmitter {
     private unityConnection: UnityConnection;
     /** Instances for which we've fetched /health at least once. */
     private healthFetched: Set<string> = new Set();
+    /** Consecutive UDP listener restarts since the last successful bind (#9). */
+    private udpRestartAttempts: number = 0;
+    private readonly healthPollMonitor: ConsecutiveFailureMonitor;
+    private readonly evictionMonitor: ConsecutiveFailureMonitor;
 
     public readonly udpPort: number;
     public readonly healthPollIntervalMs: number;
@@ -77,6 +82,8 @@ export class ProjectRegistry extends EventEmitter {
         this.initialHealthFetchEnabled = options?.initialHealthFetchEnabled ?? true;
         this.nowFn = options?.nowImpl ?? Date.now;
         this.fetchFn = options?.fetchImpl ?? fetch;
+        this.healthPollMonitor = new ConsecutiveFailureMonitor('health-poll', { nowImpl: this.nowFn });
+        this.evictionMonitor = new ConsecutiveFailureMonitor('eviction', { nowImpl: this.nowFn });
     }
 
     /**
@@ -126,11 +133,16 @@ export class ProjectRegistry extends EventEmitter {
             this.udpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
             this.udpSocket.on('error', (err) => {
-                console.error(`[ERROR] UDP listener error: ${err.message}`);
-                // Try to restart
+                // Restart with exponential backoff so a persistent failure
+                // (e.g. port taken) doesn't turn into a hot retry loop (#9).
+                const delayMs = computeBackoffDelayMs(this.udpRestartAttempts);
+                this.udpRestartAttempts++;
+                console.error(
+                    `[ERROR] UDP listener error: ${err.message} — restart #${this.udpRestartAttempts} in ${delayMs}ms`
+                );
                 try { this.udpSocket?.close(); } catch { /* ignore */ }
                 this.udpSocket = null;
-                setTimeout(() => this.startUdpListener(), 5000);
+                setTimeout(() => this.startUdpListener(), delayMs);
             });
 
             this.udpSocket.on('message', (msg, rinfo) => {
@@ -139,6 +151,7 @@ export class ProjectRegistry extends EventEmitter {
 
             this.udpSocket.bind(this.udpPort, () => {
                 console.error(`[INFO] UDP listener bound to port ${this.udpPort}`);
+                this.udpRestartAttempts = 0;
             });
         } catch (err) {
             console.error(
@@ -268,14 +281,26 @@ export class ProjectRegistry extends EventEmitter {
 
     private startHealthPolling(): void {
         this.healthInterval = setInterval(
-            () => { void this.pollHealth(); },
+            () => {
+                this.pollHealth().then(
+                    () => this.healthPollMonitor.recordSuccess(),
+                    (err) => this.healthPollMonitor.recordFailure(err)
+                );
+            },
             this.healthPollIntervalMs
         );
     }
 
     private startEvictionLoop(): void {
         this.evictionInterval = setInterval(
-            () => this.sweepStaleUnhealthy(),
+            () => {
+                try {
+                    this.sweepStaleUnhealthy();
+                    this.evictionMonitor.recordSuccess();
+                } catch (err) {
+                    this.evictionMonitor.recordFailure(err);
+                }
+            },
             this.evictionIntervalMs
         );
     }

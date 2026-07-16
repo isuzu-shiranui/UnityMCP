@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1] - 2026-07-16
+
+### Fixed
+- Removed `System.Private.CoreLib.dll` and `System.Runtime.Loader.dll` from `Editor/Plugins/` — they conflicted with Unity's Mono runtime and broke Scene view left-click drag (#14, thanks @pandrabox)
+- MCP server no longer starts in AssetImportWorker / batchmode processes, which raced the main Editor for the HTTP port and caused `SocketException` (#13, thanks @Lasagnoa)
+
+---
+
 ## [2.1.0] - 2026-04-24
 
 ### Added
