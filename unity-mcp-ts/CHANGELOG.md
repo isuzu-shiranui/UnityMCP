@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1] - 2026-07-16
+
+### Added
+- Task-resilience for background tasks (#9): UDP listener restarts use exponential backoff (5s→60s, reset on successful bind); health-poll/eviction ticks emit rate-limited degradation warnings after 3 consecutive failures; repeated uncaughtException/unhandledRejection (5+ in 60s) log a "consider restarting" warning
+
+---
+
 ## [2.1.0] - 2026-04-24
 
 ### Added
