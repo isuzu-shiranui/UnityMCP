@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { InstanceDescriptor, readDescriptors } from './core/InstanceDescriptors.js';
 import { buildToolArguments, parseArgs } from './core/CliArgs.js';
+import {
+    installSkill,
+    mcpClientTargets,
+    removeMcpClientConfig,
+    removeState,
+    serverEntryPoint,
+    stateInventory,
+    writeMcpClientConfig,
+} from './core/Housekeeping.js';
 
 /**
  * Terminal front end for a running Unity Editor.
@@ -26,6 +35,10 @@ COMMANDS
   jobs [id]                      List background jobs, or show one
   serve                          Run the MCP server on stdio (for MCP clients)
 
+  setup                          Register with an MCP client and install the skill
+  doctor                         Show what is installed, where, and what is stale
+  uninstall                      Remove everything this tool put on the machine
+
 CALL ARGUMENTS
   --json '<object>'              Arguments as one JSON object
   --<name> <value>               Individual argument; repeatable
@@ -37,13 +50,20 @@ OPTIONS
   --raw                          Print the response envelope instead of just the result
   -h, --help                     Show this help
 
+SETUP / UNINSTALL OPTIONS
+  --client <name>                Which MCP client to register with (see: unity-mcp doctor)
+  --no-skill                     Do not install or remove the Claude Code skill
+  --yes                          Actually remove, rather than listing what would be removed
+
 EXAMPLES
+  unity-mcp setup
   unity-mcp projects
   unity-mcp tools
   unity-mcp call play_mode_status
   unity-mcp call console_read_logs --type error --limit 20
   unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
   unity-mcp call execute_code --file snippet.cs
+  unity-mcp uninstall --yes
 `;
 
 /** Picks the Editor to talk to, failing with something actionable when it cannot. */
@@ -132,6 +152,126 @@ function report(envelope: any, raw: boolean): boolean {
     return true;
 }
 
+async function runSetup(parsed: ReturnType<typeof parseArgs>): Promise<number> {
+    const targets = mcpClientTargets();
+    const requested = parsed.options.get('client');
+
+    const chosen = requested
+        ? targets.filter(t => t.name === requested)
+        // Default to configs that already exist: writing a brand-new config file for a client
+        // the user does not have installed would be litter, which is the opposite of the point.
+        : targets.filter(t => t.exists);
+
+    if (chosen.length === 0) {
+        console.error(
+            requested
+                ? `Unknown client '${requested}'. Known: ${targets.map(t => t.name).join(', ')}`
+                : 'No MCP client config found. Pass --client <name> to create one: ' +
+                  targets.map(t => t.name).join(', ')
+        );
+        return 1;
+    }
+
+    for (const target of chosen) {
+        await writeMcpClientConfig(target.configPath);
+        console.log(`registered with ${target.name}: ${target.configPath}`);
+    }
+
+    if (!parsed.flags.has('no-skill')) {
+        try {
+            console.log(`installed skill: ${await installSkill()}`);
+        } catch (err) {
+            console.error(`could not install the skill: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    console.log('\nRestart the MCP client so it picks up the new server.');
+    return 0;
+}
+
+async function runDoctor(): Promise<number> {
+    console.log(`server entry point: ${serverEntryPoint()}`);
+    console.log(`node:               ${process.execPath}\n`);
+
+    console.log('MCP clients');
+    for (const target of mcpClientTargets()) {
+        console.log(`  ${target.exists ? '[found]  ' : '[absent] '}${target.name.padEnd(15)} ${target.configPath}`);
+    }
+
+    console.log('\nOn disk');
+    for (const item of await stateInventory()) {
+        const mark = item.exists ? '[exists] ' : '[absent] ';
+        const detail = item.detail ? ` (${item.detail})` : '';
+        console.log(`  ${mark}${item.kind.padEnd(28)} ${item.path}${detail}`);
+    }
+
+    console.log('\nRunning Editors');
+    const descriptors = await readDescriptors();
+
+    if (descriptors.length === 0) {
+        console.log('  none');
+    } else {
+        for (const descriptor of descriptors) {
+            console.log(`  ${descriptor.projectName} (${descriptor.unityVersion}) ${descriptor.endpoint} pid ${descriptor.pid}`);
+        }
+    }
+
+    return 0;
+}
+
+async function runUninstall(parsed: ReturnType<typeof parseArgs>): Promise<number> {
+    const includeSkill = !parsed.flags.has('no-skill');
+
+    if (!parsed.flags.has('yes')) {
+        // Listing before removing, by default: the alternative is a command that deletes
+        // things the user has not seen named.
+        console.log('Would remove:\n');
+
+        for (const item of await stateInventory()) {
+            if (!item.exists) {
+                continue;
+            }
+
+            if (item.kind === 'Claude Code skill' && !includeSkill) {
+                continue;
+            }
+
+            // Descriptor and cache directories live under a state root that is removed whole.
+            if (item.kind.startsWith('state root') || item.kind.startsWith('legacy') || item.kind === 'Claude Code skill') {
+                console.log(`  ${item.path}`);
+            }
+        }
+
+        for (const target of mcpClientTargets().filter(t => t.exists)) {
+            console.log(`  the unity-mcp entry in ${target.configPath}`);
+        }
+
+        console.log('\nRe-run with --yes to remove them.');
+        return 0;
+    }
+
+    let failed = false;
+
+    for (const target of mcpClientTargets().filter(t => t.exists)) {
+        const result = await removeMcpClientConfig(target.configPath);
+        console.log(result.removed
+            ? `removed entry from ${result.path}`
+            : `skipped ${result.path} (${result.reason})`);
+    }
+
+    for (const result of await removeState({ includeSkill })) {
+        if (result.removed) {
+            console.log(`removed ${result.path}`);
+        } else if (result.reason !== 'not present') {
+            console.error(`could not remove ${result.path}: ${result.reason}`);
+            failed = true;
+        }
+    }
+
+    console.log('\nThe Unity package itself is removed through the Package Manager.');
+    return failed ? 1 : 0;
+}
+
 async function main(): Promise<number> {
     const parsed = parseArgs(process.argv.slice(2));
 
@@ -148,6 +288,20 @@ async function main(): Promise<number> {
 
     const raw = parsed.flags.has('raw');
     const project = parsed.options.get('project');
+
+    // Housekeeping commands work with no Editor running, so they are handled before any
+    // attempt to resolve one.
+    if (parsed.command === 'setup') {
+        return runSetup(parsed);
+    }
+
+    if (parsed.command === 'doctor') {
+        return runDoctor();
+    }
+
+    if (parsed.command === 'uninstall') {
+        return runUninstall(parsed);
+    }
 
     if (parsed.command === 'projects') {
         const descriptors = await readDescriptors();

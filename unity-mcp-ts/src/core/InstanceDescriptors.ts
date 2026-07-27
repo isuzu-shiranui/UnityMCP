@@ -1,6 +1,9 @@
 import { promises as fs } from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+
+import { descriptorDirectories } from './StatePaths.js';
+
+export { descriptorDirectories };
 
 /**
  * A running Editor as published by `McpInstanceDescriptor` on the C# side.
@@ -14,32 +17,6 @@ export interface InstanceDescriptor {
     pid: number;
     protocolVersion: string;
     endpoint: string;
-}
-
-/**
- * Directories that may hold descriptors.
- *
- * The Editor writes to .NET's LocalApplicationData, which resolves differently per platform
- * and per runtime — and Mono has not always agreed with .NET about macOS. Rather than
- * reimplement that mapping and risk disagreeing with the writer, every plausible location is
- * scanned; a directory that does not exist costs one failed readdir.
- */
-export function descriptorDirectories(): string[] {
-    const candidates: string[] = [];
-    const home = os.homedir();
-
-    if (process.env.LOCALAPPDATA) {
-        candidates.push(path.join(process.env.LOCALAPPDATA, 'UnityMCP', 'instances'));
-    }
-
-    if (process.env.XDG_DATA_HOME) {
-        candidates.push(path.join(process.env.XDG_DATA_HOME, 'UnityMCP', 'instances'));
-    }
-
-    candidates.push(path.join(home, '.local', 'share', 'UnityMCP', 'instances'));
-    candidates.push(path.join(home, 'Library', 'Application Support', 'UnityMCP', 'instances'));
-
-    return Array.from(new Set(candidates));
 }
 
 /**

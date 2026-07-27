@@ -1,54 +1,57 @@
 # unity-mcp-ts
 
-TypeScript MCP server that bridges Claude (and other MCP clients) with one or more running Unity Editor instances via HTTP + UDP discovery.
+The MCP server and CLI for [UnityMCP](https://github.com/isuzu-shiranui/UnityMCP).
+
+This package deliberately knows nothing about individual tools. The Editor publishes them at
+`GET /tools` with a JSON Schema generated from its C# signatures, and this server forwards
+that catalog. Adding a tool is a change in the Unity package alone.
 
 ## Architecture
 
 ```
-MCP client (Claude)
-    │ stdio
-    ▼
-unity-mcp-ts (Node process)
-    ├── MCP tool handlers  (HandlerAdapter)
-    ├── UnityConnection    (HTTP fetch + retry)
-    │       ├── sendRequest(command, params)   → POST /command  (existing tools)
-    │       └── sendToEndpoint(path, body)     → POST <path>    (direct endpoints, e.g. /execute_code)
-    ├── ProjectRegistry    (UDP :27183 listener, instance state machine)
-    └── ProjectApi         (Express :27180, /projects + /proxy/:name/*)
-            │ HTTP
-            ▼
-    Unity Editor(s)        (McpHttpServer :27182–27199)
+MCP client (Claude)                        terminal / scripts
+        │ stdio                                    │
+        ▼                                          │
+  build/index.js                              build/cli.js
+  (MCP server)                                (unity-mcp)
+        │                                          │
+        │  read descriptor ────────────────────────┤
+        │  <port + token>                          │
+        ▼                                          ▼
+  Unity Editor  :27182-27199  (127.0.0.1 only, bearer auth)
 ```
 
-`UnityConnection.sendToEndpoint(path, body, opts)` is the transport for handlers that call non-`/command` endpoints directly (e.g. `unity_execute_code` uses it to POST to `/execute_code`). Custom handlers that extend `BaseCommandHandler` use `sendRequest`; handlers that need a direct path use `sendToEndpoint`.
+| Module | Role |
+|---|---|
+| `core/InstanceDescriptors.ts` | Finds running Editors by reading their descriptor files |
+| `core/ToolCatalogClient.ts` | Fetches `/tools`, caches it to disk |
+| `core/ToolRouter.ts` | Serves `tools/list` and `tools/call` |
+| `core/UnityConnection.ts` | HTTP transport, instance resolution, envelope unwrapping |
+| `core/ProjectRegistry.ts` | Descriptor sweep, health polling, instance state machine |
+| `core/ProjectApi.ts` | `/projects` and `/proxy/:name/*` for HTTP clients |
+| `core/CliArgs.ts` | CLI parsing, kept out of the entry point so it is testable |
 
 ## Requirements
 
-- Node.js 18 or later
-- A Unity project with the `jp.shiranui-isuzu.unity-mcp` package installed
+- Node.js 18 or newer
+- A Unity Editor running the `jp.shiranui-isuzu.unity-mcp` package
 
 ## Installation
 
 ```bash
 npm install
 npm run build
-```
-
-Or run directly in development mode (no build step):
-```bash
-npm run dev
+npm link     # provides unity-mcp and unity-mcp-server
 ```
 
 ## Usage
 
-### As MCP server (Claude Desktop / Claude Code)
-
-Add to your MCP client configuration:
+### As an MCP server
 
 ```json
 {
   "mcpServers": {
-    "unity": {
+    "unity-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/unity-mcp-ts/build/index.js"]
     }
@@ -56,140 +59,114 @@ Add to your MCP client configuration:
 }
 ```
 
-The server communicates via **stdio** with the MCP client. It discovers Unity Editor instances automatically via UDP broadcast (port 27183). No manual connection setup required.
+`unity-mcp serve` starts the same server, so one binary covers both roles.
 
-### As CLI proxy (curl)
+The Editor need not be running at startup. Until one appears the server answers `tools/list`
+from `~/.unity-mcp/tool-catalog.json`, then sends `tools/list_changed` once it has a live
+catalog. Clients ask for the tool list the moment they connect, which is routinely before any
+Editor is open; answering from the last known catalog beats answering "no tools".
 
-The server also exposes an HTTP `ProjectApi` on port 27180 (fallback 27180–27189):
+### As a CLI
 
 ```bash
-# List all running Unity instances
-curl -s http://127.0.0.1:27180/projects
+unity-mcp projects
+unity-mcp tools
+unity-mcp health
+unity-mcp jobs [id]
 
-# Proxy any Editor endpoint by project name
-curl -s http://127.0.0.1:27180/proxy/MyProject/health
-curl -s -X POST http://127.0.0.1:27180/proxy/MyProject/execute_code \
-  -H "Content-Type: application/json" \
-  -d '{"code":"return Application.version;"}'
+unity-mcp call <tool> --json '{"key":"value"}'
+unity-mcp call <tool> --name value --other 3
+unity-mcp call execute_code --file snippet.cs
+
+unity-mcp call <tool> --project MyGame   # when several Editors are open
+unity-mcp call <tool> --raw              # print the whole envelope
 ```
 
-## MCP Tools
+The CLI talks to the Editor directly rather than through this server, so it works with no MCP
+client running. Errors print to stderr and set a non-zero exit code.
 
-| Tool | Description |
+`--file` sends `execute_code` snippets base64-encoded. Passing C# through a shell and a JSON
+encoder loses the backslashes in its string literals, and the failure surfaces as a compile
+error in generated source the caller never sees.
+
+### As an HTTP proxy
+
+While the MCP server is running it exposes a small API for HTTP clients:
+
+```bash
+curl http://127.0.0.1:27180/projects
+curl -X POST http://127.0.0.1:27180/proxy/MyProject/tools/play_mode_status \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+The proxy supplies the bearer token, so requests through it need no credential handling. It
+only exists while an MCP client has this server running — for a standalone path, use the CLI.
+
+## Multi-instance behaviour
+
+Every Editor publishes its own descriptor. When more than one is running, a call must say
+which to use, either per call with `target` (MCP) / `--project` (CLI), or once with
+`unity_set_active_client`.
+
+Descriptors are checked for a live pid, so an Editor that crashed rather than quit cannot
+linger as a phantom instance. A withdrawn descriptor unregisters its instance immediately: a
+clean shutdown is a more definite signal than any health poll result.
+
+## Reload resilience
+
+A domain reload takes the Editor's HTTP server down for a few seconds. The instance moves to
+`reloading` rather than being dropped, requests retry within `MCP_RELOAD_RETRY_MAX_MS`, and
+the Editor keeps its descriptor and token across the reload so the reconnect needs no new
+credential.
+
+## Retry safety
+
+Each tool declares its own idempotency in the catalog, and only `safe` calls are retried after
+a post-handshake failure. Retrying an `unsafe` call could apply its side effect twice.
+
+## Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MCP_DESCRIPTOR_INTERVAL` | 2000 | Descriptor directory sweep interval (ms) |
+| `MCP_HEALTH_INTERVAL` | 10000 | `/health` poll interval (ms) |
+| `MCP_UNHEALTHY_COOLDOWN_MS` | 60000 | How long a `reloading` instance waits before it is called unhealthy |
+| `MCP_RELOAD_RETRY_MAX_MS` | 15000 | Retry budget while a reload is in flight (ms) |
+| `MCP_PROJECT_API_PORT` | 27180 | Preferred ProjectApi port |
+| `MCP_PROJECT_API_PORT_END` | 27189 | Last port ProjectApi will try |
+
+## Error codes
+
+| Code | Meaning |
 |---|---|
-| `unity_execute_code` | Execute C# code in the Editor main thread (built-in, no setup required) |
-| `unity_browse_hierarchy` | Query the scene hierarchy |
-| `unity_inspect` | Read or write component properties |
-| `unity_capture_screenshot` | Capture Game, Scene, or Editor panel (Windows-only for panels) |
-| `unity_read_logs` | Read console logs |
-| `unity_play_mode` | Control Play Mode |
-| `unity_command` | Execute menu items, console, or asset commands |
-| `unity_resource` | Get package or assembly info |
-| `unity_listClients` | List all registered Unity instances |
-| `unity_setActiveClient` | Set the active instance for subsequent tool calls |
-| `unity_getActiveClient` | Get the currently active instance |
-| `unity_connectToProject` | Register a Unity instance manually by port |
-
-All tools accept an optional `target` parameter (clientId or project name) to address a specific instance when multiple are registered.
-
-## MCP Prompts
-
-| Prompt | Description |
-|---|---|
-| `code_execute` | C# code templates for `unity_execute_code` — provides correct boilerplate for code execution requests |
-
-Prompts appear in the MCP client's prompt list (`prompts/list`) and can be fetched via `prompts/get`.
-
-## Multi-Instance Behavior
-
-When multiple Unity Editor instances are running:
-
-1. Each instance broadcasts a UDP announce packet on port 27183 every 30 seconds.
-2. The TS server receives these and maintains a `ProjectRegistry` with instance states: `healthy`, `reloading`, or `unhealthy`.
-3. Tool calls without a `target` parameter require an explicit active instance to be set (via `unity_setActiveClient`), or exactly one instance must be registered. Otherwise a `target_required` error is returned.
-
-Instance state transitions:
-- `healthy` → `reloading`: first poll failure (ECONNREFUSED) after recent contact
-- `reloading` → `unhealthy`: consecutive failures for longer than `MCP_UNHEALTHY_COOLDOWN_MS` (default 60s)
-- any → `healthy`: successful `/health` response or incoming UDP announce
-
-## Reload Resilience
-
-When Unity performs a domain reload (script edit, Play Mode entry with reload enabled), the HTTP listener goes offline briefly. The TS server:
-
-1. Detects ECONNREFUSED after recent successful contact → marks instance `reloading`
-2. Retries with exponential backoff for up to `MCP_RELOAD_RETRY_MAX_MS` (default 15000 ms)
-3. Automatically resumes when the Editor comes back online
-4. Reports retry progress via `console.error` (visible in MCP client logs)
-
-## Retry Safety (Idempotency)
-
-The server classifies each endpoint as Safe or Unsafe based on `handlers[].idempotency` from the Editor's `/health` response.
-
-- **Safe endpoints** (e.g. `/browse_hierarchy`, `/read_logs`): retried on all transient failures
-- **Unsafe endpoints** (e.g. `/execute_code`, `/play_mode:play`, `/play_mode:step`): only retried on TCP pre-handshake failures (`ECONNREFUSED`, `ENOTFOUND`, `UND_ERR_CONNECT_TIMEOUT`) to prevent double-execution. Handler names use `:` separators for per-action idempotency granularity (see `/health.handlers[]`)
-
-For the `/proxy/:name/*` passthrough, classification is based on the sub-path alone (no external header can upgrade idempotency).
-
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `MCP_RELOAD_RETRY_MAX_MS` | `15000` | Max retry duration (ms) during domain reload |
-| `MCP_UNHEALTHY_COOLDOWN_MS` | `60000` | Cooldown (ms) before reloading → unhealthy |
-| `MCP_PROJECT_API_PORT` | `27180` | ProjectApi start port (scans 27180–27189) |
-| `MCP_UDP_PORT` | `27183` | UDP announce listener port |
-| `MCP_HEALTH_INTERVAL` | `10000` | Health poll interval (ms) |
-
-## ProjectApi Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/projects` | GET | List all registered Unity instances |
-| `/projects/:name` | GET | Get a single instance by partial name match |
-| `/proxy/:name/*` | ANY | Transparent passthrough to the named Unity instance |
-
-### Proxy details
-
-- Body buffered up to **10 MB** (413 if exceeded)
-- Hop-by-hop headers stripped; `Host` rewritten to Unity's address
-- Retry logic applies (see idempotency above)
-- Sub-path idempotency: `/health`, `/read_logs`, `/browse_hierarchy`, `/capture_screenshot`, `/resource` are Safe; all others are Unsafe
-
-## Error Codes
-
-| Code | HTTP | Meaning |
-|---|---|---|
-| `no_instance` | 503 | No Unity instances registered |
-| `unhealthy` | 503 | Target instance is unhealthy |
-| `target_not_found` | 404 | `target` matched no instances |
-| `target_required` | 400 | Multiple instances, no target specified |
-| `multiple_matches` | 409 | Ambiguous project name in proxy path |
-| `body_too_large` | 413 | Proxy body > 10 MB |
+| `no_instance` | No Editor is registered |
+| `target_required` | Several Editors are registered and none was chosen |
+| `target_not_found` | No Editor matches the given target |
+| `unauthorized` | Missing or wrong bearer token |
+| `tool_not_found` | No such tool; `GET /tools` lists them |
+| `invalid_params` | Arguments failed to bind, or a value was rejected |
+| `confirmation_required` | A destructive tool was called without `confirm: true` |
+| `timeout` | The retry budget ran out |
 
 ## Development
 
 ```bash
-# Run tests
-npm test
-
-# Lint
-npm run lint
-npm run lint:fix
-
-# Build
-npm run build
+npm test          # jest
+npx tsc --noEmit  # types
+npm run lint      # eslint
+npm run build     # tsc
 ```
 
-## Migration from v2.0 → v2.1
+CI runs all four on every pull request, and additionally checks that the two packages agree on
+their version and that the protocol version the Editor advertises matches its package.
 
-- **`unity_execute_code`** is now a built-in MCP tool. If you imported `UnityMCPHandlerSamplesJS` for code execution, remove it.
-- **`code_execute`** MCP prompt is now built-in. Same action: remove any JS sample that provided it.
-- No breaking API changes for v2.0 consumers.
+## Migrating from v2
 
-## Migration from v1.x
+The handler system is gone: `src/handlers/`, `HandlerAdapter`, `HandlerDiscovery`, the
+registries and the `Base*Handler` classes were all a second copy of definitions the Editor
+already owned, and the two drifted. If you had written a TypeScript handler, rewrite it as an
+`[McpTool]` method in C#; it will then be reachable from MCP clients and the CLI alike.
 
-- All responses now use `{"status":"success","result":{...}}` envelope. Parse `.result` instead of the top level.
-- `autoRestartOnPlayModeChange` removed — no server restarts on PlayMode transitions.
-- Auto-active instance on register removed — multi-instance users must call `unity_setActiveClient` or pass `target`.
-- ProjectApi port may now be on 27180–27189 (previously fixed 27180).
+MCP resources are withdrawn. Their TypeScript implementations posted to an endpoint the Editor
+never registered, so they had never worked; `project_assemblies` and `project_packages` cover
+the same ground as tools.

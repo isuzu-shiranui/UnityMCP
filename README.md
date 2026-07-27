@@ -1,70 +1,68 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-2.1.0-brightgreen)
-![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6.1-black.svg)
+![Version](https://img.shields.io/badge/version-3.0.0-brightgreen)
+![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
 
 [English Version](./README.en.md)
 
-Unity Editor と Model Context Protocol (MCP) を統合する拡張フレームワークです。Claude などの AI 言語モデル、または CLI (curl) から、HTTP 経由で Unity Editor を直接操作できます。
+Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに、CLI 経由で人間とスクリプトに開放するフレームワークです。
 
-## 🌟 特徴 (v2.1)
+## 🌟 v3 の特徴
 
-- **HTTP + UDP アーキテクチャ**: 各 Unity Editor が HTTP サーバを持ち、UDP ブロードキャストで自動 discovery
-- **MCP と HTTP の両方をサポート**: Claude Desktop / Claude Code からは MCP tool 経由、スクリプト / CI からは curl 直叩き
-- **マルチ Editor 対応**: 複数 Unity Editor を同時起動しても `target` パラメータ or プロキシで名前指定ルーティング
-- **ドメインリロード耐性**: `SessionState` で port を永続化し、リロード跨ぎで同 port を自動再バインド
-- **Editor パネルキャプチャ** *(Windows)*: Inspector / Hierarchy / Project / Console などの任意 EditorWindow をスクリーンショット
-- **built-in コード実行**: HTTP `/execute_code` と MCP tool `unity_execute_code` が標準装備 (Roslyn 使用)
-- **拡張可能なプラグインアーキテクチャ**: `IMcpCommandHandler` / `IMcpResourceHandler` / `BasePromptHandler` を実装すればリフレクションで自動登録
-- **統一レスポンスエンベロープ**: `{status, result?, error?, truncated?, next?}` で成功/エラー/ページングを一貫した形で返す
-- **コンテキスト経済**: `limit` / `offset` / `fields` / `detail` パラメータでレスポンスを絞り込み可能
-- **冪等性分類**: `Safe` / `Unsafe` を per-action で宣言し、TS 側が `err.cause.code` を見て再送可否を制御 (副作用操作の二重実行を構造的に排除)
+- **ツール定義は Editor 側の1箇所だけ** — C# の static メソッドに `[McpTool]` を付けると、シグネチャから JSON Schema が生成され `GET /tools` で配信されます。TypeScript 側にツール定義はありません。
+- **CLI が MCP から独立** — `unity-mcp` コマンドは Editor が公開する descriptor ファイルを読んで直接接続します。MCP クライアントを起動しておく必要はありません。
+- **メインスレッドが詰まっても応答する** — `MainThread = false` を宣言したツールと `/health` `/jobs` `/tools` はワーカースレッドで応答します。Editor が「Hold on」で固まっている最中こそ状態を知りたいので。
+- **遅い処理はジョブになる** — 数秒で終わらない呼び出しは job ID を返します。タイムアウトを返しつつ裏で実行を続ける、ということはありません。
+- **認証必須** — 全リクエストに bearer token が要ります。ローカルバインドはアクセス制御ではありません。
 
 ## 📋 必要条件
 
-- Unity 2022.3 以上 (Unity 6000 系対応)
-  - 2022.3.22f1、2023.2.19f1、6000.0.35f1、6000.1.17f1 で動作確認
-- .NET / C# 9.0
-- Node.js 18.0.0 以上 (TypeScript MCP サーバ用)
-  - [Node.js 公式サイト](https://nodejs.org/) から入手
+- Unity Editor 2022.3 以降（Unity 6 で検証）
+- Node.js 18 以降
+- `com.unity.nuget.newtonsoft-json` 3.2.1（依存として自動解決されます）
 
 ## 🚀 はじめに
 
-### インストール方法
+### インストール
 
-Unity パッケージマネージャからインストール:
+Unity の Package Manager で **Add package from git URL**:
 
-1. Window > Package Manager を開く
-2. 「+」 → 「Add package from git URL...」
-3. `https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp` を入力
+```
+https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp
+```
 
-### クイックセットアップ
+MCP サーバ / CLI:
 
-1. Unity Editor を起動すると、`McpEditorInitializer` が自動的に HTTP サーバを立ち上げます (127.0.0.1:27182、27182-27199 でフォールバック)
-2. Edit > Preferences > Unity MCP で設定を確認
-3. `curl http://127.0.0.1:27182/health` で動作確認
+```bash
+cd unity-mcp-ts
+npm install
+npm run build
+npm link          # unity-mcp / unity-mcp-server コマンドを使う場合
+
+unity-mcp setup   # MCP クライアントへの登録と Claude Code スキルの導入
+```
+
+`setup` は既に存在する MCP クライアント設定だけを更新します（使っていないクライアントの設定ファイルを新規に作ったりはしません）。設定ファイル内の他のサーバやキーはそのまま残ります。
+
+```bash
+unity-mcp doctor      # 何がどこに入っているか、古いものが残っていないか
+unity-mcp uninstall   # 何を消すかを一覧表示（--yes で実行）
+```
+
+### 動作確認
+
+Editor がプロジェクトを開くとサーバが起動し、descriptor ファイルを公開します。
+
+```bash
+unity-mcp projects   # 起動中の Editor 一覧
+unity-mcp health     # サーバの状態
+unity-mcp tools      # 利用可能なツール
+```
 
 ### Claude Desktop / Claude Code との連携
-
-#### インストーラーを使う場合
-
-1. Unity Editor で Edit > Preferences > Unity MCP を開く
-2. 「Open Installer Window」をクリック
-3. インストーラーの指示に従い、Node.js の存在確認後、TypeScript クライアントをダウンロード
-4. 「Configuration Preview」セクションの JSON をクリップボードへコピー
-5. Claude Desktop の Settings > Developer > Edit Config で貼り付けて保存
-6. Claude Desktop を再起動
-
-> 💡 **macOS 利用者へ**: v2.1 で Homebrew 経由の Node (`/opt/homebrew/bin/node`、`/usr/local/bin/node`) の検出に対応しました。Finder から起動した Unity が PATH を継承しない環境でも動作します (#7)。
-
-#### 手動でインストールする場合
-
-1. `unity-mcp-ts` リポジトリをクローン or リリース ZIP を取得
-2. `npm install && npm run build` を実行して `build/index.js` を生成
-3. Claude Desktop の `claude_desktop_config.json` に追加:
 
 ```json
 {
@@ -77,256 +75,224 @@ Unity パッケージマネージャからインストール:
 }
 ```
 
-Windows ではパスのバックスラッシュをエスケープ (`\\`) するか、フォワードスラッシュを使ってください。
+Editor を先に起動しておく必要はありません。起動していない間、MCP サーバは前回のツールカタログをキャッシュから返し、Editor が現れたら `tools/list_changed` を送ります。
 
-### CLI (curl) でも使える
-
-TypeScript サーバ不要で、HTTP 直叩きから操作可能:
+### CLI
 
 ```bash
-# ヘルスチェック
-curl http://127.0.0.1:27182/health
+unity-mcp call play_mode_status
+unity-mcp call console_read_logs --type error --limit 20
+unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
 
-# C# コード実行
-curl -X POST http://127.0.0.1:27182/execute_code \
-  -H "Content-Type: application/json" \
-  -d '{"code":"return GameObject.FindObjectsByType<Transform>(FindObjectsSortMode.None).Length;"}'
+# C# スニペットはファイルから渡すのが安全（base64 で送られます）
+unity-mcp call execute_code --file snippet.cs
 
-# Inspector のスクショ (Windows)
-curl -X POST http://127.0.0.1:27182/capture_screenshot \
-  -H "Content-Type: application/json" \
-  -d '{"view":"inspector","maxSize":1024}'
+# Editor が複数起動しているとき
+unity-mcp call play_mode_status --project MyGame
 ```
 
-マルチ Editor 用にプロキシ経由の例:
+エラーは stderr に出て終了コードが非ゼロになるので、そのままスクリプトに組み込めます。
 
-```bash
-# 複数 Unity が起動中なら TS サーバの :27180 で discover
-curl http://127.0.0.1:27180/projects
+> **`--file` を使う理由**: C# のスニペットをシェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。結果は「呼び出し側に見えない生成ソース中のコンパイルエラー」になり、原因の特定が非常に困難です。ファイルから読めばそのどちらも経由しません。
 
-# プロジェクト名指定でリクエスト転送
-curl -X POST http://127.0.0.1:27180/proxy/MyProject/health
-```
-
-Skill として `~/.claude/skills/unity-mcp/` に curl ワークフロー集を同梱しています。
-
-## 🔌 アーキテクチャ (v2.1)
+## 🔌 アーキテクチャ
 
 ```
-MCP client (Claude)
-    │ stdio (MCP protocol)
-    ▼
-unity-mcp-ts (Node)
-    ├── HandlerAdapter / HandlerDiscovery  (MCP tools / prompts / resources)
-    ├── UnityConnection                     (HTTP fetch + retryableFetch)
-    │       ├── sendRequest(cmd, params)    → POST /command
-    │       └── sendToEndpoint(path, body)  → POST <path>  (e.g. /execute_code)
-    ├── ProjectRegistry                     (UDP :27183, state machine)
-    └── ProjectApi :27180-27189             (/projects, /proxy/:name/*)
-            │ HTTP
-            ▼
-Unity Editor(s) — McpHttpServer :27182-27199
-    ├── HttpListener + main-thread execution queue
-    ├── Built-in shortcuts + plugin handlers
-    └── UDP broadcast (27183) every 30s
+MCP クライアント (Claude)                  ターミナル / スクリプト
+        │ stdio                                    │
+        ▼                                          │
+  unity-mcp-server                            unity-mcp (CLI)
+        │                                          │
+        │  descriptor を読む ──────────────────────┤
+        │  <ポート + トークン>                      │
+        ▼                                          ▼
+  Unity Editor  :27182-27199  (HttpListener, 127.0.0.1 のみ)
+        │
+        ├── GET  /tools              属性から生成したツールカタログ
+        ├── POST /tools/<name>       ツール実行
+        ├── GET  /health             状態・キュー深さ・実行中ジョブ数
+        ├── GET  /jobs, /jobs/<id>   長時間処理の追跡
+        └── POST /jobs/<id>/cancel   未開始のジョブを中止
 ```
 
-### Unity C# プラグイン
+### Editor 側 (C#)
 
-- **McpHttpServer**: HTTP リスナー + UDP ブロードキャスタ + メインスレッド実行キュー
-- **IMcpCommandHandler** / **IMcpResourceHandler**: プラグイン拡張用インターフェース (Idempotency 付き)
-- **McpIdempotency**: `Safe` / `Unsafe` enum
-- **ListResponseBuilder**: `limit` / `offset` / `fields` を処理する共通ユーティリティ
-- **McpEditorInitializer**: `InitializeOnLoad` + `AssemblyReloadEvents` で SessionState 経由 port 復元
-- **McpHandlerDiscovery**: リフレクションでハンドラー自動登録
+`ToolCatalog` が `[McpTool]` の付いた static メソッドをリフレクションで収集し、シグネチャから JSON Schema を作ります。`ToolInvoker` が JSON 引数を型付きパラメータに束縛し、`confirm` / `dry_run` ゲートと Undo グルーピングを適用します。
 
-### TypeScript MCP サーバ
+`McpMainThreadDispatcher` がワーカースレッドから Editor メインスレッドへ処理を渡します。キューからの取り出しだけロックし実行はロック外で行うので、遅い処理が他のリクエストの受付を止めません。開始前のジョブは確実に中止できます。
 
-- **HandlerAdapter**: MCP SDK に tools / prompts / resources を登録
-- **HandlerDiscovery**: `src/handlers/` を走査して `ICommandHandler` / `IPromptHandler` / `IResourceHandler` を自動登録
-- **UnityConnection**: HTTP クライアント (retry + idempotency + target 解決)
-- **ProjectRegistry**: UDP 受信 + 3 値ステートマシン (healthy / reloading / unhealthy)
-- **ProjectApi**: 27180-27189 の `/projects` + `/proxy/:name/*`
-- **retryableFetch**: `err.cause.code` ベースで Unsafe は pre-handshake のみリトライ
+### MCP サーバ側 (TypeScript)
 
-## 📄 MCP ハンドラータイプ
+`ToolCatalogClient` が `/tools` を取得し、`ToolRouter` がそれを `tools/list` / `tools/call` として配ります。低レベルのリクエストハンドラを使っているので、**Editor が生成した JSON Schema がそのままクライアントに届きます**。
 
-| 種別 | 用途 | MCP 制御 | 実装インターフェース |
-|---|---|---|---|
-| Tools (Command) | アクション実行 | モデル制御 | `IMcpCommandHandler` (C#) / `BaseCommandHandler` (TS) |
-| Resources | データ提供 | アプリ制御 | `IMcpResourceHandler` (C#) / `BaseResourceHandler` (TS) |
-| Prompts | テンプレ / ワークフロー | ユーザ制御 | `BasePromptHandler` (TS のみ) |
+## 📚 組み込みツール
 
-## 📚 組み込みハンドラー
+### Editor が公開するもの（22個）
 
-### HTTP エンドポイント (Editor 側、built-in)
-
-| Endpoint | Idempotency | 概要 |
+| ツール | 冪等性 | 用途 |
 |---|---|---|
-| `GET /health` | Safe | バージョン、ハンドラー一覧、稼働時間 |
-| `POST /execute_code` | Unsafe | Roslyn で C# を動的コンパイル・実行 |
-| `POST /browse_hierarchy` | Safe | シーン階層をフィルタ付きで取得 (limit/offset/fields 対応) |
-| `POST /inspect` | read/list: Safe、write: Unsafe | GameObject / Component のプロパティ読み書き |
-| `POST /capture_screenshot` | Safe | Game / Scene / Editor パネル (inspector / hierarchy / project / console / `window:<title>`) のキャプチャ |
-| `POST /read_logs` | Safe | Console ログを取得 (limit/offset/fields/type) |
-| `POST /play_mode` | status: Safe、他: Unsafe | Play Mode 制御 (status/play/stop/pause/unpause/step) |
-| `GET /resource` | Safe | assemblies / packages 情報 |
-| `POST /command` | per-command | プラグイン系 (`menu.execute`、`console.*`) |
+| `execute_code` | unsafe | C# スニペットのコンパイル・実行 |
+| `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
+| `compile_request` | unsafe | 再コンパイルを要求 |
+| `console_read_logs` | safe | コンソールのエントリを読む |
+| `console_get_count` | safe | エラー / 警告 / ログの件数 |
+| `console_clear` | unsafe | コンソールをクリア |
+| `console_set_filter` | unsafe | コンソールの検索フィルタ |
+| `editor_log_tail` | safe | `Editor.log` を直接読む（**Editor が固まっていても動く**） |
+| `scene_browse_hierarchy` | safe | シーン階層の走査 |
+| `inspect_read` / `inspect_list` | safe | シリアライズプロパティの読み取り・一覧 |
+| `inspect_write` | unsafe | シリアライズプロパティの書き込み（Undo 1操作にまとまる） |
+| `play_mode_status` | safe | 再生中 / 一時停止中 / コンパイル中 |
+| `play_mode_play` / `_stop` / `_pause` / `_unpause` / `_step` | unsafe | Play mode 制御 |
+| `capture_screenshot` | safe | Game / Scene ビューや Editor パネルの画像 |
+| `menu_execute` | unsafe | メニュー項目の実行 |
+| `project_assemblies` | safe | ロード済みアセンブリ一覧 |
+| `project_packages` | safe | UPM パッケージ一覧 |
 
-### MCP tools (TS 側、built-in)
+Editor パネルのキャプチャ（`inspector` / `hierarchy` / `project` / `console` / `window:<title>`）は Windows 限定です。`game` と `scene` は全プラットフォームで動きます。
 
-`unity_listClients`、`unity_setActiveClient`、`unity_connectToProject`、`unity_getActiveClient`、`unity_execute_code`、`console_getLogs`、`console_getCount`、`console_clear`、`console_setFilter`、`menu_execute`
+### MCP サーバが提供するもの（3個）
 
-### MCP prompts (TS 側、built-in)
+`unity_list_clients` / `unity_set_active_client` / `unity_get_active_client` — 複数 Editor の選択。どの Editor 単体にも答えられない問いなので、ここに残っています。
 
-- `code_execute`: `unity_execute_code` 用の C# コードテンプレート
+### プロンプト
 
-すべての tool / endpoint は任意で `target` パラメータ (projectName or clientId) を受け、複数 Editor 環境でルーティングを明示できます。
+`code_execute` — `execute_code` に渡す C# の書き方。
 
-## 🛠️ カスタムハンドラーの作成
+## 🛠️ ツールの追加
 
-### コマンドハンドラー (C#)
+**Editor 側にメソッドを1つ書くだけです。** TypeScript 側の作業はありません。
 
 ```csharp
-using Newtonsoft.Json.Linq;
+using System.Linq;
 using UnityMCP.Editor.Core;
+using UnityMCP.Editor.Core.Attributes;
 
-namespace YourNamespace.Handlers
+internal static class MyTools
 {
-    internal sealed class YourCommandHandler : IMcpCommandHandler
+    [McpTool(
+        "asset_find_by_type",
+        "Find project assets of a given type. Prefer a narrow type and a small limit: " +
+        "a full asset list is large and rarely relevant to one question.",
+        Idempotency = McpIdempotency.Safe)]
+    public static string[] FindByType(
+        [McpArg("type", "Unity type name, e.g. Material.")] string type,
+        [McpArg("limit", "Maximum paths to return.")] int limit = 50)
     {
-        public string CommandPrefix => "yourprefix";
-        public string Description => "ハンドラーの説明";
-        public McpIdempotency Idempotency => McpIdempotency.Safe; // Unsafe なら明示
-
-        public JObject Execute(string action, JObject parameters)
-        {
-            if (action == "yourAction")
-            {
-                return new JObject { ["result"] = "..." };
-            }
-            // エンベロープ側で自動的に error envelope に promote される
-            return new JObject { ["error"] = $"Unknown action: {action}" };
-        }
+        return UnityEditor.AssetDatabase.FindAssets($"t:{type}")
+            .Take(limit)
+            .Select(UnityEditor.AssetDatabase.GUIDToAssetPath)
+            .ToArray();
     }
 }
 ```
 
-### コマンドハンドラー (TypeScript)
+これだけで `/tools` に現れ、MCP クライアントと CLI の両方から呼べます。JSON Schema はシグネチャから生成されるので、書く場所は1箇所です。
 
-```typescript
-import { BaseCommandHandler } from "../core/BaseCommandHandler.js";
-import { IMcpToolDefinition } from "../core/interfaces/ICommandHandler.js";
-import { JObject } from "../types/index.js";
-import { z } from "zod";
+`[McpTool]` の属性:
 
-export class YourCommandHandler extends BaseCommandHandler {
-    public get commandPrefix(): string { return "yourprefix"; }
-    public get description(): string { return "ハンドラーの説明"; }
+| プロパティ | 既定値 | 意味 |
+|---|---|---|
+| `Idempotency` | `Unsafe` | 接続失敗時に自動リトライしてよいか。読み取り専用なら `Safe` |
+| `MainThread` | `true` | Editor メインスレッドが必要か。`false` なら Editor が固まっていても応答できる（Unity API を触らないツール限定） |
+| `Destructive` | `false` | `true` なら `confirm: true` が無いと実行せず、`dry_run` に対応 |
+| `UndoGroup` | `null` | 設定すると呼び出し1回が Undo 1操作にまとまる |
 
-    public getToolDefinitions(): Map<string, IMcpToolDefinition> {
-        const tools = new Map();
-        tools.set("yourprefix_yourAction", {
-            description: "アクションの説明",
-            parameterSchema: { param1: z.string() }
-        });
-        return tools;
-    }
+ツール名は `^[a-z][a-z0-9_]{0,63}$`（MCP のツール名にドットは使えません）。
 
-    protected async executeCommand(action: string, parameters: JObject): Promise<JObject> {
-        return this.sendUnityRequest(`${this.commandPrefix}.${action}`, parameters);
-    }
-}
-```
-
-### プロンプトハンドラー (TypeScript)
-
-```typescript
-import { BasePromptHandler } from "../core/BasePromptHandler.js";
-import { IMcpPromptDefinition } from "../core/interfaces/IPromptHandler.js";
-
-export class YourPromptHandler extends BasePromptHandler {
-    public get promptName(): string { return "yourprompt"; }
-    public get description(): string { return "プロンプトの説明"; }
-
-    public getPromptDefinitions(): Map<string, IMcpPromptDefinition> {
-        const prompts = new Map();
-        prompts.set("your-template", {
-            description: "テンプレートの説明",
-            template: "以下のコードを分析してください:\n{code}"
-        });
-        return prompts;
-    }
-}
-```
-
-> 💡 C# ハンドラーはプロジェクト内のどこに置いても `McpHandlerDiscovery` が自動検出します。TS は `unity-mcp-ts/src/handlers/` に置けば `HandlerDiscovery` が自動登録します。
+**説明文はモデルがそのツールを選ぶ唯一の手がかりです。** 何をするかだけでなく、どういうときに使うかを書いてください。
 
 ## ⚙️ 設定
 
-### Unity Editor 設定
+### Unity Editor (Preferences → Unity MCP)
 
-Edit > Preferences > Unity MCP:
-
-- **HTTP Port**: サーバ開始ポート (既定 27182、27182-27199 で先着フォールバック)
-- **Auto-start on Launch**: Editor 起動時に自動開始
-- **UDP Discovery**: UDP ブロードキャスト (ポート 27183、既定 30 秒間隔) の有効化
-- **Broadcast Interval**: UDP 送信間隔
-- **Port Persistence**: ドメインリロード跨ぎで同じ port を維持
-- **Reload Retry Max MS**: TS/CLI 側のリトライ上限のヒント
-- **Detailed Logs**: デバッグログの出力切替
-- **Handler / Resource Enabled States**: ハンドラーごとの有効化トグル
-
-> ⚠️ v2.1 で **`Auto-restart on Play Mode Change` を削除**しました。Play Mode 遷移はドメインリロードを伴う場合のみ server を Stop/Start し、`AssemblyReloadEvents` 経由で自動復元します。
-
-### TypeScript サーバ環境変数
-
-| Variable | 既定 | 説明 |
+| 設定 | 既定値 | 意味 |
 |---|---|---|
-| `MCP_RELOAD_RETRY_MAX_MS` | 15000 | ドメインリロード中の再試行時間上限 (ms) |
-| `MCP_UNHEALTHY_COOLDOWN_MS` | 60000 | reloading → unhealthy への昇格までの猶予 |
-| `MCP_PROJECT_API_PORT` | 27180 | ProjectApi 開始ポート (27180-27189 フォールバック) |
-| `MCP_UDP_PORT` | 27183 | UDP announce 受信ポート |
-| `MCP_HEALTH_INTERVAL` | 10000 | ヘルスポーリング間隔 (ms) |
+| `httpPort` | 27182 | 開始ポート。使用中なら 27199 まで自動で繰り上がります |
+| `autoStartOnLaunch` | true | Editor 起動時にサーバを開始 |
+| `syncWaitMs` | 3000 | この時間を超えた処理は job ID を返します |
+| `detailedLogs` | true | リクエストログ |
+
+### MCP サーバ環境変数
+
+| 変数 | 既定値 | 意味 |
+|---|---|---|
+| `MCP_DESCRIPTOR_INTERVAL` | 2000 | descriptor ディレクトリの走査間隔 (ms) |
+| `MCP_HEALTH_INTERVAL` | 10000 | `/health` ポーリング間隔 (ms) |
+| `MCP_RELOAD_RETRY_MAX_MS` | 15000 | ドメインリロード中のリトライ上限 (ms) |
+| `MCP_PROJECT_API_PORT` | 27180 | ProjectApi のポート |
 
 ## 🧪 テスト
 
-- **Unity (EditMode)**: `Editor/Tests/` — 23 ケース (ListResponseBuilder / Envelope / Idempotency / ScreenshotCapture)
-- **TS (Jest)**: `unity-mcp-ts/src/__tests__/` — 68 ケース (UnityConnection / ProjectRegistry / ProjectApi / retry / cache)
-
 ```bash
-cd unity-mcp-ts
-npm test    # Jest 68/68 pass 期待
+# TypeScript
+cd unity-mcp-ts && npm test
+
+# Unity (ヘッドレス)
+Unity.exe -batchmode -nographics -projectPath <project> \
+  -runTests -testPlatform EditMode -testResults results.xml
 ```
+
+Unity 側のテストを走らせるには、プロジェクトの `Packages/manifest.json` に
+`"testables": ["jp.shiranui-isuzu.unity-mcp"]` が必要です。
 
 ## 🔍 トラブルシューティング
 
-| 症状 | 対応 |
-|---|---|
-| `/health` に接続できない | Unity Editor が起動しているか、MCP パッケージが import されているか、27182-27199 のいずれかが listen しているか確認 |
-| `target_required` エラー | 複数 Unity 起動中 + `target` 未指定。`unity_setActiveClient` か `target` パラメータで明示 |
-| ドメインリロード後に切れる | v2.1 では自動再バインド。`SessionState` が機能していない場合は Unity ログ確認 |
-| C# ハンドラーが登録されない | Editor アセンブリで internal/public、`IMcpCommandHandler` 実装、コンパイルエラー無しを確認 |
-| Node が検出されない (Mac) | v2.1 で Homebrew パスにフォールバック対応。最新版を利用 (#7) |
+**`unity-mcp projects` が何も返さない** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
 
-詳細なエラーコードは `unity-mcp-ts/README.md` または [Skill api-reference.md](~/.claude/skills/unity-mcp/references/api-reference.md) 参照。
+**401 が返る** — トークンは descriptor ファイルにあります。CLI と MCP サーバは自動で読みますが、curl で直接叩く場合は `Authorization: Bearer <token>` が要ります。`unity-mcp` 経由にするか、MCP サーバの `/proxy` を使えばトークンを意識せずに済みます。
+
+**ログが無いはずがないのに空** — `console_read_logs` は Editor コンソールの現在の内容を返します。取りこぼしが疑われるときは `editor_log_tail` でログファイルを直接読んでください。こちらは Editor がビジーでも動きます。
+
+**スクリプトを編集したのに反映されない** — `AssetDatabase.Refresh()` は必ずしも再コンパイルを起こしません。`compile_request` を使い、`compile_status` で `succeeded` を確認してください。コンパイルに失敗すると Editor は直前のアセンブリのまま `isCompiling` を false に戻すので、「静か」＝「成功」ではありません。
+
+**呼び出しが job ID を返した** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
 
 ## 🔒 セキュリティ
 
-- **`/execute_code` は任意の C# を実行できます**。不特定多数がアクセスできる環境では McpSettings から無効化するか、listener を loopback のみに制限してください (v2.x は既定で 127.0.0.1 のみ bind)。
-- **外部ネットワーク非公開**: HTTP/UDP すべて loopback 限定。LAN 公開はサポート外です。
+- サーバは `127.0.0.1` のみにバインドし、**全リクエストに bearer token を要求します**。
+- CORS ヘッダは送りません。v2 は `Access-Control-Allow-Origin: *` を返しており、ユーザーが開いている任意の Web ページが `/execute_code` に POST して Editor 内で任意の C# を実行できました。
+- **descriptor ファイルは資格情報として扱ってください。** 読める者は Editor 内でコードを実行できます。
+- `execute_code` と `menu_execute` は Editor の全権限で動きます。信頼できないコードを流さないでください。
 
-## 📖 外部リソース
+## 🧹 マシン上に置くもの
 
-- [Model Context Protocol (MCP) 仕様](https://modelcontextprotocol.io/introduction)
-- [unity-mcp-ts README](./unity-mcp-ts/README.md) (TS サーバ詳細)
-- [Unity パッケージ README](./jp.shiranui-isuzu.unity-mcp/README.md) (Editor 側詳細)
-- [CHANGELOG](./jp.shiranui-isuzu.unity-mcp/CHANGELOG.md)
+状態はすべて1つのルート配下にまとまっているので、消すときは1箇所で済みます。
+
+| パス | 中身 |
+|---|---|
+| `%LOCALAPPDATA%\UnityMCP\instances\` | 起動中 Editor の descriptor（ポートとトークン）。終了時に自分で削除し、起動時に pid 死亡分を掃除 |
+| `%LOCALAPPDATA%\UnityMCP\cache\` | ツールカタログのキャッシュ |
+| `~/.claude/skills/unity-mcp/` | Claude Code スキル（`setup` で導入） |
+| MCP クライアント設定の `unity-mcp` エントリ | `setup` で追加 |
+
+macOS / Linux では `%LOCALAPPDATA%` の位置が `~/.local/share` または `~/Library/Application Support` になります。`unity-mcp doctor` が実際の場所を表示します。
+
+```bash
+unity-mcp uninstall         # 消す対象を一覧表示するだけ
+unity-mcp uninstall --yes   # 実行
+```
+
+`uninstall` は MCP クライアント設定から `unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor をすぐ再作成してしまうので、その場合は実行を拒否して先に閉じるよう促します。Unity パッケージ本体の削除は Package Manager から行ってください。
+
+## 📖 v2 からの移行
+
+破壊的変更です。
+
+| v2 | v3 |
+|---|---|
+| `/command` の `console.getLogs` 等 | ツール `console_read_logs` 等 |
+| `unity_listClients` | `unity_list_clients` |
+| `/inspect`（`mode` 引数） | `inspect_read` / `inspect_list` / `inspect_write` |
+| `/play_mode`（`action` 引数） | `play_mode_status` / `_play` / `_stop` / … |
+| MCP resource `unity://assemblies` | ツール `project_assemblies` |
+| `unity_connectToProject` | `unity_set_active_client` |
+| UDP ブロードキャストによる発見 | descriptor ファイル |
+| 認証なし | bearer token 必須 |
+| TypeScript でハンドラを書く | C# に `[McpTool]` を書く |
+
+curl ベースの手順書は `unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付与します。
 
 ## 📄 ライセンス
 
-MIT License — 詳細はリポジトリのライセンスファイルを参照。
-
----
-
-Shiranui-Isuzu いすず
+MIT
