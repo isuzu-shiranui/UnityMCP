@@ -63,12 +63,12 @@ namespace UnityMCP.Editor.Installer
             EditorGUILayout.LabelField("Environment", EditorStyles.boldLabel);
 
             var hasNode = McpInstallHelper.IsNodeInstalled();
-            var npm = McpInstallHelper.ResolveNpmExecutable();
+            var npmCli = McpInstallHelper.ResolveNpmCliScript();
 
             EditorGUILayout.LabelField("Node.js", hasNode ? "found" : "not found");
-            EditorGUILayout.LabelField("npm", string.IsNullOrEmpty(npm) ? "not found" : npm);
+            EditorGUILayout.LabelField("npm", string.IsNullOrEmpty(npmCli) ? "not found" : npmCli);
 
-            if (!hasNode || string.IsNullOrEmpty(npm))
+            if (!hasNode || string.IsNullOrEmpty(npmCli))
             {
                 EditorGUILayout.HelpBox(
                     "Node.js 18 or newer is required. Install it, then restart the Editor so it " +

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace UnityMCP.Editor.Installer
@@ -54,59 +55,83 @@ namespace UnityMCP.Editor.Installer
         }
 
         /// <summary>
-        /// Resolves the executable to use for spawning npm, or an empty string when it cannot
-        /// be found.
+        /// Absolute path to npm's own entry script, or an empty string when it cannot be found.
         /// </summary>
         /// <remarks>
-        /// On Windows npm is a .cmd shim, which <c>Process.Start</c> will not launch without
-        /// the extension, so the name is resolved rather than assumed. Where node was found at
-        /// an absolute path — the macOS Homebrew case — npm is looked for beside it, since a
-        /// node that is not on PATH usually means npm is not either.
+        /// npm is driven as <c>node npm-cli.js</c> rather than through the <c>npm</c> command.
+        /// The Windows shim resolves npm's module directory relative to the working directory,
+        /// so spawning <c>npm.cmd</c> from an arbitrary folder starts and then exits 1 with
+        /// "Cannot find module ...\node_modules\npm\bin\npm-cli.js" — observed on a stock
+        /// Node 22 install. Going through node sidesteps the shim entirely, and works the same
+        /// on every platform.
         /// </remarks>
-        public static string ResolveNpmExecutable()
+        public static string ResolveNpmCliScript()
         {
-            if (!string.IsNullOrEmpty(resolvedNpmExecutable))
+            if (npmCliScriptResolved)
             {
-                return resolvedNpmExecutable;
+                return resolvedNpmCliScript;
             }
 
-            var node = ResolveNodeExecutableOrNull();
+            npmCliScriptResolved = true;
+            resolvedNpmCliScript = string.Empty;
 
-            if (!string.IsNullOrEmpty(node) && node != "node")
+            var nodeDirectory = ResolveNodeDirectory();
+
+            if (string.IsNullOrEmpty(nodeDirectory))
             {
-                var beside = Path.Combine(Path.GetDirectoryName(node) ?? string.Empty, "npm");
-                if (File.Exists(beside) && TryRunVersion(beside))
+                return resolvedNpmCliScript;
+            }
+
+            // Windows keeps npm beside node; the usual Unix layout puts it one level up in lib.
+            string[] candidates =
+            {
+                Path.Combine(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
+                Path.Combine(nodeDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+            };
+
+            foreach (var candidate in candidates)
+            {
+                var full = Path.GetFullPath(candidate);
+                if (File.Exists(full))
                 {
-                    resolvedNpmExecutable = beside;
-                    return resolvedNpmExecutable;
+                    resolvedNpmCliScript = full;
+                    return resolvedNpmCliScript;
                 }
             }
 
-            foreach (var candidate in Application.platform == RuntimePlatform.WindowsEditor
-                         ? new[] { "npm.cmd", "npm" }
-                         : new[] { "npm" })
-            {
-                if (TryRunVersion(candidate))
-                {
-                    resolvedNpmExecutable = candidate;
-                    return resolvedNpmExecutable;
-                }
-            }
-
-            return string.Empty;
+            return resolvedNpmCliScript;
         }
 
-        private static string resolvedNpmExecutable;
+        /// <summary>True when both node and npm's entry script were located.</summary>
+        public static bool IsNpmAvailable() => !string.IsNullOrEmpty(ResolveNpmCliScript());
 
-        /// <summary>Returns true when "&lt;exe&gt; --version" exits cleanly.</summary>
-        private static bool TryRunVersion(string exe)
+        private static string resolvedNpmCliScript;
+        private static bool npmCliScriptResolved;
+
+        /// <summary>
+        /// Directory holding the node executable, resolved through the OS when node was found
+        /// on PATH rather than at a known absolute location.
+        /// </summary>
+        private static string ResolveNodeDirectory()
         {
+            var node = ResolveNodeExecutableOrNull();
+
+            if (string.IsNullOrEmpty(node))
+            {
+                return string.Empty;
+            }
+
+            if (node != "node")
+            {
+                return Path.GetDirectoryName(node) ?? string.Empty;
+            }
+
             try
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = exe,
-                    Arguments = "--version",
+                    FileName = Application.platform == RuntimePlatform.WindowsEditor ? "where" : "which",
+                    Arguments = "node",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -116,16 +141,23 @@ namespace UnityMCP.Editor.Installer
                 using var process = Process.Start(psi);
                 if (process == null)
                 {
-                    return false;
+                    return string.Empty;
                 }
 
-                process.StandardOutput.ReadToEnd();
+                var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit(10000);
-                return process.HasExited && process.ExitCode == 0;
+
+                // `where` can report several matches; the first is the one PATH would pick.
+                var first = output
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault(line => line.Trim().Length > 0)
+                    ?.Trim();
+
+                return string.IsNullOrEmpty(first) ? string.Empty : Path.GetDirectoryName(first) ?? string.Empty;
             }
             catch
             {
-                return false;
+                return string.Empty;
             }
         }
 

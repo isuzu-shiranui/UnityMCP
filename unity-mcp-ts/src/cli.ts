@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { InstanceDescriptor, readDescriptors } from './core/InstanceDescriptors.js';
-import { buildToolArguments, parseArgs } from './core/CliArgs.js';
+import { buildToolArguments, matchByProjectName, parseArgs } from './core/CliArgs.js';
 import {
     detectAgents,
     findAgent,
@@ -83,17 +83,7 @@ async function resolveInstance(projectName?: string): Promise<InstanceDescriptor
     }
 
     if (projectName) {
-        const lowered = projectName.toLowerCase();
-        const matches = descriptors.filter(d => d.projectName.toLowerCase().includes(lowered));
-
-        if (matches.length === 0) {
-            throw new Error(
-                `No running Editor matches "${projectName}". Running: ` +
-                descriptors.map(d => d.projectName).join(', ')
-            );
-        }
-
-        return matches[0];
+        return matchByProjectName(descriptors, projectName);
     }
 
     if (descriptors.length > 1) {

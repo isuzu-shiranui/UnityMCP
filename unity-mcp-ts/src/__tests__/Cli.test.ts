@@ -6,7 +6,7 @@
  */
 import { describe, test, expect } from '@jest/globals';
 
-import { parseArgs, buildToolArguments, coerceScalar } from '../core/CliArgs.js';
+import { parseArgs, buildToolArguments, coerceScalar, matchByProjectName } from '../core/CliArgs.js';
 
 describe('parseArgs', () => {
     test('takes the command from the first positional', () => {
@@ -38,6 +38,45 @@ describe('parseArgs', () => {
 
     test('accepts -h as help', () => {
         expect(parseArgs(['-h']).flags.has('help')).toBe(true);
+    });
+});
+
+describe('matchByProjectName', () => {
+    const open = [
+        { projectName: 'UnityMCP v3 Test' },
+        { projectName: 'UnityMCP v3 Test B' },
+    ];
+
+    test('an exact name wins over a longer name containing it', () => {
+        // Both entries contain "UnityMCP v3 Test". Without the exact-match rule this resolves
+        // by whichever descriptor was read first, and the call silently hits the wrong project.
+        expect(matchByProjectName(open, 'UnityMCP v3 Test').projectName).toBe('UnityMCP v3 Test');
+        expect(matchByProjectName([...open].reverse(), 'UnityMCP v3 Test').projectName)
+            .toBe('UnityMCP v3 Test');
+    });
+
+    test('matching is case-insensitive', () => {
+        expect(matchByProjectName(open, 'unitymcp v3 test b').projectName).toBe('UnityMCP v3 Test B');
+    });
+
+    test('an unambiguous substring resolves', () => {
+        expect(matchByProjectName(open, 'Test B').projectName).toBe('UnityMCP v3 Test B');
+    });
+
+    test('an ambiguous substring is refused rather than guessed', () => {
+        expect(() => matchByProjectName(open, 'UnityMCP')).toThrow(/matches more than one/);
+    });
+
+    test('the ambiguity error names the candidates', () => {
+        expect(() => matchByProjectName(open, 'v3')).toThrow(/UnityMCP v3 Test B/);
+    });
+
+    test('no match lists what is running', () => {
+        expect(() => matchByProjectName(open, 'Nothing')).toThrow(/Running: UnityMCP v3 Test,/);
+    });
+
+    test('surrounding whitespace is ignored', () => {
+        expect(matchByProjectName(open, '  Test B  ').projectName).toBe('UnityMCP v3 Test B');
     });
 });
 

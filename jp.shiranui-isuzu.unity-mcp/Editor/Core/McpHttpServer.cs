@@ -285,27 +285,63 @@ namespace UnityMCP.Editor.Core
         //  HTTP Listener
         // ──────────────────────────────────────────────
 
+        /// <summary>
+        /// Binds the first free port at or after <paramref name="startPort"/>.
+        /// </summary>
+        /// <remarks>
+        /// Every per-port failure is swallowed so the scan continues. Catching only
+        /// <see cref="HttpListenerException"/> was not enough: the Editor runs on Mono, whose
+        /// HttpListener is implemented over managed sockets, so a busy port surfaces as a
+        /// <see cref="SocketException"/> instead. That escaped the catch and aborted the whole
+        /// scan on its first candidate, which is why a second Editor — or the same Editor
+        /// rebinding after a domain reload while its previous socket was still in TIME_WAIT —
+        /// reported "only one usage of each socket address is normally permitted" and started
+        /// no server at all, with nineteen free ports in the range.
+        /// <para>
+        /// Only the 127.0.0.1 prefix is registered. The old code also added a `localhost`
+        /// prefix for the same port, which binds nothing extra — clients connect to the
+        /// loopback address — while giving the bind a second way to fail.
+        /// </para>
+        /// </summary>
         private int StartHttpListener(int startPort)
         {
             const int maxPort = 27199;
-            for (var port = startPort; port <= maxPort; port++)
+            var firstFailure = string.Empty;
+
+            for (var port = Math.Max(startPort, 1); port <= maxPort; port++)
             {
+                HttpListener listener = null;
+
                 try
                 {
-                    var listener = new HttpListener();
+                    listener = new HttpListener();
                     listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-                    listener.Prefixes.Add($"http://localhost:{port}/");
                     listener.Start();
                     this.httpListener = listener;
                     return port;
                 }
-                catch (HttpListenerException)
+                catch (Exception e)
                 {
-                    // Port in use — try next
+                    // Port unavailable for any reason at all — move on. Which exception type a
+                    // busy port produces depends on the runtime, and guessing wrong here costs
+                    // the whole scan.
+                    try { listener?.Close(); }
+                    catch { }
+
+                    if (firstFailure.Length == 0)
+                    {
+                        firstFailure = $"{port}: {e.GetType().Name}: {e.Message}";
+                    }
+
+                    if (DetailedLogs)
+                    {
+                        Debug.Log($"[McpHttpServer] Port {port} unavailable ({e.GetType().Name}), trying the next one");
+                    }
                 }
             }
 
-            throw new InvalidOperationException($"No available port in range {startPort}-{maxPort}");
+            throw new InvalidOperationException(
+                $"No free port in {startPort}-{maxPort}. First failure was {firstFailure}");
         }
 
         private void ListenerLoop()

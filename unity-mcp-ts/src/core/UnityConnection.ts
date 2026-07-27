@@ -163,7 +163,7 @@ export class UnityConnection extends EventEmitter {
      *
      * NOTE: We DO NOT auto-select the first instance as active (design §3.2).
      * `activeInstanceId` is only set when the user explicitly calls
-     * `unity_setActiveClient` or `unity_connectToProject`.
+     * `unity_set_active_client`.
      */
     public registerInstance(instance: UnityInstance): void {
         const existing = this.instances.get(instance.id);
@@ -267,7 +267,7 @@ export class UnityConnection extends EventEmitter {
      *   3. target omitted + active not set + exactly 1 instance → use it
      *   4. target omitted + active not set + 0 instances → ResolveInstanceError(no_instance)
      *   5. target omitted + active not set + multiple instances →
-     *        ResolveInstanceError(target_required, hint about unity_listClients)
+     *        ResolveInstanceError(target_required, hint about unity_list_clients)
      */
     public resolveInstance(target?: string): UnityInstance {
         const all = Array.from(this.instances.values());
@@ -280,8 +280,20 @@ export class UnityConnection extends EventEmitter {
                     `No Unity instance matches target "${target}"`
                 );
             }
-            // Pick first match. Ambiguity at MCP-tool level is tolerated
-            // (first-hit); /proxy has stricter semantics via its own resolver.
+            if (matches.length > 1) {
+                // Previously the first match won. With "MyGame" and "MyGame Sandbox" both
+                // open, asking for "MyGame" then resolved by registration order — and the
+                // call succeeded against whichever it happened to pick, so a write could land
+                // in the wrong project with nothing to indicate it. Exact matches are already
+                // preferred above; only an ambiguous substring reaches here.
+                throw new ResolveInstanceError(
+                    ResolveErrorCode.TargetRequired,
+                    `"${target}" matches more than one Unity instance: ` +
+                    matches.map(m => m.projectName).join(', ') +
+                    '. Use the full project name or the clientId.'
+                );
+            }
+
             return matches[0];
         }
 
@@ -310,8 +322,8 @@ export class UnityConnection extends EventEmitter {
         throw new ResolveInstanceError(
             ResolveErrorCode.TargetRequired,
             'Multiple Unity instances are registered but no target was specified. ' +
-            'Call unity_listClients to see options, then pass `target` or ' +
-            'call unity_setActiveClient.'
+            'Call unity_list_clients to see them, then either pass `target` on this call or ' +
+            'call unity_set_active_client to fix the destination.'
         );
     }
 

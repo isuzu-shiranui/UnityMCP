@@ -56,6 +56,46 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 /**
+ * Picks the Editor a `--project` value refers to.
+ *
+ * An exact name wins outright before substrings are considered. Without that rule, asking for
+ * "MyGame" while "MyGame" and "MyGame Sandbox" are both open resolves by whichever descriptor
+ * happened to be read first — and the failure is silent, because the call succeeds against the
+ * wrong project. An ambiguous substring is refused for the same reason: sending a write to the
+ * wrong Editor is worse than making the caller be specific.
+ */
+export function matchByProjectName<T extends { projectName: string }>(
+    candidates: T[],
+    query: string
+): T {
+    const lowered = query.trim().toLowerCase();
+
+    const exact = candidates.filter(c => c.projectName.toLowerCase() === lowered);
+    if (exact.length === 1) {
+        return exact[0];
+    }
+
+    const partial = candidates.filter(c => c.projectName.toLowerCase().includes(lowered));
+
+    if (partial.length === 1) {
+        return partial[0];
+    }
+
+    if (partial.length === 0) {
+        throw new Error(
+            `No running Editor matches "${query}". Running: ` +
+            candidates.map(c => c.projectName).join(', ')
+        );
+    }
+
+    throw new Error(
+        `"${query}" matches more than one running Editor: ` +
+        partial.map(c => c.projectName).join(', ') +
+        '. Use the full project name.'
+    );
+}
+
+/**
  * Turns obviously numeric or boolean command-line text into the matching JSON type.
  *
  * The Editor coerces scalars anyway, so this is not required for the call to work; it keeps

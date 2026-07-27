@@ -123,9 +123,22 @@ namespace UnityMCP.Editor.Installer
                     new UTF8Encoding(false));
             }
 
+            var node = McpInstallHelper.ResolveNodeExecutable();
+            var npmCli = McpInstallHelper.ResolveNpmCliScript();
+
+            if (string.IsNullOrEmpty(node) || string.IsNullOrEmpty(npmCli))
+            {
+                return new CommandResult
+                {
+                    Succeeded = false,
+                    Error = "Node.js and npm were not found. Install Node.js 18 or newer, then restart " +
+                            "the Editor so it inherits the updated PATH.",
+                };
+            }
+
             return await RunAsync(
-                McpInstallHelper.ResolveNpmExecutable(),
-                $"install {NpmPackageName}@{version} --no-audit --no-fund",
+                node,
+                $"\"{npmCli}\" install {NpmPackageName}@{version} --no-audit --no-fund",
                 InstallRoot);
         }
 
