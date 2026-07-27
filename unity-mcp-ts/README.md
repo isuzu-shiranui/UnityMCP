@@ -1,4 +1,4 @@
-# @shiranui-isuzu/unity-mcp
+# @shiranui_isuzu/unity-mcp
 
 The MCP server and CLI for [UnityMCP](https://github.com/isuzu-shiranui/UnityMCP).
 

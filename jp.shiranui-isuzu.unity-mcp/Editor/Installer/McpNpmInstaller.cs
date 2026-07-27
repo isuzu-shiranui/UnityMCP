@@ -37,7 +37,7 @@ namespace UnityMCP.Editor.Installer
         /// Unity's own CLI command. The scope says who owns this without anyone having to
         /// check.
         /// </remarks>
-        public const string NpmPackageName = "@shiranui-isuzu/unity-mcp";
+        public const string NpmPackageName = "@shiranui_isuzu/unity-mcp";
 
         /// <summary>Where the npm package is installed, under the project's Library folder.</summary>
         public static string InstallRoot =>

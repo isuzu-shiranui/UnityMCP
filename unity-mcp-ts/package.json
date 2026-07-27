@@ -1,5 +1,5 @@
 {
-  "name": "@shiranui-isuzu/unity-mcp",
+  "name": "@shiranui_isuzu/unity-mcp",
   "version": "3.0.0",
   "main": "build/index.js",
   "type": "module",
