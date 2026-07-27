@@ -28,42 +28,31 @@ namespace UnityMCP.Editor.Settings
         [SerializeField]
         public bool autoStartOnLaunch = true;
 
-        /// <summary>
-        /// Gets or sets whether to persist the bound port across assembly reloads via SessionState.
-        /// </summary>
-        [SerializeField]
-        public bool portPersistenceEnabled = true;
+        // Removed in v3, all of them dead settings that only looked like controls:
+        //   portPersistenceEnabled — never read; port persistence was always on.
+        //   reloadRetryMaxMs       — documented as "read from /health", but /health never
+        //                            emitted it; the TS server reads MCP_RELOAD_RETRY_MAX_MS.
+        //   useUdpBroadcast        — the server started the broadcaster unconditionally, so
+        //                            turning it off did nothing. Discovery is now file-based.
+        //   udpBroadcastPort, broadcastIntervalSeconds — belonged to that broadcaster.
 
         /// <summary>
-        /// Gets or sets the maximum retry duration (ms) for TS/CLI clients to retry after a reload.
-        /// This value is advisory; the TS server reads it from /health.
+        /// Gets or sets how long (ms) a request waits for its main-thread work before the
+        /// server hands back a job id instead. Clamped to a 250 ms floor by the server.
         /// </summary>
+        /// <remarks>
+        /// Deliberately far below v2's fixed 10 s: work slower than this is better tracked
+        /// through a job the caller can poll than through a socket held open, and the old
+        /// behaviour of returning 504 while leaving the work queued made retries dangerous.
+        /// </remarks>
         [SerializeField]
-        public int reloadRetryMaxMs = 15000;
+        public int syncWaitMs = 3000;
 
         /// <summary>
         /// Gets or sets whether to store detailed logs.
         /// </summary>
         [SerializeField]
         public bool detailedLogs = true;
-
-        /// <summary>
-        /// Gets or sets whether to use UDP broadcast for discovery.
-        /// </summary>
-        [SerializeField]
-        public bool useUdpBroadcast = true;
-
-        /// <summary>
-        /// Gets or sets the UDP broadcast port.
-        /// </summary>
-        [SerializeField]
-        public int udpBroadcastPort = 27183;
-
-        /// <summary>
-        /// Gets or sets the broadcast interval in seconds.
-        /// </summary>
-        [SerializeField]
-        public int broadcastIntervalSeconds = 30;
 
         /// <summary>
         /// Gets or sets the dictionary of command handlers and their enabled states.
@@ -92,24 +81,6 @@ namespace UnityMCP.Editor.Settings
         {
             get => this.httpPort;
             set => this.httpPort = value;
-        }
-
-        /// <summary>
-        /// Legacy: maps to useUdpBroadcast.
-        /// </summary>
-        public bool useUdpDiscovery
-        {
-            get => this.useUdpBroadcast;
-            set => this.useUdpBroadcast = value;
-        }
-
-        /// <summary>
-        /// Legacy: maps to udpBroadcastPort.
-        /// </summary>
-        public int udpDiscoveryPort
-        {
-            get => this.udpBroadcastPort;
-            set => this.udpBroadcastPort = value;
         }
 
         /// <summary>
