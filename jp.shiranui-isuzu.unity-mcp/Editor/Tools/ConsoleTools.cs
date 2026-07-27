@@ -68,15 +68,12 @@ namespace UnityMCP.Editor.Tools
             return Handler.Execute("clear", new JObject());
         }
 
-        [McpTool(
-            "console_set_filter",
-            "Set the console's search filter text. Affects what the Editor UI displays.",
-            Idempotency = McpIdempotency.Unsafe)]
-        public static JObject SetFilter(
-            [McpArg("filter", "Filter text; pass an empty string to clear it.")]
-            string filter = "")
-        {
-            return Handler.Execute("setFilter", ToolArgs.Of(("filter", filter)));
-        }
+        // console_set_filter is deliberately not a tool. Setting the console's search filter
+        // is Editor UI state that persists, and it silently narrows every later read: with a
+        // filter set, console_read_logs went from 21 entries to 1, and console_get_count
+        // reported errorCount 0 alongside logCount 23. An agent checking for errors would
+        // conclude there were none. A tool whose lasting effect is to hide the diagnostics
+        // is worth less than the catalog space it occupies. The console.setFilter command
+        // endpoint remains for anyone driving the Editor UI on purpose.
     }
 }

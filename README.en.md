@@ -142,7 +142,7 @@ MCP client (Claude)                        terminal / scripts
 
 ## 📚 Built-in tools
 
-### Published by the Editor (22)
+### Published by the Editor (21)
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
@@ -152,7 +152,6 @@ MCP client (Claude)                        terminal / scripts
 | `console_read_logs` | safe | Read console entries |
 | `console_get_count` | safe | Error / warning / log counts |
 | `console_clear` | unsafe | Clear the console |
-| `console_set_filter` | unsafe | Set the console's search filter |
 | `editor_log_tail` | safe | Read `Editor.log` from disk (**works while the Editor is wedged**) |
 | `scene_browse_hierarchy` | safe | Walk the scene hierarchy |
 | `inspect_read` / `inspect_list` | safe | Read and list serialized properties |

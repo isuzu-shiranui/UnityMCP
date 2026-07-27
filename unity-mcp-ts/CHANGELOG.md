@@ -17,6 +17,11 @@ what it finds rather than keeping its own copy.
   registered, so they had never worked.
 - `unity_listClients` and friends are snake_case; `unity_connectToProject` is removed as an
   alias of `unity_set_active_client`.
+- `console_set_filter` is not exposed as a tool. Setting the console's search filter is
+  persistent Editor UI state that silently narrows every later read: with a filter set,
+  `console_read_logs` returned 1 entry instead of 21 and `console_get_count` reported
+  `errorCount` 0 next to `logCount` 23. An agent checking for errors would have concluded
+  there were none. The `console.setFilter` command endpoint remains.
 - Five settings are removed. All of them looked like controls and governed nothing: the UDP
   toggle never stopped the broadcaster, port persistence was unconditional, and
   `reloadRetryMaxMs` was documented as being read from `/health`, which never published it.

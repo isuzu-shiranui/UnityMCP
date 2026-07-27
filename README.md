@@ -137,7 +137,7 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 ## 📚 組み込みツール
 
-### Editor が公開するもの（22個）
+### Editor が公開するもの（21個）
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
@@ -147,7 +147,6 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `console_read_logs` | safe | コンソールのエントリを読む |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
-| `console_set_filter` | unsafe | コンソールの検索フィルタ |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（**Editor が固まっていても動く**） |
 | `scene_browse_hierarchy` | safe | シーン階層の走査 |
 | `inspect_read` / `inspect_list` | safe | シリアライズプロパティの読み取り・一覧 |
