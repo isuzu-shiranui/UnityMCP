@@ -41,8 +41,25 @@ MCP client (Claude)                        terminal / scripts
 ```bash
 npm install
 npm run build
-npm link     # provides unity-mcp and unity-mcp-server
+npm link          # provides unity-mcp and unity-mcp-server
+
+unity-mcp setup   # register with installed agents and install the skill
 ```
+
+`setup` writes to the MCP config of every supported agent it finds — Claude Code, Claude
+Desktop, Codex, Cursor, Gemini CLI — and installs the skill for those that have a skills
+directory. It updates only configs that already exist, rather than creating one for a tool
+that is not installed, and rewrites them key by key so other servers survive. Pass
+`--agent <name>` to pick one, `--no-skill` to skip skills.
+
+```bash
+unity-mcp doctor          # what is installed, where, and what is stale
+unity-mcp uninstall       # lists what it would remove
+unity-mcp uninstall --yes # removes it
+```
+
+`uninstall` takes only the `unity-mcp` entry out of each agent config, and refuses while an
+Editor is running, since that Editor would republish its descriptor moments later.
 
 ## Usage
 
@@ -104,9 +121,21 @@ only exists while an MCP client has this server running — for a standalone pat
 
 ## Multi-instance behaviour
 
-Every Editor publishes its own descriptor. When more than one is running, a call must say
-which to use, either per call with `target` (MCP) / `--project` (CLI), or once with
-`unity_set_active_client`.
+Every Editor publishes its own descriptor and binds the first free port from 27182, so
+several can run at once.
+
+With more than one running, the target is resolved in this order:
+
+1. An explicit `target` (MCP) or `--project` (CLI). An exact project name or clientId wins
+   over a substring; an ambiguous substring is refused with the candidates named, because
+   silently picking one means a write can land in the wrong project and still succeed.
+2. The active client, if `unity_set_active_client` was called.
+3. **The project containing the working directory.** A shell inside a project, or an MCP
+   client opened in one, has already said which project it means. Nested projects resolve to
+   the deepest containing root.
+4. Otherwise the call is refused and the candidates are listed.
+
+`unity-mcp projects` marks the entry that step 3 would choose with `containsWorkingDirectory`.
 
 Descriptors are checked for a live pid, so an Editor that crashed rather than quit cannot
 linger as a phantom instance. A withdrawn descriptor unregisters its instance immediately: a

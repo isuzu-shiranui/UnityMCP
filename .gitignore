@@ -1,0 +1,19 @@
+# Unity
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Ll]ogs/
+[Uu]serSettings/
+*.csproj
+*.sln
+*.user
+
+# Node
+node_modules/
+*.tgz
+
+# Tooling scratch that has ended up here before
+.orchestra/
+*.stackdump
+*.log
