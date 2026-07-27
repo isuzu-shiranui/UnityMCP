@@ -4,7 +4,8 @@
   "main": "build/index.js",
   "type": "module",
   "bin": {
-    "unity-mcp": "./build/index.js"
+    "unity-mcp": "./build/cli.js",
+    "unity-mcp-server": "./build/index.js"
   },
   "scripts": {
     "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('build', {recursive:true, force:true}))\"",
