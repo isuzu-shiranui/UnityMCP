@@ -4,7 +4,7 @@
   "main": "build/index.js",
   "type": "module",
   "bin": {
-    "isuzu-unity-mcp": "./build/cli.js"
+    "isuzu-unity-mcp": "build/cli.js"
   },
   "scripts": {
     "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('build', {recursive:true, force:true}))\"",
