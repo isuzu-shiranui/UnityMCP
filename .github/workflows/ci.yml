@@ -103,3 +103,42 @@ jobs:
             echo "McpHttpServer.ProtocolVersion is stale; clients would be told the wrong version"
             exit 1
           fi
+
+      # Redistributing a binary without attributing it is a licensing problem, and the list
+      # is exactly the kind of thing that goes stale silently when a dependency is swapped.
+      - name: Every bundled assembly is attributed
+        run: |
+          NOTICES="jp.shiranui-isuzu.unity-mcp/Third Party Notices.md"
+          STATUS=0
+          for dll in jp.shiranui-isuzu.unity-mcp/Editor/Plugins/*.dll; do
+            name=$(basename "$dll")
+            if ! grep -qF "$name" "$NOTICES"; then
+              echo "$name ships in the package but is not listed in Third Party Notices.md"
+              STATUS=1
+            fi
+          done
+          # And the reverse: a name left behind after its assembly was dropped.
+          grep -oP '`\K[A-Za-z0-9.]+\.dll(?=`)' "$NOTICES" | sort -u | while read -r listed; do
+            if [ ! -f "jp.shiranui-isuzu.unity-mcp/Editor/Plugins/$listed" ]; then
+              echo "note: $listed is attributed but no longer shipped"
+            fi
+          done
+          exit $STATUS
+
+      # Unreferenced binaries are dead weight the user still downloads, and something we
+      # would otherwise have to keep attributing.
+      - name: No unreferenced assemblies in Plugins
+        run: |
+          node -e "
+            const fs = require('fs');
+            const root = 'jp.shiranui-isuzu.unity-mcp';
+            const asmdef = JSON.parse(fs.readFileSync(root + '/Editor/UnityMCP.Editor.asmdef', 'utf8'));
+            const referenced = new Set(asmdef.precompiledReferences || []);
+            const shipped = fs.readdirSync(root + '/Editor/Plugins').filter(f => f.endsWith('.dll'));
+            const orphans = shipped.filter(f => !referenced.has(f));
+            if (orphans.length) {
+              console.error('shipped but not referenced by the asmdef: ' + orphans.join(', '));
+              process.exit(1);
+            }
+            console.log(shipped.length + ' assemblies, all referenced');
+          "
