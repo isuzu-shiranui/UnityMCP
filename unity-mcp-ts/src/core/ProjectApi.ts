@@ -325,6 +325,14 @@ export class ProjectApi {
             else if (typeof v === 'string') outHeaders[k] = v;
         }
         outHeaders['Host'] = `127.0.0.1:${instance.port}`;
+
+        // The Editor now requires a bearer token. Supplying it here is the point of the
+        // proxy: a curl user gets to keep writing plain requests against a stable port
+        // instead of digging the token out of the descriptor file themselves.
+        if (instance.token) {
+            outHeaders['Authorization'] = `Bearer ${instance.token}`;
+        }
+
         // Only set Content-Length for methods with body.
         const method = (req.method || 'GET').toUpperCase();
         const hasBody = body.length > 0 && method !== 'GET' && method !== 'HEAD';

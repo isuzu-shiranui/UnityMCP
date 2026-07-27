@@ -113,6 +113,34 @@ export class RetryableFetchError extends Error {
     }
 }
 
+/**
+ * Pulls `{code, message}` out of Unity's error envelope.
+ *
+ * Returns undefined for a body that is not an envelope — a proxy error page, an empty
+ * response — so the caller can fall back to the status line.
+ */
+export function parseEnvelopeError(body: string): { code?: string; message: string } | undefined {
+    if (!body) {
+        return undefined;
+    }
+
+    try {
+        const parsed = JSON.parse(body);
+        const error = parsed?.error;
+
+        if (error && typeof error.message === 'string' && error.message !== '') {
+            return {
+                code: typeof error.code === 'string' ? error.code : undefined,
+                message: error.message,
+            };
+        }
+    } catch {
+        // Not JSON.
+    }
+
+    return undefined;
+}
+
 export interface RetryableFetchOptions {
     idempotency: Idempotency;
     retryMaxMs?: number;
@@ -210,14 +238,20 @@ export async function retryableFetch(
                 return { response: res, attempts };
             }
 
-            // For non-success, drain body to free the socket before retrying.
-            try { await res.arrayBuffer(); } catch { /* ignore */ }
+            // Read rather than discard the body: Unity puts the actionable part of a failure
+            // in the error envelope, and reporting a bare "HTTP 400" throws away the one
+            // thing that tells the caller how to fix the call. Consuming it also frees the
+            // socket before a retry, which is why the body was being drained here before.
+            let responseBody = '';
+            try { responseBody = await res.text(); } catch { /* ignore */ }
             lastStatus = res.status;
 
             if (classification === 'fatal') {
+                const envelope = parseEnvelopeError(responseBody);
+
                 throw new RetryableFetchError(
-                    `HTTP ${res.status}`,
-                    res.status >= 500 ? 'server_error' : 'client_error',
+                    envelope?.message ?? `HTTP ${res.status}`,
+                    envelope?.code ?? (res.status >= 500 ? 'server_error' : 'client_error'),
                     attempts,
                     { httpStatus: res.status }
                 );

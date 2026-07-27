@@ -33,6 +33,7 @@ function seedInstance(conn: UnityConnection, overrides: Partial<UnityInstance>):
         unityVersion: '',
         endpoint: overrides.endpoint ?? 'http://127.0.0.1:0',
         version: '',
+        token: 'test-token',
         state: overrides.state ?? 'healthy',
         lastSeen: Date.now(),
         lastContact: Date.now(),

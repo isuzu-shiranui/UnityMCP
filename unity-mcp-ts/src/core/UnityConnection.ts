@@ -4,6 +4,7 @@ import { McpErrorCode } from "../types/ErrorCodes.js";
 import {
     retryableFetch,
     RetryableFetchError,
+    RetryableFetchInit,
     Idempotency,
 } from './retryableFetch.js';
 
@@ -56,6 +57,12 @@ export interface UnityInstance {
     unityVersion: string;
     endpoint: string;
     version: string;
+    /**
+     * Bearer token read from the instance's descriptor file.
+     * Every request must carry it: loopback binding is not access control, and
+     * `/execute_code` runs arbitrary C# with full Editor privileges.
+     */
+    token: string;
     /** state machine (design §3.4). */
     state: UnityInstanceState;
     /** Last time a success observation was made (/health 200 or UDP announce). */
@@ -330,6 +337,7 @@ export class UnityConnection extends EventEmitter {
             target?: string;
             retryMaxMs?: number;
             idempotency?: Idempotency;
+            method?: 'GET' | 'POST';
         }
     ): Promise<JObject> {
         const retryMaxMs =
@@ -346,16 +354,27 @@ export class UnityConnection extends EventEmitter {
             opts?.idempotency
             ?? this.getHandlerIdempotency(cacheKey);
 
-        const body = JSON.stringify(payload);
+        const method = opts?.method ?? 'POST';
+
+        // A GET carrying a body is rejected by Unity's HttpListener, so the payload is
+        // dropped for reads (the catalog fetch has nothing to send anyway).
+        const authHeaders: Record<string, string> = instance.token
+            ? { Authorization: `Bearer ${instance.token}` }
+            : {};
+
+        const init: RetryableFetchInit =
+            method === 'GET'
+                ? { method, headers: authHeaders }
+                : {
+                    method,
+                    headers: { 'Content-Type': 'application/json', ...authHeaders },
+                    body: JSON.stringify(payload),
+                };
 
         try {
             const { response } = await retryableFetch(
                 `${instance.endpoint}${path}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body,
-                },
+                init,
                 {
                     idempotency,
                     retryMaxMs,
@@ -448,6 +467,24 @@ export class UnityConnection extends EventEmitter {
         }
     ): Promise<JObject> {
         return this._sendCore(endpoint, body as Record<string, unknown>, body, opts);
+    }
+
+    /**
+     * GETs an absolute endpoint on a Unity instance and unwraps the envelope.
+     * Used for `/tools`, which is a read and therefore always safe to retry.
+     */
+    public async getFromEndpoint(
+        endpoint: string,
+        opts?: {
+            target?: string;
+            retryMaxMs?: number;
+        }
+    ): Promise<JObject> {
+        return this._sendCore(endpoint, null, null, {
+            ...opts,
+            method: 'GET',
+            idempotency: 'safe',
+        });
     }
 
     // ──────────────────────────────────────────────

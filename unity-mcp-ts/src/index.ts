@@ -1,14 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { HandlerAdapter } from "./core/HandlerAdapter.js";
-import { HandlerDiscovery, HandlerType } from "./core/HandlerDiscovery.js";
 import { UnityConnection } from "./core/UnityConnection.js";
-import { CommandRegistry } from "./core/CommandRegistry.js";
-import { ResourceRegistry } from "./core/ResourceRegistry.js";
-import { PromptRegistry } from "./core/PromptRegistry.js";
 import { ProjectRegistry } from "./core/ProjectRegistry.js";
 import { ProjectApi } from "./core/ProjectApi.js";
-import { registerUnityClientTools } from "./core/UnityClientHandler.js";
+import { createUnityClientTools } from "./core/UnityClientHandler.js";
+import { ToolCatalogClient } from "./core/ToolCatalogClient.js";
+import { ToolRouter } from "./core/ToolRouter.js";
+import { registerCodePrompt } from "./core/CodePrompt.js";
 import { UnhandledErrorTracker } from "./core/TaskResilience.js";
 
 /**
@@ -17,18 +15,19 @@ import { UnhandledErrorTracker } from "./core/TaskResilience.js";
  */
 async function main() {
   try {
-    // Initialize MCP server with the official SDK
-    const mcpServer = new McpServer({
-      name: "unity-mcp",
-      version: "2.1.1"
-    });
+    // listChanged is declared because the tool list is not static: it comes from whichever
+    // Editor is connected, and changes when one connects or recompiles.
+    const mcpServer = new McpServer(
+      { name: "unity-mcp", version: "3.0.0" },
+      { capabilities: { tools: { listChanged: true }, prompts: {} } }
+    );
 
     // Initialize UnityConnection (HTTP client)
     const unityConnection = UnityConnection.getInstance();
 
     // Create and start ProjectRegistry (UDP listener + health polling)
     const registry = new ProjectRegistry(unityConnection, {
-      udpPort: parseInt(process.env.MCP_UDP_PORT || '27183', 10),
+      descriptorPollIntervalMs: parseInt(process.env.MCP_DESCRIPTOR_INTERVAL || '2000', 10),
       healthPollIntervalMs: parseInt(process.env.MCP_HEALTH_INTERVAL || '10000', 10),
       staleThresholdMs: 90000,
       unhealthyCooldownMs: parseInt(process.env.MCP_UNHEALTHY_COOLDOWN_MS || '60000', 10),
@@ -49,37 +48,56 @@ async function main() {
       console.error('[WARN] CLI discovery via /projects will not be available');
     }
 
-    // Log discovery events
+    // The Editor publishes the tool catalog; this server only forwards it.
+    const catalog = new ToolCatalogClient(unityConnection);
+    const router = new ToolRouter(mcpServer, unityConnection, catalog, createUnityClientTools());
+    router.install();
+    registerCodePrompt(mcpServer);
+
+    // Clients ask for tools/list immediately, usually before any Editor is running, so start
+    // from the last known catalog rather than answering "no tools".
+    if (await catalog.loadCache()) {
+      console.error(`[INFO] Loaded ${catalog.getTools().length} tools from cache (no Editor contacted yet)`);
+    }
+
+    // The catalog is always fetched from a named instance. Leaving the target off would make
+    // this fail with "target required" the moment a second Editor is registered, which is
+    // both common and exactly when a working tool list matters most.
+    const refreshCatalog = async (reason: string, target: string) => {
+      try {
+        const changed = await catalog.refresh(target);
+        console.error(`[INFO] Tool catalog refreshed from ${target} (${reason}): ${catalog.getTools().length} tools`);
+        if (changed) {
+          router.notifyToolsChanged();
+        }
+      } catch (err) {
+        console.error(
+          `[WARN] Could not fetch the tool catalog from ${target} (${reason}): ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    };
+
     registry.on('instanceDiscovered', (instance) => {
       console.error(`[INFO] Discovered Unity instance: ${instance.projectName} on :${instance.port}`);
+      // Also covers reconnect after a domain reload, which is when the catalog is most
+      // likely to have gained or lost tools.
+      void refreshCatalog('discovered', instance.id);
     });
 
-    // Create registries
-    const commandRegistry = new CommandRegistry();
-    const resourceRegistry = new ResourceRegistry();
-    const promptRegistry = new PromptRegistry();
+    // Try each registered instance rather than only the first: a UDP announce from another
+    // machine on the subnet registers an instance whose endpoint is forced to loopback, so a
+    // dead entry can sit at the head of the list.
+    const usable = unityConnection
+      .getConnectedClients()
+      .filter(c => c.state === 'healthy' || c.state === 'reloading')
+      .sort((a, b) => (a.state === 'healthy' ? 0 : 1) - (b.state === 'healthy' ? 0 : 1));
 
-    // Create handler adapter
-    const handlerAdapter = new HandlerAdapter(mcpServer);
-
-    // Create handler discovery with Unity connection and registries
-    const handlerDiscovery = new HandlerDiscovery(
-        handlerAdapter,
-        unityConnection,
-        commandRegistry,
-        resourceRegistry,
-        promptRegistry
-    );
-
-    // Register unity client management tools
-    registerUnityClientTools(mcpServer);
-
-    // Discover and register handlers
-    const counts = await handlerDiscovery.discoverAndRegisterHandlers();
-    console.error(`[INFO] Discovered and registered:
-      Command Handlers: ${counts[HandlerType.COMMAND]}
-      Resource Handlers: ${counts[HandlerType.RESOURCE]}
-      Prompt Handlers: ${counts[HandlerType.PROMPT]}`);
+    for (const client of usable) {
+      await refreshCatalog('startup', client.id);
+      if (catalog.getTools().length > 0) {
+        break;
+      }
+    }
 
     // Register connection events
     unityConnection.on('clientRegistered', (client) => {

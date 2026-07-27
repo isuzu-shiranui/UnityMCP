@@ -31,6 +31,7 @@ function makeInstance(overrides: Partial<UnityInstance> = {}): UnityInstance {
         unityVersion: overrides.unityVersion ?? '2022.3',
         endpoint: overrides.endpoint ?? 'http://127.0.0.1:27182',
         version: overrides.version ?? '2.0.0',
+        token: overrides.token ?? 'test-token',
         state: overrides.state ?? 'healthy',
         lastSeen: overrides.lastSeen ?? Date.now(),
         lastContact: overrides.lastContact ?? Date.now(),
