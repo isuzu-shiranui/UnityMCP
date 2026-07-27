@@ -1,7 +1,7 @@
 # Unity MCP Integration Framework
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.0.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -10,7 +10,7 @@
 
 Opens the Unity Editor to AI agents over the Model Context Protocol, and to people and scripts over a CLI.
 
-## 🌟 What's new in v3
+## What's new in v3
 
 - **Tools are defined once, in the Editor.** Put `[McpTool]` on a static C# method and its JSON Schema is derived from the signature and published at `GET /tools`. There is no tool definition on the TypeScript side.
 - **The CLI does not need MCP.** `isuzu-unity-mcp` reads the descriptor file the Editor publishes and connects directly, so reaching Unity from a shell no longer requires an MCP client to be running.
@@ -18,13 +18,13 @@ Opens the Unity Editor to AI agents over the Model Context Protocol, and to peop
 - **Slow work becomes a job.** A call that does not finish in a few seconds returns a job id rather than a timeout, so nothing keeps running behind a failure you might retry.
 - **Authenticated.** Every request needs a bearer token; binding to loopback was never access control.
 
-## 📋 Requirements
+## Requirements
 
 - Unity Editor 2022.3 or newer (verified on Unity 6)
 - Node.js 18 or newer
 - `com.unity.nuget.newtonsoft-json` 3.2.1 (resolved automatically)
 
-## 🚀 Getting started
+## Getting started
 
 ### Installation
 
@@ -110,7 +110,7 @@ Errors go to stderr with a non-zero exit code, so it composes in scripts.
 
 > **Why `--file`**: passing a C# snippet through both a shell and a JSON encoder loses the backslashes in its string literals. The result is a compile error inside generated source the caller never sees, which is close to undiagnosable. Reading from a file goes through neither.
 
-## 🔌 Architecture
+## Architecture
 
 ```
 MCP client (Claude)                        terminal / scripts
@@ -140,15 +140,17 @@ MCP client (Claude)                        terminal / scripts
 
 `ToolCatalogClient` fetches `/tools` and `ToolRouter` serves it as `tools/list` and `tools/call`. It uses the low-level request handlers, so **the Editor's JSON Schema reaches the client unchanged**.
 
-## 📚 Built-in tools
+## Built-in tools
 
-### Published by the Editor (21)
+### Published by the Editor (23)
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
 | `execute_code` | unsafe | Compile and run a C# snippet |
 | `compile_status` | safe | Whether scripts are compiling, and whether the last compile succeeded |
 | `compile_request` | unsafe | Ask for a recompile |
+| `test_run` | unsafe | Start an EditMode or PlayMode test run |
+| `test_results` | safe | The current or most recent run (**readable while it runs**) |
 | `console_read_logs` | safe | Read console entries |
 | `console_get_count` | safe | Error / warning / log counts |
 | `console_clear` | unsafe | Clear the console |
@@ -165,6 +167,8 @@ MCP client (Claude)                        terminal / scripts
 
 Editor panel capture (`inspector`, `hierarchy`, `project`, `console`, `window:<title>`) is Windows-only; `game` and `scene` work everywhere.
 
+`test_run` and `test_results` appear only when `com.unity.test-framework` is present, which it is by default. They live in their own assembly constrained to `UNITY_INCLUDE_TESTS`, so a project without the framework loses those two tools rather than failing to compile the package.
+
 ### Provided by the MCP server (3)
 
 `unity_list_clients`, `unity_set_active_client`, `unity_get_active_client` — choosing between Editors. No single Editor can answer that, which is why these stay here.
@@ -173,7 +177,7 @@ Editor panel capture (`inspector`, `hierarchy`, `project`, `console`, `window:<t
 
 `code_execute` — how to write C# for `execute_code`.
 
-## 🛠️ Adding a tool
+## Adding a tool
 
 **Write one method in the Editor.** There is nothing to add on the TypeScript side.
 
@@ -216,7 +220,7 @@ Tool names must match `^[a-z][a-z0-9_]{0,63}$`; MCP tool names cannot contain do
 
 **The description is the model's only cue for reaching for a tool.** Say when to use it, not just what it does.
 
-## ⚙️ Configuration
+## Configuration
 
 ### Unity Editor (Preferences → Unity MCP)
 
@@ -236,7 +240,7 @@ Tool names must match `^[a-z][a-z0-9_]{0,63}$`; MCP tool names cannot contain do
 | `MCP_RELOAD_RETRY_MAX_MS` | 15000 | Retry budget while a domain reload is in flight (ms) |
 | `MCP_PROJECT_API_PORT` | 27180 | ProjectApi port |
 
-## 🧪 Tests
+## Tests
 
 ```bash
 # TypeScript
@@ -247,10 +251,22 @@ Unity.exe -batchmode -nographics -projectPath <project> \
   -runTests -testPlatform EditMode -testResults results.xml
 ```
 
+A running Editor can also be driven from MCP or the CLI.
+
+```bash
+isuzu-unity-mcp call test_run --mode edit --assembly MyGame.Tests
+isuzu-unity-mcp call test_results          # readable while the run is in progress
+isuzu-unity-mcp call test_results --include_passed true --limit 200
+```
+
+**A test run holds the main thread for its whole duration, so no other tool answers during it.**
+`test_results` is declared `MainThread = false` and reports counts and failures anyway. `test_run`
+returns as soon as the run is queued; it does not wait for the outcome.
+
 Running the package's tests needs `"testables": ["jp.shiranui-isuzu.unity-mcp"]` in the
 project's `Packages/manifest.json`.
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 **`isuzu-unity-mcp projects` finds nothing** — check an Editor has a project open and its server started. Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\`, or `~/.local/share` / `~/Library/Application Support` on macOS and Linux.
 
@@ -262,7 +278,7 @@ project's `Packages/manifest.json`.
 
 **A call returned a job id** — work slower than `syncWaitMs` (3 s by default) becomes a job. Collect it with `isuzu-unity-mcp jobs <id>`. **Do not repeat the call**: the work is still running.
 
-## 🔒 Security
+## Security
 
 - The server binds `127.0.0.1` only and **requires a bearer token on every request**.
 - No CORS headers are sent. v2 returned `Access-Control-Allow-Origin: *`, which let any web page the user had open POST to `/execute_code` and run arbitrary C# in their Editor.
@@ -287,7 +303,7 @@ This is a checked property rather than a remembered convention: CI asserts both 
 change, and both were verified to fail the build when violated — one by adding a script under
 `Runtime/`, the other by emptying `includePlatforms`.
 
-## 🧹 What this puts on your machine
+## What this puts on your machine
 
 All state lives under a single root, so there is one thing to delete.
 
@@ -310,7 +326,7 @@ isuzu-unity-mcp uninstall --yes   # removes it
 other server alone. It refuses while an Editor is running, since that Editor would republish
 its descriptor moments later. The Unity package itself is removed through the Package Manager.
 
-## 📖 Migrating from v2
+## Migrating from v2
 
 This release is deliberately breaking.
 
@@ -328,6 +344,6 @@ This release is deliberately breaking.
 
 Replace curl-based procedures with `isuzu-unity-mcp call`, or route them through the MCP server's `/proxy/<project>/...`, which supplies the token for you.
 
-## 📄 License
+## License
 
 MIT

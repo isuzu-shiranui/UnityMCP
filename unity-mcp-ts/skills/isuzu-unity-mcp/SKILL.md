@@ -22,7 +22,7 @@ isuzu-unity-mcp health     # server state, queue depth, running jobs
 > Requires UnityMCP v3. On v2 there is no `isuzu-unity-mcp` binary and endpoints are unauthenticated
 > on `127.0.0.1:27182`; see the v2 section at the bottom.
 
-## ⚠ デバッグの鉄則: まずコンソールを読む (必須・最優先)
+## デバッグの鉄則: まずコンソールを読む (必須・最優先)
 
 **何かが動かない/表示されない時、自作の計装(リフレクションでのバッファ読み出し・デバッグカウンタ・合成テスト等)を組む前に、必ず先にコンソールのエラー/警告を読む。**
 
@@ -93,6 +93,8 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `editor_log_tail --pattern "Shader" --lines 50` | `Editor.log` from disk; **works while the Editor is wedged** |
 | `compile_status` | `isCompiling`, `succeeded`, and the error messages |
 | `compile_request` | Trigger a recompile (`AssetDatabase.Refresh` alone does not) |
+| `test_run --mode edit --assembly MyGame.Tests` | Start a test run; returns immediately |
+| `test_results` | Counts and failures; **answers while the run holds the main thread** |
 | `scene_browse_hierarchy --name Player --limit 20` | Hierarchy; also filters `component`, `tag`, `active_only`, `max_depth` |
 | `inspect_list --game_object_path Player --component_type Transform` | Discover property paths |
 | `inspect_read --game_object_path Player --component_type Transform --property_path m_LocalPosition` | Read one property |
@@ -119,6 +121,18 @@ isuzu-unity-mcp call compile_request
 sleep 3
 isuzu-unity-mcp call compile_status          # check succeeded, not just isCompiling
 ```
+
+### Run the tests
+
+```bash
+isuzu-unity-mcp call test_run --mode edit --assembly MyGame.Tests
+isuzu-unity-mcp call test_results            # poll; status goes running -> completed
+```
+
+`test_run` does not wait for the outcome, because the run occupies the main thread for its
+whole duration. During that window `test_results` is the only tool that answers — poll it
+rather than retrying `test_run`. A `status` of `interrupted` means a domain reload happened
+mid-run and the outcome was lost; start the run again.
 
 ### Save a screenshot to a file
 

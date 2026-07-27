@@ -8,6 +8,7 @@ import { ToolCatalogClient } from "./core/ToolCatalogClient.js";
 import { ToolRouter } from "./core/ToolRouter.js";
 import { registerCodePrompt } from "./core/CodePrompt.js";
 import { UnhandledErrorTracker } from "./core/TaskResilience.js";
+import { serverVersion } from "./core/Version.js";
 
 /**
  * Main entry point for the MCP server application.
@@ -18,7 +19,7 @@ async function main() {
     // listChanged is declared because the tool list is not static: it comes from whichever
     // Editor is connected, and changes when one connects or recompiles.
     const mcpServer = new McpServer(
-      { name: "unity-mcp", version: "3.0.0" },
+      { name: "unity-mcp", version: serverVersion() },
       { capabilities: { tools: { listChanged: true }, prompts: {} } }
     );
 

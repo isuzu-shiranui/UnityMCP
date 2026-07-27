@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.1.0] - 2026-07-28
+
+Released to keep the version in step with the Unity package, which gained `test_run` and
+`test_results`. No change was needed here: this server forwards whatever the Editor publishes
+at `GET /tools`, so the two new tools appear on their own. That is the property the v3
+architecture exists to have, and this release is the first time it has been exercised.
+
+### Fixed
+- The version reported in the MCP `initialize` handshake was the literal `3.0.0`, so this
+  release would have introduced itself as the previous one. It is read from package.json now,
+  and a test asserts the manifest is actually found rather than silently falling back.
+
+### Changed
+- The bundled skill documents the test tools and the polling they require.
+- Releases now publish through npm trusted publishing (OIDC) rather than a stored token.
+
 ## [3.0.0] - 2026-07-27
 
 A breaking release. Tools are declared once, in the Editor; the TypeScript server forwards

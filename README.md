@@ -1,7 +1,7 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.0.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -10,7 +10,7 @@
 
 Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに、CLI 経由で人間とスクリプトに開放するフレームワークです。
 
-## 🌟 v3 の特徴
+## v3 の特徴
 
 - **ツール定義は Editor 側の1箇所だけ** — C# の static メソッドに `[McpTool]` を付けると、シグネチャから JSON Schema が生成され `GET /tools` で配信されます。TypeScript 側にツール定義はありません。
 - **CLI が MCP から独立** — `isuzu-unity-mcp` コマンドは Editor が公開する descriptor ファイルを読んで直接接続します。MCP クライアントを起動しておく必要はありません。
@@ -18,13 +18,13 @@ Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに
 - **遅い処理はジョブになる** — 数秒で終わらない呼び出しは job ID を返します。タイムアウトを返しつつ裏で実行を続ける、ということはありません。
 - **認証必須** — 全リクエストに bearer token が要ります。ローカルバインドはアクセス制御ではありません。
 
-## 📋 必要条件
+## 必要条件
 
 - Unity Editor 2022.3 以降（Unity 6 で検証）
 - Node.js 18 以降
 - `com.unity.nuget.newtonsoft-json` 3.2.1（依存として自動解決されます）
 
-## 🚀 はじめに
+## はじめに
 
 ### インストール
 
@@ -105,7 +105,7 @@ isuzu-unity-mcp call play_mode_status
 
 > **`--file` を使う理由**: C# のスニペットをシェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。結果は「呼び出し側に見えない生成ソース中のコンパイルエラー」になり、原因の特定が非常に困難です。ファイルから読めばそのどちらも経由しません。
 
-## 🔌 アーキテクチャ
+## アーキテクチャ
 
 ```
 MCP クライアント (Claude)                  ターミナル / スクリプト
@@ -135,15 +135,17 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 `ToolCatalogClient` が `/tools` を取得し、`ToolRouter` がそれを `tools/list` / `tools/call` として配ります。低レベルのリクエストハンドラを使っているので、**Editor が生成した JSON Schema がそのままクライアントに届きます**。
 
-## 📚 組み込みツール
+## 組み込みツール
 
-### Editor が公開するもの（21個）
+### Editor が公開するもの（23個）
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
 | `execute_code` | unsafe | C# スニペットのコンパイル・実行 |
 | `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
 | `compile_request` | unsafe | 再コンパイルを要求 |
+| `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
+| `test_results` | safe | 実行中・直近のテスト結果（**実行中でも読める**） |
 | `console_read_logs` | safe | コンソールのエントリを読む |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
@@ -160,6 +162,8 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 Editor パネルのキャプチャ（`inspector` / `hierarchy` / `project` / `console` / `window:<title>`）は Windows 限定です。`game` と `scene` は全プラットフォームで動きます。
 
+`test_run` / `test_results` は `com.unity.test-framework` が入っているときだけ現れます（Unity の既定パッケージなので通常は入っています）。専用のアセンブリに分けて `UNITY_INCLUDE_TESTS` で制約しているため、無い環境ではこの2つが一覧に出ないだけで、パッケージ全体は変わらず動きます。
+
 ### MCP サーバが提供するもの（3個）
 
 `unity_list_clients` / `unity_set_active_client` / `unity_get_active_client` — 複数 Editor の選択。どの Editor 単体にも答えられない問いなので、ここに残っています。
@@ -168,7 +172,7 @@ Editor パネルのキャプチャ（`inspector` / `hierarchy` / `project` / `co
 
 `code_execute` — `execute_code` に渡す C# の書き方。
 
-## 🛠️ ツールの追加
+## ツールの追加
 
 **Editor 側にメソッドを1つ書くだけです。** TypeScript 側の作業はありません。
 
@@ -211,7 +215,7 @@ internal static class MyTools
 
 **説明文はモデルがそのツールを選ぶ唯一の手がかりです。** 何をするかだけでなく、どういうときに使うかを書いてください。
 
-## ⚙️ 設定
+## 設定
 
 ### Unity Editor (Preferences → Unity MCP)
 
@@ -231,7 +235,7 @@ internal static class MyTools
 | `MCP_RELOAD_RETRY_MAX_MS` | 15000 | ドメインリロード中のリトライ上限 (ms) |
 | `MCP_PROJECT_API_PORT` | 27180 | ProjectApi のポート |
 
-## 🧪 テスト
+## テスト
 
 ```bash
 # TypeScript
@@ -242,10 +246,20 @@ Unity.exe -batchmode -nographics -projectPath <project> \
   -runTests -testPlatform EditMode -testResults results.xml
 ```
 
+起動中の Editor に対しては MCP / CLI からも走らせられます。
+
+```bash
+isuzu-unity-mcp call test_run --mode edit --assembly MyGame.Tests
+isuzu-unity-mcp call test_results          # 進行中でも読める
+isuzu-unity-mcp call test_results --include_passed true --limit 200
+```
+
+**テスト実行中はメインスレッドが塞がるので、他のツールは応答しません。** `test_results` は `MainThread = false` なので、その最中でも件数と失敗内容を返します。実行を開始した `test_run` はすぐ戻り、結果は待ちません。
+
 Unity 側のテストを走らせるには、プロジェクトの `Packages/manifest.json` に
 `"testables": ["jp.shiranui-isuzu.unity-mcp"]` が必要です。
 
-## 🔍 トラブルシューティング
+## トラブルシューティング
 
 **`isuzu-unity-mcp projects` が何も返さない** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
 
@@ -257,7 +271,7 @@ Unity 側のテストを走らせるには、プロジェクトの `Packages/man
 
 **呼び出しが job ID を返した** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`isuzu-unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
 
-## 🔒 セキュリティ
+## セキュリティ
 
 - サーバは `127.0.0.1` のみにバインドし、**全リクエストに bearer token を要求します**。
 - CORS ヘッダは送りません。v2 は `Access-Control-Allow-Origin: *` を返しており、ユーザーが開いている任意の Web ページが `/execute_code` に POST して Editor 内で任意の C# を実行できました。
@@ -275,7 +289,7 @@ Unity 側のテストを走らせるには、プロジェクトの `Packages/man
 
 これは規約に頼った約束ではなく、CI が両方を毎回検査します。`Runtime/` にスクリプトを1つ置く、あるいは asmdef の `includePlatforms` を空にする、いずれもビルドが落ちることを確認済みです。
 
-## 🧹 マシン上に置くもの
+## マシン上に置くもの
 
 状態はすべて1つのルート配下にまとまっているので、消すときは1箇所で済みます。
 
@@ -295,7 +309,7 @@ isuzu-unity-mcp uninstall --yes   # 実行
 
 `uninstall` は MCP クライアント設定から `isuzu-unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor をすぐ再作成してしまうので、その場合は実行を拒否して先に閉じるよう促します。Unity パッケージ本体の削除は Package Manager から行ってください。
 
-## 📖 v2 からの移行
+## v2 からの移行
 
 破壊的変更です。
 
@@ -313,6 +327,6 @@ isuzu-unity-mcp uninstall --yes   # 実行
 
 curl ベースの手順書は `isuzu-unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付与します。
 
-## 📄 ライセンス
+## ライセンス
 
 MIT

@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.1.0] - 2026-07-28
+
+### Added
+- `test_run` and `test_results` drive Unity's test runner. `test_run` returns as soon as the
+  run is queued, because a run holds the main thread for its whole duration; `test_results` is
+  declared `MainThread = false` so it can report counts and failures during exactly that window,
+  when no other tool answers. State is mirrored into `SessionState`, so a PlayMode run's domain
+  reloads do not lose it — a run that was interrupted says so rather than reporting "running"
+  forever.
+- These two live in their own assembly, `UnityMCP.Editor.TestRunner`, constrained to
+  `UNITY_INCLUDE_TESTS`. A project without `com.unity.test-framework` loses the two tools
+  instead of failing to compile the package, and no dependency is pushed onto consumers who
+  do not want it.
+
+### Fixed
+- `/health` advertised a hand-written version that had already fallen behind the package, the
+  exact failure its own comment warned about. The version is read from the package manifest
+  now; the literal that remains is only for an assembly loaded outside a package, and CI
+  checks that one too.
+
+### Removed
+- The `501` stubs for `POST /test/run` and `GET /test/results`, now that the tools exist.
+
 ## [3.0.0] - 2026-07-27
 
 A breaking release. Tools are declared once, in the Editor; the TypeScript server forwards

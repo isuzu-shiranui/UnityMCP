@@ -92,15 +92,22 @@ jobs:
             exit 1
           fi
 
-      - name: Advertised protocol version matches the package
+      # The server reads its version from the package manifest at runtime, so the two cannot
+      # drift. The literal below is only reached when the assembly is not loaded from a
+      # package, which is rare enough that a stale value there would never be noticed.
+      - name: Fallback version matches the package
         run: |
           UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
-          SERVER=$(grep -oP 'ProtocolVersion = "\K[^"]+' \
+          SERVER=$(grep -oP 'FallbackVersion = "\K[^"]+' \
             jp.shiranui-isuzu.unity-mcp/Editor/Core/McpHttpServer.cs)
           echo "package:  $UNITY"
-          echo "protocol: $SERVER"
+          echo "fallback: $SERVER"
+          if [ -z "$SERVER" ]; then
+            echo "McpHttpServer.FallbackVersion was not found; this check has stopped checking anything"
+            exit 1
+          fi
           if [ "$UNITY" != "$SERVER" ]; then
-            echo "McpHttpServer.ProtocolVersion is stale; clients would be told the wrong version"
+            echo "McpHttpServer.FallbackVersion is stale; clients would be told the wrong version"
             exit 1
           fi
 

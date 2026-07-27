@@ -24,10 +24,47 @@ namespace UnityMCP.Editor.Core
     /// </summary>
     internal sealed class McpHttpServer : IDisposable
     {
-        // Protocol version advertised in /health and UDP announce payloads.
-        // Kept equal to the package version: v2 left this at 2.1.0 while the package moved to
-        // 2.1.1, so the number clients saw meant nothing.
-        private const string ProtocolVersion = "3.0.0";
+        /// <summary>
+        /// Version advertised in <c>/health</c> and in the instance descriptor.
+        /// </summary>
+        /// <remarks>
+        /// Read from the package manifest rather than written here. v2 left a hand-written
+        /// constant at 2.1.0 while the package moved to 2.1.1, so the number clients saw meant
+        /// nothing; v3 kept the constant and a comment saying to keep it in step, and it went
+        /// stale again on the very next release. A comment is not a mechanism. The literal
+        /// remains only as the answer for an assembly that is not loaded from a package, and CI
+        /// checks that it too stays in step.
+        /// </remarks>
+        private const string FallbackVersion = "3.1.0";
+
+        private static string ProtocolVersion
+        {
+            get
+            {
+                if (cachedVersion != null)
+                {
+                    return cachedVersion;
+                }
+
+                string version = null;
+
+                try
+                {
+                    version = UnityEditor.PackageManager.PackageInfo
+                        .FindForAssembly(typeof(McpHttpServer).Assembly)?.version;
+                }
+                catch
+                {
+                    // Resolution can fail while the package database is still loading.
+                }
+
+                cachedVersion = string.IsNullOrEmpty(version) ? FallbackVersion : version;
+
+                return cachedVersion;
+            }
+        }
+
+        private static string cachedVersion;
 
         // ── Built-in endpoint/action idempotency table ──
         // Granular per-action entries exposed via /health.handlers[].
@@ -489,12 +526,10 @@ namespace UnityMCP.Editor.Core
                         break;
 
                     // /compile/* is implemented as the compile_status and compile_request
-                    // tools; /eval duplicated /execute_code and is withdrawn. The remaining
-                    // stubs are still unbuilt, and say so with a pointer rather than a bare
-                    // "not implemented".
+                    // tools, /test/* as test_run and test_results; /eval duplicated
+                    // /execute_code and is withdrawn. What is left is still unbuilt, and says
+                    // so with a pointer rather than a bare "not implemented".
                     case "/hlsl/errors" when method == "GET":
-                    case "/test/run" when method == "POST":
-                    case "/test/results" when method == "GET":
                         this.WriteEnvelope(
                             response,
                             501,
