@@ -42,6 +42,16 @@ jobs:
           cache: 'npm'
           cache-dependency-path: unity-mcp-ts/package-lock.json
 
+      # Node 22 bundles npm 10, which has no OIDC support at all. It does not say so: it falls
+      # straight through to the token in the .npmrc that setup-node writes, which is a
+      # placeholder when no token is supplied, and the registry answers 404. Upgrading is the
+      # difference between trusted publishing working and failing with an error about the
+      # package not existing.
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          echo "node $(node --version), npm $(npm --version)"
+
       - name: Get version
         id: package-version
         run: |
