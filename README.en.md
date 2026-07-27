@@ -13,7 +13,7 @@ Opens the Unity Editor to AI agents over the Model Context Protocol, and to peop
 ## 🌟 What's new in v3
 
 - **Tools are defined once, in the Editor.** Put `[McpTool]` on a static C# method and its JSON Schema is derived from the signature and published at `GET /tools`. There is no tool definition on the TypeScript side.
-- **The CLI does not need MCP.** `unity-mcp` reads the descriptor file the Editor publishes and connects directly, so reaching Unity from a shell no longer requires an MCP client to be running.
+- **The CLI does not need MCP.** `isuzu-unity-mcp` reads the descriptor file the Editor publishes and connects directly, so reaching Unity from a shell no longer requires an MCP client to be running.
 - **It answers while the Editor is busy.** Tools declaring `MainThread = false`, plus `/health`, `/jobs` and `/tools`, are served from a worker thread — which is exactly when you want to know what the Editor is doing.
 - **Slow work becomes a job.** A call that does not finish in a few seconds returns a job id rather than a timeout, so nothing keeps running behind a failure you might retry.
 - **Authenticated.** Every request needs a bearer token; binding to loopback was never access control.
@@ -40,17 +40,17 @@ The MCP server and CLI:
 cd unity-mcp-ts
 npm install
 npm run build
-npm link          # if you want the unity-mcp / unity-mcp-server commands
+npm link          # if you want the isuzu-unity-mcp command
 
-unity-mcp setup   # register with your MCP client and install the Claude Code skill
+isuzu-unity-mcp setup   # register with your MCP client and install the Claude Code skill
 ```
 
 `setup` only updates MCP client configs that already exist, rather than creating one for a
 client you do not use, and leaves every other server and key in those files untouched.
 
 ```bash
-unity-mcp doctor      # what is installed, where, and what is stale
-unity-mcp uninstall   # lists what it would remove; --yes to do it
+isuzu-unity-mcp doctor      # what is installed, where, and what is stale
+isuzu-unity-mcp uninstall   # lists what it would remove; --yes to do it
 ```
 
 ### Check it works
@@ -58,9 +58,9 @@ unity-mcp uninstall   # lists what it would remove; --yes to do it
 The server starts when the Editor opens a project, and publishes a descriptor file.
 
 ```bash
-unity-mcp projects   # Editors currently running
-unity-mcp health     # server status
-unity-mcp tools      # what this Editor publishes
+isuzu-unity-mcp projects   # Editors currently running
+isuzu-unity-mcp health     # server status
+isuzu-unity-mcp tools      # what this Editor publishes
 ```
 
 ### Claude Desktop / Claude Code
@@ -68,7 +68,7 @@ unity-mcp tools      # what this Editor publishes
 ```json
 {
   "mcpServers": {
-    "unity-mcp": {
+    "isuzu-unity-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/unity-mcp-ts/build/index.js"]
     }
@@ -81,15 +81,15 @@ The Editor does not have to be running first. Until one appears the server answe
 ### CLI
 
 ```bash
-unity-mcp call play_mode_status
-unity-mcp call console_read_logs --type error --limit 20
-unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
+isuzu-unity-mcp call play_mode_status
+isuzu-unity-mcp call console_read_logs --type error --limit 20
+isuzu-unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
 
 # Pass C# from a file; it is sent base64-encoded
-unity-mcp call execute_code --file snippet.cs
+isuzu-unity-mcp call execute_code --file snippet.cs
 
 # When several Editors are open
-unity-mcp call play_mode_status --project MyGame
+isuzu-unity-mcp call play_mode_status --project MyGame
 ```
 
 **Inside a project, `--project` is unnecessary.** With several Editors open, a working
@@ -97,11 +97,11 @@ directory that sits inside exactly one of them selects that one.
 
 ```bash
 cd "H:/Unity Projects/MyGame/Assets/Scripts"
-unity-mcp call play_mode_status
+isuzu-unity-mcp call play_mode_status
 # [using MyGame — the project this directory belongs to]
 ```
 
-`unity-mcp projects` marks the reachable one with `containsWorkingDirectory`. Run from
+`isuzu-unity-mcp projects` marks the reachable one with `containsWorkingDirectory`. Run from
 outside every project and it names the candidates and stops, rather than guessing. The MCP
 server applies the same rule, so opening Claude Code in a Unity project removes the need for
 `target`.
@@ -116,7 +116,7 @@ Errors go to stderr with a non-zero exit code, so it composes in scripts.
 MCP client (Claude)                        terminal / scripts
         │ stdio                                    │
         ▼                                          │
-  unity-mcp-server                            unity-mcp (CLI)
+  MCP server (build/index.js)              isuzu-unity-mcp (CLI)
         │                                          │
         │  read descriptor ────────────────────────┤
         │  <port + token>                          │
@@ -252,15 +252,15 @@ project's `Packages/manifest.json`.
 
 ## 🔍 Troubleshooting
 
-**`unity-mcp projects` finds nothing** — check an Editor has a project open and its server started. Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\`, or `~/.local/share` / `~/Library/Application Support` on macOS and Linux.
+**`isuzu-unity-mcp projects` finds nothing** — check an Editor has a project open and its server started. Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\`, or `~/.local/share` / `~/Library/Application Support` on macOS and Linux.
 
-**401 responses** — the token is in the descriptor file. The CLI and MCP server read it for you; curl needs `Authorization: Bearer <token>`. Going through `unity-mcp`, or the MCP server's `/proxy`, avoids handling it.
+**401 responses** — the token is in the descriptor file. The CLI and MCP server read it for you; curl needs `Authorization: Bearer <token>`. Going through `isuzu-unity-mcp`, or the MCP server's `/proxy`, avoids handling it.
 
 **The console reports nothing but you expect output** — `console_read_logs` reflects what the Editor console currently holds. When you suspect it has dropped something, read the file directly with `editor_log_tail`, which works even while the Editor is busy.
 
 **A script edit does not take effect** — `AssetDatabase.Refresh()` does not reliably trigger a compile. Use `compile_request`, then check `succeeded` with `compile_status`. After a failed compile the Editor keeps running the previous assembly with `isCompiling` back to false, so silence does not mean success.
 
-**A call returned a job id** — work slower than `syncWaitMs` (3 s by default) becomes a job. Collect it with `unity-mcp jobs <id>`. **Do not repeat the call**: the work is still running.
+**A call returned a job id** — work slower than `syncWaitMs` (3 s by default) becomes a job. Collect it with `isuzu-unity-mcp jobs <id>`. **Do not repeat the call**: the work is still running.
 
 ## 🔒 Security
 
@@ -295,18 +295,18 @@ All state lives under a single root, so there is one thing to delete.
 |---|---|
 | `%LOCALAPPDATA%\UnityMCP\instances\` | Descriptors for running Editors (port and token). Withdrawn on quit, and swept for dead pids on start |
 | `%LOCALAPPDATA%\UnityMCP\cache\` | Cached tool catalog |
-| `~/.claude/skills/unity-mcp/` | Claude Code skill, installed by `setup` |
-| The `unity-mcp` entry in your MCP client config | Added by `setup` |
+| `~/.claude/skills/isuzu-unity-mcp/` | Claude Code and Codex skill, installed by `setup` |
+| The `isuzu-unity-mcp` entry in your MCP client config | Added by `setup` |
 
 On macOS and Linux the root is under `~/.local/share` or `~/Library/Application Support`
-instead. `unity-mcp doctor` prints the real locations.
+instead. `isuzu-unity-mcp doctor` prints the real locations.
 
 ```bash
-unity-mcp uninstall         # lists what would go
-unity-mcp uninstall --yes   # removes it
+isuzu-unity-mcp uninstall         # lists what would go
+isuzu-unity-mcp uninstall --yes   # removes it
 ```
 
-`uninstall` takes only the `unity-mcp` entry out of your MCP client configs and leaves every
+`uninstall` takes only the `isuzu-unity-mcp` entry out of your MCP client configs and leaves every
 other server alone. It refuses while an Editor is running, since that Editor would republish
 its descriptor moments later. The Unity package itself is removed through the Package Manager.
 
@@ -326,7 +326,7 @@ This release is deliberately breaking.
 | No authentication | bearer token required |
 | Handlers written in TypeScript | `[McpTool]` written in C# |
 
-Replace curl-based procedures with `unity-mcp call`, or route them through the MCP server's `/proxy/<project>/...`, which supplies the token for you.
+Replace curl-based procedures with `isuzu-unity-mcp call`, or route them through the MCP server's `/proxy/<project>/...`, which supplies the token for you.
 
 ## 📄 License
 

@@ -1,11 +1,10 @@
 {
-  "name": "unity-mcp-ts",
+  "name": "@shiranui-isuzu/unity-mcp",
   "version": "3.0.0",
   "main": "build/index.js",
   "type": "module",
   "bin": {
-    "unity-mcp": "./build/cli.js",
-    "unity-mcp-server": "./build/index.js"
+    "isuzu-unity-mcp": "./build/cli.js"
   },
   "scripts": {
     "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('build', {recursive:true, force:true}))\"",
@@ -61,5 +60,8 @@
     "build/",
     "skills/",
     "README.md"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

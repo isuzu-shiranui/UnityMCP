@@ -54,8 +54,8 @@ describe('registerWithAgent', () => {
         expect(result.changed).toBe(true);
 
         const config = JSON.parse(await fs.readFile(nested, 'utf8'));
-        expect(config.mcpServers['unity-mcp'].args[0]).toBe(serverEntryPoint());
-        expect(config.mcpServers['unity-mcp'].command).toBe(process.execPath);
+        expect(config.mcpServers['isuzu-unity-mcp'].args[0]).toBe(serverEntryPoint());
+        expect(config.mcpServers['isuzu-unity-mcp'].command).toBe(process.execPath);
     });
 
     test('leaves other servers and unrelated keys untouched', async () => {
@@ -69,19 +69,19 @@ describe('registerWithAgent', () => {
         const config = await readConfig();
         expect(config.theme).toBe('dark');
         expect(config.mcpServers.other).toEqual({ command: 'node', args: ['other.js'] });
-        expect(config.mcpServers['unity-mcp']).toBeDefined();
+        expect(config.mcpServers['isuzu-unity-mcp']).toBeDefined();
     });
 
     test('replaces a previous registration rather than duplicating it', async () => {
         await fs.writeFile(configPath, JSON.stringify({
-            mcpServers: { 'unity-mcp': { command: 'stale', args: ['old.js'] } },
+            mcpServers: { 'isuzu-unity-mcp': { command: 'stale', args: ['old.js'] } },
         }), 'utf8');
 
         await registerWithAgent(jsonAgent(configPath), 'node', ['new.js']);
 
         const config = await readConfig();
-        expect(Object.keys(config.mcpServers)).toEqual(['unity-mcp']);
-        expect(config.mcpServers['unity-mcp'].args).toEqual(['new.js']);
+        expect(Object.keys(config.mcpServers)).toEqual(['isuzu-unity-mcp']);
+        expect(config.mcpServers['isuzu-unity-mcp'].args).toEqual(['new.js']);
     });
 
     test('refuses to overwrite a config it cannot parse', async () => {
@@ -103,7 +103,7 @@ describe('unregisterFromAgent', () => {
             theme: 'dark',
             mcpServers: {
                 other: { command: 'node', args: ['other.js'] },
-                'unity-mcp': { command: 'node', args: ['ours.js'] },
+                'isuzu-unity-mcp': { command: 'node', args: ['ours.js'] },
             },
         }), 'utf8');
 
@@ -114,7 +114,7 @@ describe('unregisterFromAgent', () => {
         const config = await readConfig();
         expect(config.theme).toBe('dark');
         expect(config.mcpServers.other).toBeDefined();
-        expect(config.mcpServers['unity-mcp']).toBeUndefined();
+        expect(config.mcpServers['isuzu-unity-mcp']).toBeUndefined();
     });
 
     test('reports a missing file without creating one', async () => {
@@ -163,8 +163,8 @@ describe('bundled skill', () => {
         const codex = agentTargets().find(a => a.name === 'codex')!;
         const cursor = agentTargets().find(a => a.name === 'cursor')!;
 
-        expect(skillDirectoryFor(claude)?.endsWith(path.join('.claude', 'skills', 'unity-mcp'))).toBe(true);
-        expect(skillDirectoryFor(codex)?.endsWith(path.join('.codex', 'skills', 'unity-mcp'))).toBe(true);
+        expect(skillDirectoryFor(claude)?.endsWith(path.join('.claude', 'skills', 'isuzu-unity-mcp'))).toBe(true);
+        expect(skillDirectoryFor(codex)?.endsWith(path.join('.codex', 'skills', 'isuzu-unity-mcp'))).toBe(true);
         // Agents without a skill mechanism get nothing rather than an invented path.
         expect(skillDirectoryFor(cursor)).toBeNull();
     });

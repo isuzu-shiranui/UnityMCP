@@ -1,4 +1,4 @@
-# unity-mcp-ts
+# @shiranui-isuzu/unity-mcp
 
 The MCP server and CLI for [UnityMCP](https://github.com/isuzu-shiranui/UnityMCP).
 
@@ -13,7 +13,7 @@ MCP client (Claude)                        terminal / scripts
         │ stdio                                    │
         ▼                                          │
   build/index.js                              build/cli.js
-  (MCP server)                                (unity-mcp)
+  (MCP server)                                (isuzu-unity-mcp)
         │                                          │
         │  read descriptor ────────────────────────┤
         │  <port + token>                          │
@@ -41,9 +41,9 @@ MCP client (Claude)                        terminal / scripts
 ```bash
 npm install
 npm run build
-npm link          # provides unity-mcp and unity-mcp-server
+npm link          # provides the isuzu-unity-mcp command
 
-unity-mcp setup   # register with installed agents and install the skill
+isuzu-unity-mcp setup   # register with installed agents and install the skill
 ```
 
 `setup` writes to the MCP config of every supported agent it finds — Claude Code, Claude
@@ -53,12 +53,12 @@ that is not installed, and rewrites them key by key so other servers survive. Pa
 `--agent <name>` to pick one, `--no-skill` to skip skills.
 
 ```bash
-unity-mcp doctor          # what is installed, where, and what is stale
-unity-mcp uninstall       # lists what it would remove
-unity-mcp uninstall --yes # removes it
+isuzu-unity-mcp doctor          # what is installed, where, and what is stale
+isuzu-unity-mcp uninstall       # lists what it would remove
+isuzu-unity-mcp uninstall --yes # removes it
 ```
 
-`uninstall` takes only the `unity-mcp` entry out of each agent config, and refuses while an
+`uninstall` takes only the `isuzu-unity-mcp` entry out of each agent config, and refuses while an
 Editor is running, since that Editor would republish its descriptor moments later.
 
 ## Usage
@@ -68,7 +68,7 @@ Editor is running, since that Editor would republish its descriptor moments late
 ```json
 {
   "mcpServers": {
-    "unity-mcp": {
+    "isuzu-unity-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/unity-mcp-ts/build/index.js"]
     }
@@ -76,27 +76,27 @@ Editor is running, since that Editor would republish its descriptor moments late
 }
 ```
 
-`unity-mcp serve` starts the same server, so one binary covers both roles.
+`isuzu-unity-mcp serve` starts the same server, so one binary covers both roles.
 
 The Editor need not be running at startup. Until one appears the server answers `tools/list`
-from `~/.unity-mcp/tool-catalog.json`, then sends `tools/list_changed` once it has a live
+from its cached catalog under the state root, then sends `tools/list_changed` once it has a live
 catalog. Clients ask for the tool list the moment they connect, which is routinely before any
 Editor is open; answering from the last known catalog beats answering "no tools".
 
 ### As a CLI
 
 ```bash
-unity-mcp projects
-unity-mcp tools
-unity-mcp health
-unity-mcp jobs [id]
+isuzu-unity-mcp projects
+isuzu-unity-mcp tools
+isuzu-unity-mcp health
+isuzu-unity-mcp jobs [id]
 
-unity-mcp call <tool> --json '{"key":"value"}'
-unity-mcp call <tool> --name value --other 3
-unity-mcp call execute_code --file snippet.cs
+isuzu-unity-mcp call <tool> --json '{"key":"value"}'
+isuzu-unity-mcp call <tool> --name value --other 3
+isuzu-unity-mcp call execute_code --file snippet.cs
 
-unity-mcp call <tool> --project MyGame   # when several Editors are open
-unity-mcp call <tool> --raw              # print the whole envelope
+isuzu-unity-mcp call <tool> --project MyGame   # when several Editors are open
+isuzu-unity-mcp call <tool> --raw              # print the whole envelope
 ```
 
 The CLI talks to the Editor directly rather than through this server, so it works with no MCP
@@ -135,7 +135,7 @@ With more than one running, the target is resolved in this order:
    the deepest containing root.
 4. Otherwise the call is refused and the candidates are listed.
 
-`unity-mcp projects` marks the entry that step 3 would choose with `containsWorkingDirectory`.
+`isuzu-unity-mcp projects` marks the entry step 3 would choose with `containsWorkingDirectory`.
 
 Descriptors are checked for a live pid, so an Editor that crashed rather than quit cannot
 linger as a phantom instance. A withdrawn descriptor unregisters its instance immediately: a

@@ -13,7 +13,7 @@ Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに
 ## 🌟 v3 の特徴
 
 - **ツール定義は Editor 側の1箇所だけ** — C# の static メソッドに `[McpTool]` を付けると、シグネチャから JSON Schema が生成され `GET /tools` で配信されます。TypeScript 側にツール定義はありません。
-- **CLI が MCP から独立** — `unity-mcp` コマンドは Editor が公開する descriptor ファイルを読んで直接接続します。MCP クライアントを起動しておく必要はありません。
+- **CLI が MCP から独立** — `isuzu-unity-mcp` コマンドは Editor が公開する descriptor ファイルを読んで直接接続します。MCP クライアントを起動しておく必要はありません。
 - **メインスレッドが詰まっても応答する** — `MainThread = false` を宣言したツールと `/health` `/jobs` `/tools` はワーカースレッドで応答します。Editor が「Hold on」で固まっている最中こそ状態を知りたいので。
 - **遅い処理はジョブになる** — 数秒で終わらない呼び出しは job ID を返します。タイムアウトを返しつつ裏で実行を続ける、ということはありません。
 - **認証必須** — 全リクエストに bearer token が要ります。ローカルバインドはアクセス制御ではありません。
@@ -40,16 +40,16 @@ MCP サーバ / CLI:
 cd unity-mcp-ts
 npm install
 npm run build
-npm link          # unity-mcp / unity-mcp-server コマンドを使う場合
+npm link          # isuzu-unity-mcp コマンドを使う場合
 
-unity-mcp setup   # MCP クライアントへの登録と Claude Code スキルの導入
+isuzu-unity-mcp setup   # MCP クライアントへの登録と Claude Code スキルの導入
 ```
 
 `setup` は既に存在する MCP クライアント設定だけを更新します（使っていないクライアントの設定ファイルを新規に作ったりはしません）。設定ファイル内の他のサーバやキーはそのまま残ります。
 
 ```bash
-unity-mcp doctor      # 何がどこに入っているか、古いものが残っていないか
-unity-mcp uninstall   # 何を消すかを一覧表示（--yes で実行）
+isuzu-unity-mcp doctor      # 何がどこに入っているか、古いものが残っていないか
+isuzu-unity-mcp uninstall   # 何を消すかを一覧表示（--yes で実行）
 ```
 
 ### 動作確認
@@ -57,9 +57,9 @@ unity-mcp uninstall   # 何を消すかを一覧表示（--yes で実行）
 Editor がプロジェクトを開くとサーバが起動し、descriptor ファイルを公開します。
 
 ```bash
-unity-mcp projects   # 起動中の Editor 一覧
-unity-mcp health     # サーバの状態
-unity-mcp tools      # 利用可能なツール
+isuzu-unity-mcp projects   # 起動中の Editor 一覧
+isuzu-unity-mcp health     # サーバの状態
+isuzu-unity-mcp tools      # 利用可能なツール
 ```
 
 ### Claude Desktop / Claude Code との連携
@@ -67,7 +67,7 @@ unity-mcp tools      # 利用可能なツール
 ```json
 {
   "mcpServers": {
-    "unity-mcp": {
+    "isuzu-unity-mcp": {
       "command": "node",
       "args": ["/absolute/path/to/unity-mcp-ts/build/index.js"]
     }
@@ -80,26 +80,26 @@ Editor を先に起動しておく必要はありません。起動していな�
 ### CLI
 
 ```bash
-unity-mcp call play_mode_status
-unity-mcp call console_read_logs --type error --limit 20
-unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
+isuzu-unity-mcp call play_mode_status
+isuzu-unity-mcp call console_read_logs --type error --limit 20
+isuzu-unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
 
 # C# スニペットはファイルから渡すのが安全（base64 で送られます）
-unity-mcp call execute_code --file snippet.cs
+isuzu-unity-mcp call execute_code --file snippet.cs
 
 # Editor が複数起動しているとき
-unity-mcp call play_mode_status --project MyGame
+isuzu-unity-mcp call play_mode_status --project MyGame
 ```
 
 **プロジェクト内で実行していれば `--project` は不要です。** Editor が複数起動していても、カレントディレクトリがどれか1つのプロジェクト配下にあれば、そのプロジェクトが選ばれます。
 
 ```bash
 cd "H:/Unity Projects/MyGame/Assets/Scripts"
-unity-mcp call play_mode_status
+isuzu-unity-mcp call play_mode_status
 # [using MyGame — the project this directory belongs to]
 ```
 
-`unity-mcp projects` の `containsWorkingDirectory` が、いまここから届く Editor を示します。どのプロジェクトの外でもない場所から曖昧なまま実行した場合は、推測せずに候補を挙げて止まります。同じ判定は MCP サーバ側でも働くので、Claude Code をプロジェクトで開いていれば `target` の指定は要りません。
+`isuzu-unity-mcp projects` の `containsWorkingDirectory` が、いまここから届く Editor を示します。どのプロジェクトの外でもない場所から曖昧なまま実行した場合は、推測せずに候補を挙げて止まります。同じ判定は MCP サーバ側でも働くので、Claude Code をプロジェクトで開いていれば `target` の指定は要りません。
 
 エラーは stderr に出て終了コードが非ゼロになるので、そのままスクリプトに組み込めます。
 
@@ -111,7 +111,7 @@ unity-mcp call play_mode_status
 MCP クライアント (Claude)                  ターミナル / スクリプト
         │ stdio                                    │
         ▼                                          │
-  unity-mcp-server                            unity-mcp (CLI)
+  MCP サーバ (build/index.js)              isuzu-unity-mcp (CLI)
         │                                          │
         │  descriptor を読む ──────────────────────┤
         │  <ポート + トークン>                      │
@@ -247,15 +247,15 @@ Unity 側のテストを走らせるには、プロジェクトの `Packages/man
 
 ## 🔍 トラブルシューティング
 
-**`unity-mcp projects` が何も返さない** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
+**`isuzu-unity-mcp projects` が何も返さない** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
 
-**401 が返る** — トークンは descriptor ファイルにあります。CLI と MCP サーバは自動で読みますが、curl で直接叩く場合は `Authorization: Bearer <token>` が要ります。`unity-mcp` 経由にするか、MCP サーバの `/proxy` を使えばトークンを意識せずに済みます。
+**401 が返る** — トークンは descriptor ファイルにあります。CLI と MCP サーバは自動で読みますが、curl で直接叩く場合は `Authorization: Bearer <token>` が要ります。`isuzu-unity-mcp` 経由にするか、MCP サーバの `/proxy` を使えばトークンを意識せずに済みます。
 
 **ログが無いはずがないのに空** — `console_read_logs` は Editor コンソールの現在の内容を返します。取りこぼしが疑われるときは `editor_log_tail` でログファイルを直接読んでください。こちらは Editor がビジーでも動きます。
 
 **スクリプトを編集したのに反映されない** — `AssetDatabase.Refresh()` は必ずしも再コンパイルを起こしません。`compile_request` を使い、`compile_status` で `succeeded` を確認してください。コンパイルに失敗すると Editor は直前のアセンブリのまま `isCompiling` を false に戻すので、「静か」＝「成功」ではありません。
 
-**呼び出しが job ID を返した** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
+**呼び出しが job ID を返した** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`isuzu-unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
 
 ## 🔒 セキュリティ
 
@@ -283,17 +283,17 @@ Unity 側のテストを走らせるには、プロジェクトの `Packages/man
 |---|---|
 | `%LOCALAPPDATA%\UnityMCP\instances\` | 起動中 Editor の descriptor（ポートとトークン）。終了時に自分で削除し、起動時に pid 死亡分を掃除 |
 | `%LOCALAPPDATA%\UnityMCP\cache\` | ツールカタログのキャッシュ |
-| `~/.claude/skills/unity-mcp/` | Claude Code スキル（`setup` で導入） |
-| MCP クライアント設定の `unity-mcp` エントリ | `setup` で追加 |
+| `~/.claude/skills/isuzu-unity-mcp/` | Claude Code / Codex スキル（`setup` で導入） |
+| MCP クライアント設定の `isuzu-unity-mcp` エントリ | `setup` で追加 |
 
-macOS / Linux では `%LOCALAPPDATA%` の位置が `~/.local/share` または `~/Library/Application Support` になります。`unity-mcp doctor` が実際の場所を表示します。
+macOS / Linux では `%LOCALAPPDATA%` の位置が `~/.local/share` または `~/Library/Application Support` になります。`isuzu-unity-mcp doctor` が実際の場所を表示します。
 
 ```bash
-unity-mcp uninstall         # 消す対象を一覧表示するだけ
-unity-mcp uninstall --yes   # 実行
+isuzu-unity-mcp uninstall         # 消す対象を一覧表示するだけ
+isuzu-unity-mcp uninstall --yes   # 実行
 ```
 
-`uninstall` は MCP クライアント設定から `unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor をすぐ再作成してしまうので、その場合は実行を拒否して先に閉じるよう促します。Unity パッケージ本体の削除は Package Manager から行ってください。
+`uninstall` は MCP クライアント設定から `isuzu-unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor をすぐ再作成してしまうので、その場合は実行を拒否して先に閉じるよう促します。Unity パッケージ本体の削除は Package Manager から行ってください。
 
 ## 📖 v2 からの移行
 
@@ -311,7 +311,7 @@ unity-mcp uninstall --yes   # 実行
 | 認証なし | bearer token 必須 |
 | TypeScript でハンドラを書く | C# に `[McpTool]` を書く |
 
-curl ベースの手順書は `unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付与します。
+curl ベースの手順書は `isuzu-unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付与します。
 
 ## 📄 ライセンス
 

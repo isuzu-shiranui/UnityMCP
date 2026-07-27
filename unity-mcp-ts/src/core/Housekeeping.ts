@@ -43,7 +43,7 @@ export function bundledSkillDirectory(): string | null {
     let directory = path.dirname(fileURLToPath(import.meta.url));
 
     for (let i = 0; i < 6; i++) {
-        const candidate = path.join(directory, 'skills', 'unity-mcp');
+        const candidate = path.join(directory, 'skills', 'isuzu-unity-mcp');
 
         if (existsSync(path.join(candidate, 'SKILL.md'))) {
             return candidate;
@@ -64,7 +64,7 @@ export function bundledSkillDirectory(): string | null {
 export function skillDirectoryFor(target: AgentTarget): string | null {
     return target.skillsDirectory === null
         ? null
-        : path.join(target.skillsDirectory, 'unity-mcp');
+        : path.join(target.skillsDirectory, 'isuzu-unity-mcp');
 }
 
 /**
@@ -82,7 +82,7 @@ export async function installSkill(
 
     if (source === null) {
         throw new Error(
-            'The bundled skill was not found. It ships at skills/unity-mcp inside this package; ' +
+            'The bundled skill was not found. It ships at skills/isuzu-unity-mcp inside this package; ' +
             'this looks like a partial checkout or an unexpected install layout.'
         );
     }

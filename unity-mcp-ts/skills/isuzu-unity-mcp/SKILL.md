@@ -1,7 +1,7 @@
 ---
-name: unity-mcp
+name: isuzu-unity-mcp
 description: >
-  Control Unity Editor from the CLI with the unity-mcp command. Execute C# code, browse scene
+  Control Unity Editor from the CLI with the isuzu-unity-mcp command. Execute C# code, browse scene
   hierarchy, inspect/modify GameObjects, capture screenshots, read console logs, check compile
   status, control play mode, and execute menu items. Use when: user wants to interact with Unity
   Editor programmatically, run C# code in Unity, debug Unity scenes, capture Unity screenshots,
@@ -10,16 +10,16 @@ description: >
 
 # Unity MCP - CLI Control for Unity Editor
 
-Drive a running Unity Editor with the `unity-mcp` command. It reads the descriptor file the
+Drive a running Unity Editor with the `isuzu-unity-mcp` command. It reads the descriptor file the
 Editor publishes, so it needs no port scan, no token handling, and no MCP client running.
 
 ```bash
-unity-mcp projects   # which Editors are running
-unity-mcp tools      # what this Editor publishes, with argument names
-unity-mcp health     # server state, queue depth, running jobs
+isuzu-unity-mcp projects   # which Editors are running
+isuzu-unity-mcp tools      # what this Editor publishes, with argument names
+isuzu-unity-mcp health     # server state, queue depth, running jobs
 ```
 
-> Requires UnityMCP v3. On v2 there is no `unity-mcp` binary and endpoints are unauthenticated
+> Requires UnityMCP v3. On v2 there is no `isuzu-unity-mcp` binary and endpoints are unauthenticated
 > on `127.0.0.1:27182`; see the v2 section at the bottom.
 
 ## ⚠ デバッグの鉄則: まずコンソールを読む (必須・最優先)
@@ -27,7 +27,7 @@ unity-mcp health     # server state, queue depth, running jobs
 **何かが動かない/表示されない時、自作の計装(リフレクションでのバッファ読み出し・デバッグカウンタ・合成テスト等)を組む前に、必ず先にコンソールのエラー/警告を読む。**
 
 ```bash
-unity-mcp call console_read_logs --type error --limit 30
+isuzu-unity-mcp call console_read_logs --type error --limit 30
 ```
 
 理由: Unityは原因を**既に文章で教えている**ことが多い。`Property (_HZB) at kernel index (5) is not set` の1行が、2時間分のGPUバッファ readback デバッグより速く真因(未bindリソースでdispatchがドロップ)を名指しした(2026-06-23 実証)。**システムが出している事実を先に読む** > 自分で観測を組む。コストの安い診断から順に: console → 既存のデバッグ表示 → 自作計装。
@@ -40,17 +40,17 @@ unity-mcp call console_read_logs --type error --limit 30
 ## Calling tools
 
 ```bash
-unity-mcp call <tool>                                # no arguments
-unity-mcp call <tool> --name value --other 3         # individual arguments
-unity-mcp call <tool> --json '{"key":"value"}'       # one JSON object
-unity-mcp call <tool> --project MyGame               # when several Editors are open
-unity-mcp call <tool> --raw                          # whole envelope, not just the result
+isuzu-unity-mcp call <tool>                                # no arguments
+isuzu-unity-mcp call <tool> --name value --other 3         # individual arguments
+isuzu-unity-mcp call <tool> --json '{"key":"value"}'       # one JSON object
+isuzu-unity-mcp call <tool> --project MyGame               # when several Editors are open
+isuzu-unity-mcp call <tool> --raw                          # whole envelope, not just the result
 ```
 
 Values are typed automatically: `--limit 20` sends a number, `--active_only true` a boolean.
 Errors print to stderr and set a non-zero exit code, so these compose in scripts.
 
-Run `unity-mcp tools` for the authoritative list — it comes from the Editor, so it is never
+Run `isuzu-unity-mcp tools` for the authoritative list — it comes from the Editor, so it is never
 out of date with the version you are talking to.
 
 ## Execute C# code
@@ -64,7 +64,7 @@ foreach (var l in lights) l.intensity = 2f;
 Debug.Log($"adjusted {lights.Length} lights");
 return lights.Length;
 EOF
-unity-mcp call execute_code --file /tmp/snippet.cs
+isuzu-unity-mcp call execute_code --file /tmp/snippet.cs
 ```
 
 `--file` sends the snippet base64-encoded. Passing C# through a shell **and** a JSON encoder
@@ -107,32 +107,32 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 ### Debug: find errors, then the object they name
 
 ```bash
-unity-mcp call console_read_logs --type error --limit 10
-unity-mcp call scene_browse_hierarchy --name ObjectName
-unity-mcp call inspect_list --game_object_path ObjectName --component_type Transform
+isuzu-unity-mcp call console_read_logs --type error --limit 10
+isuzu-unity-mcp call scene_browse_hierarchy --name ObjectName
+isuzu-unity-mcp call inspect_list --game_object_path ObjectName --component_type Transform
 ```
 
 ### Edit a script and confirm it built
 
 ```bash
-unity-mcp call compile_request
+isuzu-unity-mcp call compile_request
 sleep 3
-unity-mcp call compile_status          # check succeeded, not just isCompiling
+isuzu-unity-mcp call compile_status          # check succeeded, not just isCompiling
 ```
 
 ### Save a screenshot to a file
 
 ```bash
-unity-mcp call capture_screenshot --view scene --max_size 512 \
+isuzu-unity-mcp call capture_screenshot --view scene --max_size 512 \
   | python -c "import sys,json,base64; d=json.load(sys.stdin); open('scene.png','wb').write(base64.b64decode(d['image']))"
 ```
 
 ### The Editor stopped responding
 
 ```bash
-unity-mcp health                       # queueDepth climbing with reqCount flat = wedged main thread
-unity-mcp call editor_log_tail --lines 50
-unity-mcp jobs                         # what is queued or running
+isuzu-unity-mcp health                       # queueDepth climbing with reqCount flat = wedged main thread
+isuzu-unity-mcp call editor_log_tail --lines 50
+isuzu-unity-mcp jobs                         # what is queued or running
 ```
 
 `health`, `jobs` and `editor_log_tail` are answered off the main thread, so they keep working
@@ -147,7 +147,7 @@ Work slower than about three seconds returns a job id instead of a result:
 ```
 
 ```bash
-unity-mcp jobs execute_code-3
+isuzu-unity-mcp jobs execute_code-3
 ```
 
 **Do not repeat the call.** The work is still running; repeating it runs it twice.
@@ -159,7 +159,7 @@ unity-mcp jobs execute_code-3
 | `No running Unity Editor found` | No Editor has a project open with the package installed |
 | `Several Editors are running` | Pass `--project <name>` |
 | `error [invalid_params]` | Argument missing or the value was rejected; the text says which |
-| `error [tool_not_found]` | Run `unity-mcp tools` |
+| `error [tool_not_found]` | Run `isuzu-unity-mcp tools` |
 | `error [unauthorized]` | The descriptor is stale; restart the Editor |
 
 ## Talking to a v2 Editor

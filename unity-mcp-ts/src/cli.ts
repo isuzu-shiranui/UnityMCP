@@ -24,13 +24,13 @@ import {
  * exists while an MCP client has spawned it, which made the documented curl workflow depend
  * on Claude Code being open — the one thing a shell user is least likely to want to require.
  *
- * `unity-mcp serve` still starts the stdio MCP server, so a single binary covers both.
+ * `isuzu-unity-mcp serve` still starts the stdio MCP server, so a single binary covers both.
  */
 
-const USAGE = `unity-mcp - drive a running Unity Editor from the terminal
+const USAGE = `isuzu-unity-mcp - drive a running Unity Editor from the terminal
 
 USAGE
-  unity-mcp <command> [options]
+  isuzu-unity-mcp <command> [options]
 
 COMMANDS
   projects                       List Editors that are currently running
@@ -62,14 +62,14 @@ SETUP / UNINSTALL OPTIONS
   --yes                          Actually remove, rather than listing what would be removed
 
 EXAMPLES
-  unity-mcp setup
-  unity-mcp projects
-  unity-mcp tools
-  unity-mcp call play_mode_status
-  unity-mcp call console_read_logs --type error --limit 20
-  unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
-  unity-mcp call execute_code --file snippet.cs
-  unity-mcp uninstall --yes
+  isuzu-unity-mcp setup
+  isuzu-unity-mcp projects
+  isuzu-unity-mcp tools
+  isuzu-unity-mcp call play_mode_status
+  isuzu-unity-mcp call console_read_logs --type error --limit 20
+  isuzu-unity-mcp call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
+  isuzu-unity-mcp call execute_code --file snippet.cs
+  isuzu-unity-mcp uninstall --yes
 `;
 
 /** Picks the Editor to talk to, failing with something actionable when it cannot. */
@@ -138,7 +138,7 @@ function print(value: unknown): void {
 
 /**
  * Prints an envelope and reports whether it was an error.
- * Errors go to stderr so `unity-mcp call ... > out.json` keeps stdout clean.
+ * Errors go to stderr so `isuzu-unity-mcp call ... > out.json` keeps stdout clean.
  */
 function report(envelope: any, raw: boolean): boolean {
     if (raw) {
@@ -277,7 +277,7 @@ async function runUninstall(parsed: ReturnType<typeof parseArgs>): Promise<numbe
 
         for (const agent of agents) {
             if (agent.configPath !== null) {
-                console.log(`  the unity-mcp entry in ${agent.configPath}`);
+                console.log(`  the isuzu-unity-mcp entry in ${agent.configPath}`);
             }
         }
 
@@ -400,7 +400,7 @@ async function main(): Promise<number> {
             const tool = parsed.positional[0];
 
             if (!tool) {
-                console.error('Which tool? Run `unity-mcp tools` to see what this Editor publishes.');
+                console.error('Which tool? Run `isuzu-unity-mcp tools` to see what this Editor publishes.');
                 return 2;
             }
 

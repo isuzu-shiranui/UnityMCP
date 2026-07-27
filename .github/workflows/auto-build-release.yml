@@ -34,7 +34,7 @@ jobs:
           # The Editor and the server speak one protocol. Releasing them at different
           # versions is the failure this whole release exists to design out, so it stops here.
           if [ "$VERSION" != "$TS_VERSION" ]; then
-            echo "Unity package is $VERSION but unity-mcp-ts is $TS_VERSION; they must match."
+            echo "Unity package is $VERSION but the npm package is $TS_VERSION; they must match."
             exit 1
           fi
 
@@ -125,6 +125,7 @@ jobs:
         if: steps.check-tag.outputs.exists != 'true'
         run: |
           VERSION=${{ steps.package-version.outputs.version }}
+          NAME=$(node -p "require('./unity-mcp-ts/package.json').name")
           {
             echo "## Released v$VERSION"
             echo ""
@@ -132,6 +133,6 @@ jobs:
             if [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
               echo "- npm: already published, skipped"
             else
-              echo "- npm: \`npm install unity-mcp-ts@$VERSION\`"
+              echo "- npm: \`npm install $NAME@$VERSION\`"
             fi
           } >> $GITHUB_STEP_SUMMARY

@@ -39,6 +39,11 @@ what it finds rather than keeping its own copy.
 - `compile_status` and `compile_request` replace the `/compile/*` stubs.
 - `execute_code` accepts `code_base64`, caches compilations by source hash, serializes return
   values structurally, and reports rather than awaits an incomplete Task.
+- The npm package is scoped: @shiranui-isuzu/unity-mcp, with a single isuzu-unity-mcp
+  command. An unscoped unity- name in the public registry reads as official Unity tooling,
+  and the unscoped unity-mcp is already taken by an unrelated project that also installs a
+  binary called unity — Unity's own CLI command. unity-mcp-server is taken twice over.
+  The scope says who owns this without anyone having to check.
 - The installer fetches the server from npm, pinned to this package's version.
 
 ### Fixed

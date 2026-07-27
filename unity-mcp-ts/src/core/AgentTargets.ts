@@ -236,7 +236,7 @@ export async function registerWithAgent(
     target: AgentTarget,
     command: string,
     args: string[],
-    serverName = 'unity-mcp'
+    serverName = 'isuzu-unity-mcp'
 ): Promise<ConfigChange> {
     if (target.configPath === null) {
         return { agent: target.name, configPath: '', changed: false, reason: 'no MCP config' };
@@ -273,7 +273,7 @@ export async function registerWithAgent(
 
 export async function unregisterFromAgent(
     target: AgentTarget,
-    serverName = 'unity-mcp'
+    serverName = 'isuzu-unity-mcp'
 ): Promise<ConfigChange> {
     if (target.configPath === null) {
         return { agent: target.name, configPath: '', changed: false, reason: 'no MCP config' };

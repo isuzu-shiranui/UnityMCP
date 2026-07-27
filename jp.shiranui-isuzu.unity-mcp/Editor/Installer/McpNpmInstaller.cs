@@ -27,17 +27,44 @@ namespace UnityMCP.Editor.Installer
     /// </remarks>
     public static class McpNpmInstaller
     {
-        public const string NpmPackageName = "unity-mcp-ts";
+        /// <summary>
+        /// The companion npm package.
+        /// </summary>
+        /// <remarks>
+        /// Scoped deliberately. An unscoped `unity-` name in the public registry reads as
+        /// official Unity tooling, and the unscoped `unity-mcp` is already taken by an
+        /// unrelated project — one that also installs a binary called `unity`, which is
+        /// Unity's own CLI command. The scope says who owns this without anyone having to
+        /// check.
+        /// </remarks>
+        public const string NpmPackageName = "@shiranui-isuzu/unity-mcp";
 
         /// <summary>Where the npm package is installed, under the project's Library folder.</summary>
         public static string InstallRoot =>
             Path.GetFullPath(Path.Combine(UnityEngine.Application.dataPath, "..", "Library", "UnityMCP"));
 
-        public static string CliPath =>
-            Path.Combine(InstallRoot, "node_modules", NpmPackageName, "build", "cli.js");
+        /// <summary>
+        /// Installed package directory. A scoped name is two path segments, not one, so it is
+        /// split rather than concatenated.
+        /// </summary>
+        private static string PackageRoot
+        {
+            get
+            {
+                var directory = Path.Combine(InstallRoot, "node_modules");
 
-        public static string ServerPath =>
-            Path.Combine(InstallRoot, "node_modules", NpmPackageName, "build", "index.js");
+                foreach (var segment in NpmPackageName.Split('/'))
+                {
+                    directory = Path.Combine(directory, segment);
+                }
+
+                return directory;
+            }
+        }
+
+        public static string CliPath => Path.Combine(PackageRoot, "build", "cli.js");
+
+        public static string ServerPath => Path.Combine(PackageRoot, "build", "index.js");
 
         /// <summary>True when the companion package is already installed here.</summary>
         public static bool IsInstalled => File.Exists(CliPath) && File.Exists(ServerPath);
@@ -95,7 +122,7 @@ namespace UnityMCP.Editor.Installer
         }
 
         /// <summary>
-        /// Runs `npm install unity-mcp-ts@&lt;version&gt;` into the project's Library folder.
+        /// Runs `npm install &lt;package&gt;@&lt;version&gt;` into the project's Library folder.
         /// </summary>
         public static async Task<CommandResult> InstallAsync()
         {
