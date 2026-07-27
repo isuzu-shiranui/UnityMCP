@@ -1,8 +1,14 @@
 name: Release
 
 # Tags, releases and publishes to npm when the version in the Unity package's package.json
-# changes on main. The tag check makes a re-run of the same version a no-op, so pushing an
-# unrelated commit to main does not republish.
+# changes on main.
+#
+# The tag and the npm publish are gated independently. An earlier version gated everything
+# on "does the tag exist", which meant a publish that failed after the tag had been created
+# could never be retried: the re-run saw the tag, decided there was nothing to do, and exited
+# green with the package still missing from the registry. That is exactly what happened to
+# v3.0.0. Each half now asks its own question, so a partial release is resumable with
+# workflow_dispatch.
 on:
   push:
     branches:
@@ -11,8 +17,8 @@ on:
 
 permissions:
   contents: write
-  # Required for npm provenance, which records in the registry which workflow and commit
-  # produced the tarball.
+  # Required for OIDC. npm trusted publishing exchanges this for a short-lived credential,
+  # so no long-lived token is stored in the repository, and provenance is attested from it.
   id-token: write
 
 jobs:
@@ -24,6 +30,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Trusted publishing needs npm 11.5.1 or later, which means Node 22 or later. Node 20
+      # ships npm 10 and fails with an authentication error that says nothing about the
+      # version being the cause.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: unity-mcp-ts/package-lock.json
 
       - name: Get version
         id: package-version
@@ -46,30 +63,48 @@ jobs:
         run: |
           TAG="v${{ steps.package-version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; nothing to release."
+            echo "Tag $TAG already exists."
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Set up Node.js
-        if: steps.check-tag.outputs.exists != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
-          cache-dependency-path: unity-mcp-ts/package-lock.json
+      - name: Already on npm?
+        id: npm-check
+        working-directory: unity-mcp-ts
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=${{ steps.package-version.outputs.version }}
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published."
+            echo "published=true" >> $GITHUB_OUTPUT
+          else
+            echo "$NAME@$VERSION is not on the registry."
+            echo "published=false" >> $GITHUB_OUTPUT
+          fi
+
+      # One flag for "is there anything left to do", so the steps below do not each repeat
+      # the same pair of conditions.
+      - name: Anything to do?
+        id: work
+        run: |
+          if [ "${{ steps.check-tag.outputs.exists }}" = "true" ] \
+             && [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
+            echo "Tagged and published already; nothing to do."
+            echo "needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "needed=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Install
-        if: steps.check-tag.outputs.exists != 'true'
+        if: steps.work.outputs.needed == 'true'
         working-directory: unity-mcp-ts
         run: npm ci
 
       # A release that fails its own tests is worse than a late one. CI covers pull requests;
       # this covers the path that actually publishes.
       - name: Verify
-        if: steps.check-tag.outputs.exists != 'true'
+        if: steps.work.outputs.needed == 'true'
         working-directory: unity-mcp-ts
         run: |
           npx tsc --noEmit
@@ -97,39 +132,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Publishing is separate from the release so a registry outage does not leave the tag
-      # uncreated, and so the "already published" check can be explicit rather than relying on
-      # npm's error text.
-      - name: Already on npm?
-        id: npm-check
-        if: steps.check-tag.outputs.exists != 'true'
-        working-directory: unity-mcp-ts
-        run: |
-          NAME=$(node -p "require('./package.json').name")
-          VERSION=${{ steps.package-version.outputs.version }}
-          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "$NAME@$VERSION is already published."
-            echo "published=true" >> $GITHUB_OUTPUT
-          else
-            echo "published=false" >> $GITHUB_OUTPUT
-          fi
-
+      # No NODE_AUTH_TOKEN. The package is configured on npmjs.com to trust this repository
+      # and this workflow file, and the npm CLI exchanges the OIDC token above for a
+      # short-lived credential. A stored automation token would also have to be one that
+      # bypasses two-factor auth, which npm is in the process of restricting for publishing.
+      #
+      # Requires a trusted publisher entry at
+      # https://www.npmjs.com/package/@shiranui_isuzu/unity-mcp/access naming this workflow.
+      # Without it npm asks for a one-time password and this step fails.
       - name: Publish to npm
-        if: steps.check-tag.outputs.exists != 'true' && steps.npm-check.outputs.published != 'true'
+        if: steps.npm-check.outputs.published != 'true'
         working-directory: unity-mcp-ts
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
-        if: steps.check-tag.outputs.exists != 'true'
+        if: steps.work.outputs.needed == 'true'
         run: |
           VERSION=${{ steps.package-version.outputs.version }}
           NAME=$(node -p "require('./unity-mcp-ts/package.json').name")
           {
-            echo "## Released v$VERSION"
+            echo "## v$VERSION"
             echo ""
             echo "- Unity package: \`https://github.com/${{ github.repository }}.git?path=jp.shiranui-isuzu.unity-mcp#v$VERSION\`"
+            if [ "${{ steps.check-tag.outputs.exists }}" = "true" ]; then
+              echo "- Tag: already existed, left alone"
+            else
+              echo "- Tag: created"
+            fi
             if [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
               echo "- npm: already published, skipped"
             else
