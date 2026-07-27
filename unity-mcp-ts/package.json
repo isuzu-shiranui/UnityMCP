@@ -1,45 +1,65 @@
 {
-    "name":  "unity-mcp-ts",
-    "version":  "3.0.0",
-    "main":  "build/index.js",
-    "type":  "module",
-    "bin":  {
-                "unity-mcp":  "./build/cli.js",
-                "unity-mcp-server":  "./build/index.js"
-            },
-    "scripts":  {
-                    "clean":  "node -e \"import(\u0027node:fs/promises\u0027).then(fs =\u003e fs.rm(\u0027build\u0027, {recursive:true, force:true}))\"",
-                    "build":  "npm run clean \u0026\u0026 tsc",
-                    "start":  "node build/index.js",
-                    "dev":  "tsx src/index.ts",
-                    "test":  "node --experimental-vm-modules node_modules/jest/bin/jest.js",
-                    "lint":  "eslint src --ext .ts",
-                    "lint:fix":  "eslint src --ext .ts --fix"
-                },
-    "keywords":  [
-                     "unity",
-                     "mcp",
-                     "claude",
-                     "ai"
-                 ],
-    "author":  "",
-    "license":  "ISC",
-    "description":  "Unity Model Context Protocol integration",
-    "dependencies":  {
-                         "@modelcontextprotocol/sdk":  "^1.11.0",
-                         "zod":  "^3.24.2"
-                     },
-    "devDependencies":  {
-                            "@jest/globals":  "^29.7.0",
-                            "@types/jest":  "^29.5.12",
-                            "@types/node":  "^22.13.10",
-                            "@typescript-eslint/eslint-plugin":  "^6.21.0",
-                            "@typescript-eslint/parser":  "^6.21.0",
-                            "eslint":  "^8.57.0",
-                            "jest":  "^29.7.0",
-                            "ts-jest":  "^29.1.2",
-                            "tsx":  "^4.19.3",
-                            "typescript":  "^5.8.2",
-                            "undici":  "^6.19.8"
-                        }
+  "name": "unity-mcp-ts",
+  "version": "3.0.0",
+  "main": "build/index.js",
+  "type": "module",
+  "bin": {
+    "unity-mcp": "./build/cli.js",
+    "unity-mcp-server": "./build/index.js"
+  },
+  "scripts": {
+    "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('build', {recursive:true, force:true}))\"",
+    "build": "npm run clean && tsc",
+    "start": "node build/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "unity",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "codex",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "description": "MCP server and CLI for driving the Unity Editor. Pairs with the jp.shiranui-isuzu.unity-mcp Unity package.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.13.10",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "undici": "^6.19.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isuzu-shiranui/UnityMCP.git",
+    "directory": "unity-mcp-ts"
+  },
+  "homepage": "https://github.com/isuzu-shiranui/UnityMCP#readme",
+  "bugs": {
+    "url": "https://github.com/isuzu-shiranui/UnityMCP/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "build/",
+    "skills/",
+    "README.md"
+  ]
 }

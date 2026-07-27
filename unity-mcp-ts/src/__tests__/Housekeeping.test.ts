@@ -10,13 +10,12 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import { agentTargets, registerWithAgent, unregisterFromAgent } from '../core/AgentTargets.js';
 import {
     bundledSkillDirectory,
     installSkill,
-    removeMcpClientConfig,
     serverEntryPoint,
-    skillDirectory,
-    writeMcpClientConfig,
+    skillDirectoryFor,
 } from '../core/Housekeeping.js';
 import { catalogCachePath, descriptorDirectories, stateRoots } from '../core/StatePaths.js';
 
@@ -36,31 +35,36 @@ async function readConfig(): Promise<any> {
     return JSON.parse(await fs.readFile(configPath, 'utf8'));
 }
 
-describe('writeMcpClientConfig', () => {
-    test('creates a config that did not exist', async () => {
-        await writeMcpClientConfig(configPath);
+function jsonAgent(configPath: string) {
+    return {
+        name: 'test-agent',
+        label: 'Test Agent',
+        configPath,
+        configFormat: 'json' as const,
+        skillsDirectory: null,
+    };
+}
 
-        const config = await readConfig();
+describe('registerWithAgent', () => {
+    test('creates a config that did not exist, including parent directories', async () => {
+        const nested = path.join(workDir, 'a', 'b', 'config.json');
+
+        const result = await registerWithAgent(jsonAgent(nested), process.execPath, [serverEntryPoint()]);
+
+        expect(result.changed).toBe(true);
+
+        const config = JSON.parse(await fs.readFile(nested, 'utf8'));
         expect(config.mcpServers['unity-mcp'].args[0]).toBe(serverEntryPoint());
         expect(config.mcpServers['unity-mcp'].command).toBe(process.execPath);
-    });
-
-    test('creates missing parent directories', async () => {
-        const nested = path.join(workDir, 'a', 'b', 'config.json');
-        await writeMcpClientConfig(nested);
-
-        expect(JSON.parse(await fs.readFile(nested, 'utf8')).mcpServers['unity-mcp']).toBeDefined();
     });
 
     test('leaves other servers and unrelated keys untouched', async () => {
         await fs.writeFile(configPath, JSON.stringify({
             theme: 'dark',
-            mcpServers: {
-                other: { command: 'node', args: ['other.js'] },
-            },
+            mcpServers: { other: { command: 'node', args: ['other.js'] } },
         }), 'utf8');
 
-        await writeMcpClientConfig(configPath);
+        await registerWithAgent(jsonAgent(configPath), 'node', ['x.js']);
 
         const config = await readConfig();
         expect(config.theme).toBe('dark');
@@ -73,15 +77,27 @@ describe('writeMcpClientConfig', () => {
             mcpServers: { 'unity-mcp': { command: 'stale', args: ['old.js'] } },
         }), 'utf8');
 
-        await writeMcpClientConfig(configPath);
+        await registerWithAgent(jsonAgent(configPath), 'node', ['new.js']);
 
         const config = await readConfig();
         expect(Object.keys(config.mcpServers)).toEqual(['unity-mcp']);
-        expect(config.mcpServers['unity-mcp'].command).toBe(process.execPath);
+        expect(config.mcpServers['unity-mcp'].args).toEqual(['new.js']);
+    });
+
+    test('refuses to overwrite a config it cannot parse', async () => {
+        // An unparseable config is far more likely to hold settings worth keeping than to be
+        // disposable, so it is reported rather than replaced.
+        await fs.writeFile(configPath, 'not json at all', 'utf8');
+
+        const result = await registerWithAgent(jsonAgent(configPath), 'node', ['x.js']);
+
+        expect(result.changed).toBe(false);
+        expect(result.reason).toMatch(/could not parse/);
+        expect(await fs.readFile(configPath, 'utf8')).toBe('not json at all');
     });
 });
 
-describe('removeMcpClientConfig', () => {
+describe('unregisterFromAgent', () => {
     test('removes only our entry', async () => {
         await fs.writeFile(configPath, JSON.stringify({
             theme: 'dark',
@@ -91,9 +107,9 @@ describe('removeMcpClientConfig', () => {
             },
         }), 'utf8');
 
-        const result = await removeMcpClientConfig(configPath);
+        const result = await unregisterFromAgent(jsonAgent(configPath));
 
-        expect(result.removed).toBe(true);
+        expect(result.changed).toBe(true);
 
         const config = await readConfig();
         expect(config.theme).toBe('dark');
@@ -102,19 +118,21 @@ describe('removeMcpClientConfig', () => {
     });
 
     test('reports a missing file without creating one', async () => {
-        const result = await removeMcpClientConfig(path.join(workDir, 'absent.json'));
+        const absent = path.join(workDir, 'absent.json');
 
-        expect(result.removed).toBe(false);
+        const result = await unregisterFromAgent(jsonAgent(absent));
+
+        expect(result.changed).toBe(false);
         expect(result.reason).toBe('not present');
-        await expect(fs.access(path.join(workDir, 'absent.json'))).rejects.toThrow();
+        await expect(fs.access(absent)).rejects.toThrow();
     });
 
     test('reports a config with no entry of ours', async () => {
         await fs.writeFile(configPath, JSON.stringify({ mcpServers: { other: {} } }), 'utf8');
 
-        const result = await removeMcpClientConfig(configPath);
+        const result = await unregisterFromAgent(jsonAgent(configPath));
 
-        expect(result.removed).toBe(false);
+        expect(result.changed).toBe(false);
         expect(result.reason).toBe('no entry');
         expect((await readConfig()).mcpServers.other).toBeDefined();
     });
@@ -122,9 +140,9 @@ describe('removeMcpClientConfig', () => {
     test('leaves an unreadable file alone', async () => {
         await fs.writeFile(configPath, 'not json at all', 'utf8');
 
-        const result = await removeMcpClientConfig(configPath);
+        const result = await unregisterFromAgent(jsonAgent(configPath));
 
-        expect(result.removed).toBe(false);
+        expect(result.changed).toBe(false);
         expect(await fs.readFile(configPath, 'utf8')).toBe('not json at all');
     });
 });
@@ -140,8 +158,15 @@ describe('bundled skill', () => {
         await expect(fs.access(path.join(source as string, 'SKILL.md'))).resolves.toBeUndefined();
     });
 
-    test('installs into the Claude Code skills directory', () => {
-        expect(skillDirectory().endsWith(path.join('.claude', 'skills', 'unity-mcp'))).toBe(true);
+    test('resolves a per-agent destination', () => {
+        const claude = agentTargets().find(a => a.name === 'claude-code')!;
+        const codex = agentTargets().find(a => a.name === 'codex')!;
+        const cursor = agentTargets().find(a => a.name === 'cursor')!;
+
+        expect(skillDirectoryFor(claude)?.endsWith(path.join('.claude', 'skills', 'unity-mcp'))).toBe(true);
+        expect(skillDirectoryFor(codex)?.endsWith(path.join('.codex', 'skills', 'unity-mcp'))).toBe(true);
+        // Agents without a skill mechanism get nothing rather than an invented path.
+        expect(skillDirectoryFor(cursor)).toBeNull();
     });
 
     test('a failed install leaves the existing skill intact', async () => {

@@ -1,9 +1,9 @@
 import { existsSync } from 'fs';
 import { promises as fs } from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
+import { AgentTarget, agentTargets } from './AgentTargets.js';
 import { readDescriptors } from './InstanceDescriptors.js';
 import {
     catalogCachePath,
@@ -16,7 +16,7 @@ import {
 /**
  * Setup and teardown for everything this tool puts on the machine.
  *
- * The point is that nothing gets installed without a matching way to remove it, and that a
+ * The rule is that nothing gets installed without a matching way to remove it, and that a
  * user can ask where the residue is rather than having to know.
  */
 
@@ -26,45 +26,10 @@ export interface RemovalResult {
     reason?: string;
 }
 
-/** MCP client config files this tool knows how to edit. */
-export interface McpClientTarget {
-    name: string;
-    configPath: string;
-    exists: boolean;
-}
-
-export function mcpClientTargets(): McpClientTarget[] {
-    const home = os.homedir();
-    const targets: { name: string; configPath: string }[] = [];
-
-    if (process.platform === 'win32') {
-        if (process.env.APPDATA) {
-            targets.push({
-                name: 'claude-desktop',
-                configPath: path.join(process.env.APPDATA, 'Claude', 'claude_desktop_config.json'),
-            });
-        }
-    } else if (process.platform === 'darwin') {
-        targets.push({
-            name: 'claude-desktop',
-            configPath: path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json'),
-        });
-    }
-
-    targets.push({ name: 'claude-code', configPath: path.join(home, '.claude.json') });
-
-    return targets.map(t => ({ ...t, exists: existsSync(t.configPath) }));
-}
-
 /** Absolute path of the built MCP server, derived from this module's own location. */
 export function serverEntryPoint(): string {
     const here = path.dirname(fileURLToPath(import.meta.url));
     return path.resolve(here, '..', 'index.js');
-}
-
-/** Where the skill is installed for Claude Code. */
-export function skillDirectory(): string {
-    return path.join(os.homedir(), '.claude', 'skills', 'unity-mcp');
 }
 
 /**
@@ -95,59 +60,19 @@ export function bundledSkillDirectory(): string | null {
     return null;
 }
 
-/**
- * Adds or updates this server's entry in an MCP client config, preserving everything else in
- * the file. Returns the path written.
- */
-export async function writeMcpClientConfig(configPath: string, serverName = 'unity-mcp'): Promise<string> {
-    let config: any = {};
-
-    try {
-        config = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    } catch {
-        // A missing or unparseable config starts from an empty object rather than being
-        // overwritten blind — an unreadable file is not the same as an absent one, so a parse
-        // failure on an existing file is reported by the caller before we get here.
-    }
-
-    config.mcpServers ??= {};
-    config.mcpServers[serverName] = {
-        command: process.execPath,
-        args: [serverEntryPoint()],
-    };
-
-    await fs.mkdir(path.dirname(configPath), { recursive: true });
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
-
-    return configPath;
-}
-
-/** Removes this server's entry from an MCP client config, leaving the rest untouched. */
-export async function removeMcpClientConfig(configPath: string, serverName = 'unity-mcp'): Promise<RemovalResult> {
-    let config: any;
-
-    try {
-        config = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    } catch {
-        return { path: configPath, removed: false, reason: 'not present' };
-    }
-
-    if (!config?.mcpServers?.[serverName]) {
-        return { path: configPath, removed: false, reason: 'no entry' };
-    }
-
-    delete config.mcpServers[serverName];
-    await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
-
-    return { path: configPath, removed: true };
+/** Where this skill is installed for a given agent. */
+export function skillDirectoryFor(target: AgentTarget): string | null {
+    return target.skillsDirectory === null
+        ? null
+        : path.join(target.skillsDirectory, 'unity-mcp');
 }
 
 /**
- * Copies the bundled skill into the user's Claude Code skills directory.
+ * Copies the bundled skill into an agent's skills directory.
  *
  * Staged through a sibling directory and swapped in at the end. Removing the destination
- * first and copying into it would mean a failure part-way — a missing source, an unreadable
- * file — leaves the user with no skill at all, having destroyed the working one they had.
+ * first and copying into it means a failure part-way — a missing source, an unreadable file —
+ * leaves the user with no skill at all, having destroyed the working one they had.
  */
 export async function installSkill(
     sourceOverride?: string,
@@ -157,12 +82,16 @@ export async function installSkill(
 
     if (source === null) {
         throw new Error(
-            'The bundled skill was not found. It ships at skills/unity-mcp in the repository; ' +
+            'The bundled skill was not found. It ships at skills/unity-mcp inside this package; ' +
             'this looks like a partial checkout or an unexpected install layout.'
         );
     }
 
-    const destination = destinationOverride ?? skillDirectory();
+    if (destinationOverride === undefined) {
+        throw new Error('installSkill needs a destination; pass one from skillDirectoryFor().');
+    }
+
+    const destination = destinationOverride;
     const staging = `${destination}.incoming`;
 
     await fs.rm(staging, { recursive: true, force: true });
@@ -196,18 +125,28 @@ async function copyDirectory(source: string, destination: string): Promise<void>
     }
 }
 
+export interface InventoryItem {
+    path: string;
+    kind: string;
+    exists: boolean;
+    detail?: string;
+    /** True when `uninstall` removes this path outright. */
+    removable: boolean;
+}
+
 /**
  * Everything on disk that belongs to this tool, whether or not it currently exists.
  * `doctor` prints it and `uninstall` removes it, from the same list.
  */
-export async function stateInventory(): Promise<Array<{ path: string; kind: string; exists: boolean; detail?: string }>> {
-    const items: Array<{ path: string; kind: string; exists: boolean; detail?: string }> = [];
+export async function stateInventory(): Promise<InventoryItem[]> {
+    const items: InventoryItem[] = [];
 
     for (const root of stateRoots()) {
         items.push({
             path: root,
             kind: root === primaryStateRoot() ? 'state root (written here)' : 'state root (scanned)',
             exists: await pathExists(root),
+            removable: true,
         });
     }
 
@@ -224,20 +163,36 @@ export async function stateInventory(): Promise<Array<{ path: string; kind: stri
             }
         }
 
-        items.push({ path: directory, kind: 'Editor descriptors', exists, detail });
+        items.push({ path: directory, kind: 'Editor descriptors', exists, detail, removable: false });
     }
 
     const cache = catalogCachePath();
-    items.push({ path: cache, kind: 'tool catalog cache', exists: await pathExists(cache) });
+    items.push({
+        path: cache,
+        kind: 'tool catalog cache',
+        exists: await pathExists(cache),
+        removable: false,
+    });
 
-    const skill = skillDirectory();
-    items.push({ path: skill, kind: 'Claude Code skill', exists: await pathExists(skill) });
+    for (const target of agentTargets()) {
+        const skill = skillDirectoryFor(target);
+
+        if (skill !== null) {
+            items.push({
+                path: skill,
+                kind: `${target.label} skill`,
+                exists: await pathExists(skill),
+                removable: true,
+            });
+        }
+    }
 
     for (const legacy of legacyPaths()) {
         items.push({
             path: legacy,
             kind: 'legacy (no longer written)',
             exists: await pathExists(legacy),
+            removable: true,
         });
     }
 
@@ -254,12 +209,12 @@ export async function pathExists(target: string): Promise<boolean> {
 }
 
 /**
- * Removes the tool's state.
+ * Removes the tool's state and installed skills.
  *
- * Refuses while an Editor is still running: its descriptor would be recreated a moment later,
- * and reporting a clean uninstall that immediately un-cleans itself would be a lie.
+ * Refuses while an Editor is running: its descriptor would be recreated a moment later, and
+ * reporting a clean uninstall that immediately un-cleans itself would be a lie.
  */
-export async function removeState(options: { includeSkill: boolean }): Promise<RemovalResult[]> {
+export async function removeState(options: { includeSkills: boolean }): Promise<RemovalResult[]> {
     const running = await readDescriptors();
 
     if (running.length > 0) {
@@ -273,8 +228,13 @@ export async function removeState(options: { includeSkill: boolean }): Promise<R
     const results: RemovalResult[] = [];
     const targets = [...stateRoots(), ...legacyPaths()];
 
-    if (options.includeSkill) {
-        targets.push(skillDirectory());
+    if (options.includeSkills) {
+        for (const agent of agentTargets()) {
+            const skill = skillDirectoryFor(agent);
+            if (skill !== null) {
+                targets.push(skill);
+            }
+        }
     }
 
     for (const target of targets) {

@@ -15,7 +15,7 @@ export interface ParsedArgs {
 }
 
 /** Options consumed by the CLI itself, never forwarded to a tool. */
-const CLI_ONLY_OPTIONS = new Set(['json', 'project', 'file', 'raw', 'help']);
+const CLI_ONLY_OPTIONS = new Set(['json', 'project', 'file', 'raw', 'help', 'agent', 'client', 'yes', 'no-skill']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
     const positional: string[] = [];

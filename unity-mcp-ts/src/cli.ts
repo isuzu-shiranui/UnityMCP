@@ -2,13 +2,17 @@
 import { InstanceDescriptor, readDescriptors } from './core/InstanceDescriptors.js';
 import { buildToolArguments, parseArgs } from './core/CliArgs.js';
 import {
+    detectAgents,
+    findAgent,
+    registerWithAgent,
+    unregisterFromAgent,
+} from './core/AgentTargets.js';
+import {
     installSkill,
-    mcpClientTargets,
-    removeMcpClientConfig,
     removeState,
     serverEntryPoint,
+    skillDirectoryFor,
     stateInventory,
-    writeMcpClientConfig,
 } from './core/Housekeeping.js';
 
 /**
@@ -51,8 +55,9 @@ OPTIONS
   -h, --help                     Show this help
 
 SETUP / UNINSTALL OPTIONS
-  --client <name>                Which MCP client to register with (see: unity-mcp doctor)
-  --no-skill                     Do not install or remove the Claude Code skill
+  --agent <name>                 Which agent to set up: claude-code, claude-desktop, codex,
+                                 cursor, gemini. Defaults to every one found installed.
+  --no-skill                     Do not install or remove skills
   --yes                          Actually remove, rather than listing what would be removed
 
 EXAMPLES
@@ -153,49 +158,80 @@ function report(envelope: any, raw: boolean): boolean {
 }
 
 async function runSetup(parsed: ReturnType<typeof parseArgs>): Promise<number> {
-    const targets = mcpClientTargets();
-    const requested = parsed.options.get('client');
+    const requested = parsed.options.get('agent') ?? parsed.options.get('client');
+    const detected = detectAgents();
 
-    const chosen = requested
-        ? targets.filter(t => t.name === requested)
-        // Default to configs that already exist: writing a brand-new config file for a client
-        // the user does not have installed would be litter, which is the opposite of the point.
-        : targets.filter(t => t.exists);
+    let chosen = requested
+        ? detected.filter(a => a.name === requested)
+        // Default to agents that are actually installed: writing a config for a tool the user
+        // does not have would be litter, which is the opposite of the point.
+        : detected.filter(a => a.detected);
+
+    if (requested && chosen.length === 0) {
+        const known = findAgent(requested);
+        if (known) {
+            chosen = [{ ...known, detected: false }];
+        } else {
+            console.error(
+                `Unknown agent '${requested}'. Known: ${detected.map(a => a.name).join(', ')}`
+            );
+            return 1;
+        }
+    }
 
     if (chosen.length === 0) {
         console.error(
-            requested
-                ? `Unknown client '${requested}'. Known: ${targets.map(t => t.name).join(', ')}`
-                : 'No MCP client config found. Pass --client <name> to create one: ' +
-                  targets.map(t => t.name).join(', ')
+            'No supported agent found on this machine. Pass --agent <name> to set one up anyway: ' +
+            detected.map(a => a.name).join(', ')
         );
         return 1;
     }
 
-    for (const target of chosen) {
-        await writeMcpClientConfig(target.configPath);
-        console.log(`registered with ${target.name}: ${target.configPath}`);
-    }
+    const entry = serverEntryPoint();
+    let failed = false;
 
-    if (!parsed.flags.has('no-skill')) {
+    for (const agent of chosen) {
+        const result = await registerWithAgent(agent, process.execPath, [entry]);
+
+        if (result.changed) {
+            console.log(`registered with ${agent.label}: ${result.configPath}`);
+        } else {
+            console.error(`${agent.label}: ${result.reason}`);
+            failed = failed || result.reason?.startsWith('could not parse') === true;
+        }
+
+        if (parsed.flags.has('no-skill')) {
+            continue;
+        }
+
+        const destination = skillDirectoryFor(agent);
+        if (destination === null) {
+            continue;
+        }
+
         try {
-            console.log(`installed skill: ${await installSkill()}`);
+            console.log(`installed skill:  ${await installSkill(undefined, destination)}`);
         } catch (err) {
-            console.error(`could not install the skill: ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`${agent.label}: could not install the skill: ${err instanceof Error ? err.message : String(err)}`);
+            failed = true;
         }
     }
 
-    console.log('\nRestart the MCP client so it picks up the new server.');
-    return 0;
+    console.log('\nRestart the agent so it picks up the new server.');
+    return failed ? 1 : 0;
 }
 
 async function runDoctor(): Promise<number> {
     console.log(`server entry point: ${serverEntryPoint()}`);
     console.log(`node:               ${process.execPath}\n`);
 
-    console.log('MCP clients');
-    for (const target of mcpClientTargets()) {
-        console.log(`  ${target.exists ? '[found]  ' : '[absent] '}${target.name.padEnd(15)} ${target.configPath}`);
+    console.log('Agents');
+    for (const agent of detectAgents()) {
+        const skills = agent.skillsDirectory === null ? 'no skills' : 'skills supported';
+        console.log(
+            `  ${agent.detected ? '[found]  ' : '[absent] '}${agent.name.padEnd(15)}` +
+            `${(agent.configPath ?? '-').padEnd(60)} (${agent.configFormat}, ${skills})`
+        );
     }
 
     console.log('\nOn disk');
@@ -220,7 +256,8 @@ async function runDoctor(): Promise<number> {
 }
 
 async function runUninstall(parsed: ReturnType<typeof parseArgs>): Promise<number> {
-    const includeSkill = !parsed.flags.has('no-skill');
+    const includeSkills = !parsed.flags.has('no-skill');
+    const agents = detectAgents().filter(a => a.detected);
 
     if (!parsed.flags.has('yes')) {
         // Listing before removing, by default: the alternative is a command that deletes
@@ -228,22 +265,21 @@ async function runUninstall(parsed: ReturnType<typeof parseArgs>): Promise<numbe
         console.log('Would remove:\n');
 
         for (const item of await stateInventory()) {
-            if (!item.exists) {
+            if (!item.exists || !item.removable) {
                 continue;
             }
 
-            if (item.kind === 'Claude Code skill' && !includeSkill) {
+            if (item.kind.endsWith('skill') && !includeSkills) {
                 continue;
             }
 
-            // Descriptor and cache directories live under a state root that is removed whole.
-            if (item.kind.startsWith('state root') || item.kind.startsWith('legacy') || item.kind === 'Claude Code skill') {
-                console.log(`  ${item.path}`);
-            }
+            console.log(`  ${item.path}`);
         }
 
-        for (const target of mcpClientTargets().filter(t => t.exists)) {
-            console.log(`  the unity-mcp entry in ${target.configPath}`);
+        for (const agent of agents) {
+            if (agent.configPath !== null) {
+                console.log(`  the unity-mcp entry in ${agent.configPath}`);
+            }
         }
 
         console.log('\nRe-run with --yes to remove them.');
@@ -252,14 +288,14 @@ async function runUninstall(parsed: ReturnType<typeof parseArgs>): Promise<numbe
 
     let failed = false;
 
-    for (const target of mcpClientTargets().filter(t => t.exists)) {
-        const result = await removeMcpClientConfig(target.configPath);
-        console.log(result.removed
-            ? `removed entry from ${result.path}`
-            : `skipped ${result.path} (${result.reason})`);
+    for (const agent of agents) {
+        const result = await unregisterFromAgent(agent);
+        console.log(result.changed
+            ? `removed entry from ${result.configPath}`
+            : `skipped ${agent.label} (${result.reason})`);
     }
 
-    for (const result of await removeState({ includeSkill })) {
+    for (const result of await removeState({ includeSkills })) {
         if (result.removed) {
             console.log(`removed ${result.path}`);
         } else if (result.reason !== 'not present') {
