@@ -1,15 +1,21 @@
-import * as dgram from 'dgram';
 import { EventEmitter } from 'events';
 import {
     UnityConnection,
     UnityInstance,
     UnityInstanceState,
 } from './UnityConnection.js';
+import { InstanceDescriptor, readDescriptors } from './InstanceDescriptors.js';
 import { extractErrorCode, Idempotency } from './retryableFetch.js';
-import { computeBackoffDelayMs, ConsecutiveFailureMonitor } from './TaskResilience.js';
+import { ConsecutiveFailureMonitor } from './TaskResilience.js';
+
+/** Authorization header for an instance, empty when its descriptor carried no token. */
+function authHeader(instance: UnityInstance): Record<string, string> {
+    return instance.token ? { Authorization: `Bearer ${instance.token}` } : {};
+}
 
 export interface ProjectRegistryOptions {
-    udpPort?: number;
+    /** How often the descriptor directory is re-read. Default 2000 ms. */
+    descriptorPollIntervalMs?: number;
     healthPollIntervalMs?: number;
     /** After this many ms of no contact, an unhealthy instance is removed. */
     staleThresholdMs?: number;
@@ -31,6 +37,8 @@ export interface ProjectRegistryOptions {
     nowImpl?: () => number;
     /** fetch injection for tests. */
     fetchImpl?: typeof fetch;
+    /** Descriptor reader injection for tests. */
+    readDescriptorsImpl?: () => Promise<InstanceDescriptor[]>;
 }
 
 /**
@@ -45,18 +53,16 @@ export interface ProjectRegistryOptions {
  *   - Separate eviction loop removes unhealthy instances after staleThresholdMs.
  */
 export class ProjectRegistry extends EventEmitter {
-    private udpSocket: dgram.Socket | null = null;
+    private descriptorInterval: ReturnType<typeof setInterval> | null = null;
     private healthInterval: ReturnType<typeof setInterval> | null = null;
     private evictionInterval: ReturnType<typeof setInterval> | null = null;
     private unityConnection: UnityConnection;
     /** Instances for which we've fetched /health at least once. */
     private healthFetched: Set<string> = new Set();
-    /** Consecutive UDP listener restarts since the last successful bind (#9). */
-    private udpRestartAttempts: number = 0;
     private readonly healthPollMonitor: ConsecutiveFailureMonitor;
     private readonly evictionMonitor: ConsecutiveFailureMonitor;
 
-    public readonly udpPort: number;
+    public readonly descriptorPollIntervalMs: number;
     public readonly healthPollIntervalMs: number;
     public readonly staleThresholdMs: number;
     public readonly unhealthyCooldownMs: number;
@@ -66,11 +72,12 @@ export class ProjectRegistry extends EventEmitter {
 
     private readonly nowFn: () => number;
     private readonly fetchFn: typeof fetch;
+    private readonly readDescriptorsFn: () => Promise<InstanceDescriptor[]>;
 
     constructor(unityConnection: UnityConnection, options?: ProjectRegistryOptions) {
         super();
         this.unityConnection = unityConnection;
-        this.udpPort = options?.udpPort ?? 27183;
+        this.descriptorPollIntervalMs = options?.descriptorPollIntervalMs ?? 2000;
         this.healthPollIntervalMs = options?.healthPollIntervalMs ?? 10000;
         this.staleThresholdMs = options?.staleThresholdMs ?? 90000;
         this.unhealthyCooldownMs =
@@ -82,19 +89,25 @@ export class ProjectRegistry extends EventEmitter {
         this.initialHealthFetchEnabled = options?.initialHealthFetchEnabled ?? true;
         this.nowFn = options?.nowImpl ?? Date.now;
         this.fetchFn = options?.fetchImpl ?? fetch;
+        this.readDescriptorsFn = options?.readDescriptorsImpl ?? readDescriptors;
         this.healthPollMonitor = new ConsecutiveFailureMonitor('health-poll', { nowImpl: this.nowFn });
         this.evictionMonitor = new ConsecutiveFailureMonitor('eviction', { nowImpl: this.nowFn });
     }
 
     /**
-     * Starts UDP listener and health polling.
+     * Starts descriptor discovery and health polling.
      */
     public start(): void {
-        this.startUdpListener();
+        void this.sweepDescriptors();
+        this.descriptorInterval = setInterval(() => {
+            void this.sweepDescriptors();
+        }, this.descriptorPollIntervalMs);
+
         this.startHealthPolling();
         this.startEvictionLoop();
         console.error(
-            `[INFO] ProjectRegistry started (UDP :${this.udpPort}, health poll ${this.healthPollIntervalMs}ms, cooldown ${this.unhealthyCooldownMs}ms)`
+            `[INFO] ProjectRegistry started (descriptor sweep ${this.descriptorPollIntervalMs}ms, ` +
+            `health poll ${this.healthPollIntervalMs}ms, cooldown ${this.unhealthyCooldownMs}ms)`
         );
     }
 
@@ -102,9 +115,9 @@ export class ProjectRegistry extends EventEmitter {
      * Stops all background processes.
      */
     public stop(): void {
-        if (this.udpSocket) {
-            try { this.udpSocket.close(); } catch { /* ignore */ }
-            this.udpSocket = null;
+        if (this.descriptorInterval) {
+            clearInterval(this.descriptorInterval);
+            this.descriptorInterval = null;
         }
         if (this.healthInterval) {
             clearInterval(this.healthInterval);
@@ -125,119 +138,89 @@ export class ProjectRegistry extends EventEmitter {
     }
 
     // ──────────────────────────────────────────────
-    //  UDP Listener
+    //  Descriptor discovery
     // ──────────────────────────────────────────────
 
-    private startUdpListener(): void {
+    /**
+     * Reads the descriptor directory and reconciles it with the registry.
+     *
+     * Replaces the UDP broadcast listener. Broadcasting could not distinguish a local Editor
+     * from one on another machine — a remote announce registered as a dead local instance and
+     * then made every call fail with "target required" — and it could not carry the auth
+     * token. It also imposed a 30-second floor on noticing a new Editor; a 2-second directory
+     * read is both faster and quieter.
+     */
+    public async sweepDescriptors(): Promise<UnityInstance[]> {
+        let descriptors: InstanceDescriptor[];
+
         try {
-            this.udpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
-
-            this.udpSocket.on('error', (err) => {
-                // Restart with exponential backoff so a persistent failure
-                // (e.g. port taken) doesn't turn into a hot retry loop (#9).
-                const delayMs = computeBackoffDelayMs(this.udpRestartAttempts);
-                this.udpRestartAttempts++;
-                console.error(
-                    `[ERROR] UDP listener error: ${err.message} — restart #${this.udpRestartAttempts} in ${delayMs}ms`
-                );
-                try { this.udpSocket?.close(); } catch { /* ignore */ }
-                this.udpSocket = null;
-                setTimeout(() => this.startUdpListener(), delayMs);
-            });
-
-            this.udpSocket.on('message', (msg, rinfo) => {
-                this.handleUdpMessage(msg, rinfo);
-            });
-
-            this.udpSocket.bind(this.udpPort, () => {
-                console.error(`[INFO] UDP listener bound to port ${this.udpPort}`);
-                this.udpRestartAttempts = 0;
-            });
+            descriptors = await this.readDescriptorsFn();
         } catch (err) {
             console.error(
-                `[ERROR] Failed to start UDP listener: ${err instanceof Error ? err.message : String(err)}`
+                `[WARN] Could not read instance descriptors: ${err instanceof Error ? err.message : String(err)}`
             );
+            return [];
         }
-    }
 
-    /**
-     * Parses an incoming UDP message. Exposed for testing.
-     */
-    public handleUdpMessage(msg: Buffer, rinfo: dgram.RemoteInfo): UnityInstance | null {
-        try {
-            const data = JSON.parse(msg.toString('utf8'));
+        const now = this.nowFn();
+        const seen = new Set<string>();
+        const instances: UnityInstance[] = [];
 
-            if (data.type !== 'unity_announce') {
-                return null;
-            }
-
-            const projectName = data.n || data.projectName || 'Unknown';
-            const port = data.port;
-            const projectPath = data.path || '';
-            const unityVersion = data.unity || data.unityVersion || '';
-            const version = data.v || '';
-
-            if (!port) {
-                console.error('[WARN] Received unity_announce without port, ignoring');
-                return null;
-            }
-
-            // Unity Editor binds HTTP on 127.0.0.1 only (requirements R7.2), but
-            // its UDP broadcast can egress via any NIC, so rinfo.address may be
-            // the machine's LAN address (e.g. 10.x.x.x). For loopback-bound HTTP
-            // we must always contact via 127.0.0.1.
-            const endpoint = `http://127.0.0.1:${port}`;
-            const id = `${projectName}-${port}`;
-            const now = this.nowFn();
+        for (const descriptor of descriptors) {
+            const id = `${descriptor.projectName}-${descriptor.port}`;
+            seen.add(id);
 
             const existing = this.unityConnection.getInstanceById(id);
-            const instance: UnityInstance = existing ? {
-                ...existing,
-                // UDP announce → reset to healthy regardless of prior state.
-                projectName,
-                projectPath,
-                port,
-                unityVersion,
-                endpoint,
-                version,
-                state: 'healthy',
-                lastSeen: now,
-                lastContact: now,
-                consecutiveFailures: 0,
-            } : {
+
+            const instance: UnityInstance = {
+                ...(existing ?? {}),
                 id,
-                projectName,
-                projectPath,
-                port,
-                unityVersion,
-                endpoint,
-                version,
+                projectName: descriptor.projectName,
+                projectPath: descriptor.projectPath ?? '',
+                port: descriptor.port,
+                unityVersion: descriptor.unityVersion ?? '',
+                endpoint: descriptor.endpoint || `http://127.0.0.1:${descriptor.port}`,
+                version: descriptor.protocolVersion ?? '',
+                token: descriptor.token,
+                // A present descriptor means the Editor published itself and has not withdrawn
+                // it, so treat it the way an announce was treated: back to healthy.
                 state: 'healthy',
                 lastSeen: now,
                 lastContact: now,
                 consecutiveFailures: 0,
             };
 
-            this.unityConnection.registerInstance(instance);
-            this.emit('instanceDiscovered', instance);
+            instances.push(instance);
 
-            // Kick off a one-shot /health fetch to populate the idempotency cache.
-            if (!existing && this.initialHealthFetchEnabled && !this.healthFetched.has(id)) {
-                this.healthFetched.add(id);
-                this.fetchInitialHealth(instance).catch((err) => {
-                    console.error(
-                        `[WARN] Initial /health fetch failed for ${id}: ${err instanceof Error ? err.message : String(err)}`
-                    );
-                });
+            if (!existing) {
+                this.unityConnection.registerInstance(instance);
+                this.emit('instanceDiscovered', instance);
+
+                if (this.initialHealthFetchEnabled && !this.healthFetched.has(id)) {
+                    this.healthFetched.add(id);
+                    this.fetchInitialHealth(instance).catch((err) => {
+                        console.error(
+                            `[WARN] Initial /health fetch failed for ${id}: ${err instanceof Error ? err.message : String(err)}`
+                        );
+                    });
+                }
+            } else {
+                this.unityConnection.registerInstance(instance);
             }
-
-            return instance;
-        } catch (err) {
-            console.error(
-                `[WARN] Failed to parse UDP message: ${err instanceof Error ? err.message : String(err)}`
-            );
-            return null;
         }
+
+        // A withdrawn descriptor is a clean shutdown, which is more definite than any health
+        // poll result — drop the instance immediately rather than waiting for it to go stale.
+        for (const instance of this.unityConnection.getAllInstances()) {
+            if (!seen.has(instance.id)) {
+                console.error(`[INFO] ${instance.id} withdrew its descriptor; unregistering`);
+                this.healthFetched.delete(instance.id);
+                this.unityConnection.removeInstance(instance.id);
+                this.emit('instanceRemoved', instance);
+            }
+        }
+
+        return instances;
     }
 
     /**
@@ -249,6 +232,7 @@ export class ProjectRegistry extends EventEmitter {
         try {
             const res = await this.fetchFn(`${instance.endpoint}/health`, {
                 signal: controller.signal,
+                headers: authHeader(instance),
             });
             if (!res.ok) return;
             const parsed: any = await res.json();
@@ -341,6 +325,7 @@ export class ProjectRegistry extends EventEmitter {
             try {
                 const response = await this.fetchFn(`${instance.endpoint}/health`, {
                     signal: controller.signal,
+                    headers: authHeader(instance),
                 });
                 if (response.ok) {
                     ok = true;

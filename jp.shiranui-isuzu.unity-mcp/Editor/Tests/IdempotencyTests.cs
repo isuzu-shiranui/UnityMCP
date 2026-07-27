@@ -33,7 +33,10 @@ namespace UnityMCP.Editor.Tests
                 ["/play_mode:pause"]    = McpIdempotency.Unsafe,
                 ["/play_mode:unpause"]  = McpIdempotency.Unsafe,
                 ["/play_mode:step"]     = McpIdempotency.Unsafe,
-                ["/execute_code"]       = McpIdempotency.Unsafe
+                ["/execute_code"]       = McpIdempotency.Unsafe,
+                ["/jobs"]               = McpIdempotency.Safe,
+                ["/jobs:cancel"]        = McpIdempotency.Unsafe,
+                ["/tools"]              = McpIdempotency.Safe
             };
 
         [Test]

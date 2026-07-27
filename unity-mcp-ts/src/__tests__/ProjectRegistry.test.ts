@@ -1,19 +1,35 @@
 /**
  * Tests for ProjectRegistry:
- *   - UDP message parsing (handleUdpMessage)
+ *   - Descriptor discovery (sweepDescriptors)
  *   - State transitions driven by applyPollOutcome
  *
- * We stub fetch and inject a controllable `now()` so all transitions can be
+ * We stub the descriptor reader and inject a controllable `now()` so all transitions can be
  * asserted deterministically.
  */
 import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import { ProjectRegistry } from '../core/ProjectRegistry.js';
+import { InstanceDescriptor } from '../core/InstanceDescriptors.js';
 import { UnityConnection } from '../core/UnityConnection.js';
+
+function makeDescriptor(overrides: Partial<InstanceDescriptor> = {}): InstanceDescriptor {
+    return {
+        projectPath: '/some/path',
+        projectName: 'MyGame',
+        unityVersion: '2022.3.10f1',
+        port: 27182,
+        token: 'secret-token',
+        pid: 1234,
+        protocolVersion: '3.0.0',
+        endpoint: 'http://127.0.0.1:27182',
+        ...overrides,
+    };
+}
 
 function makeRegistry(opts: {
     now: () => number;
     cooldownMs?: number;
     staleMs?: number;
+    descriptors?: () => Promise<InstanceDescriptor[]>;
 }): { registry: ProjectRegistry; conn: UnityConnection } {
     UnityConnection.resetInstanceForTesting();
     const conn = UnityConnection.getInstance();
@@ -22,81 +38,123 @@ function makeRegistry(opts: {
         unhealthyCooldownMs: opts.cooldownMs ?? 60_000,
         staleThresholdMs: opts.staleMs ?? 90_000,
         initialHealthFetchEnabled: false,
+        readDescriptorsImpl: opts.descriptors ?? (async () => []),
     });
     return { registry, conn };
 }
 
-describe('ProjectRegistry.handleUdpMessage', () => {
+describe('ProjectRegistry.sweepDescriptors', () => {
     beforeEach(() => {
         UnityConnection.resetInstanceForTesting();
     });
 
-    test('parses a valid unity_announce and registers instance', () => {
-        let t = 1_000_000;
-        const { registry, conn } = makeRegistry({ now: () => t });
+    test('registers an instance from a descriptor', async () => {
+        const t = 1_000_000;
+        const { registry, conn } = makeRegistry({
+            now: () => t,
+            descriptors: async () => [makeDescriptor()],
+        });
 
-        const msg = Buffer.from(JSON.stringify({
-            type: 'unity_announce',
-            n: 'MyGame',
-            port: 27182,
-            path: '/some/path',
-            unity: '2022.3.10f1',
-            v: '2.0.0',
-        }));
-        const rinfo = { address: '127.0.0.1', port: 12345, family: 'IPv4', size: msg.length } as any;
+        const result = await registry.sweepDescriptors();
 
-        const result = registry.handleUdpMessage(msg, rinfo);
-
-        expect(result).not.toBeNull();
-        expect(result!.id).toBe('MyGame-27182');
-        expect(result!.projectName).toBe('MyGame');
-        expect(result!.port).toBe(27182);
-        expect(result!.endpoint).toBe('http://127.0.0.1:27182');
-        expect(result!.state).toBe('healthy');
-        expect(result!.lastSeen).toBe(1_000_000);
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('MyGame-27182');
+        expect(result[0].endpoint).toBe('http://127.0.0.1:27182');
+        expect(result[0].state).toBe('healthy');
+        expect(result[0].lastSeen).toBe(t);
         expect(conn.getAllInstances()).toHaveLength(1);
     });
 
-    test('ignores non-announce UDP messages', () => {
-        const { registry, conn } = makeRegistry({ now: () => 0 });
-        const msg = Buffer.from(JSON.stringify({ type: 'something_else' }));
-        const rinfo = { address: '127.0.0.1', port: 1 } as any;
+    test('carries the token so requests can authenticate', async () => {
+        // Without this the server reaches the Editor and is refused: loopback binding is not
+        // access control, so every call must present the descriptor's token.
+        const { registry, conn } = makeRegistry({
+            now: () => 0,
+            descriptors: async () => [makeDescriptor({ token: 'abc123' })],
+        });
 
-        const result = registry.handleUdpMessage(msg, rinfo);
-        expect(result).toBeNull();
-        expect(conn.getAllInstances()).toHaveLength(0);
+        await registry.sweepDescriptors();
+
+        expect(conn.getInstanceById('MyGame-27182')!.token).toBe('abc123');
     });
 
-    test('ignores announce without port', () => {
-        const { registry, conn } = makeRegistry({ now: () => 0 });
-        const msg = Buffer.from(JSON.stringify({ type: 'unity_announce', n: 'X' }));
-        const rinfo = { address: '127.0.0.1', port: 1 } as any;
+    test('emits instanceDiscovered only the first time', async () => {
+        const { registry } = makeRegistry({
+            now: () => 0,
+            descriptors: async () => [makeDescriptor()],
+        });
 
-        const result = registry.handleUdpMessage(msg, rinfo);
-        expect(result).toBeNull();
-        expect(conn.getAllInstances()).toHaveLength(0);
+        const discovered = jest.fn();
+        registry.on('instanceDiscovered', discovered);
+
+        await registry.sweepDescriptors();
+        await registry.sweepDescriptors();
+
+        expect(discovered).toHaveBeenCalledTimes(1);
     });
 
-    test('handles malformed JSON gracefully', () => {
-        const { registry, conn } = makeRegistry({ now: () => 0 });
-        const msg = Buffer.from('not json{{{');
-        const rinfo = { address: '127.0.0.1', port: 1 } as any;
+    test('a withdrawn descriptor unregisters the instance immediately', async () => {
+        // Descriptor removal is a clean shutdown, which is more definite than any health poll
+        // result, so the instance should go at once rather than aging out.
+        let present = true;
+        const { registry, conn } = makeRegistry({
+            now: () => 0,
+            descriptors: async () => (present ? [makeDescriptor()] : []),
+        });
 
-        const result = registry.handleUdpMessage(msg, rinfo);
-        expect(result).toBeNull();
+        const removed = jest.fn();
+        registry.on('instanceRemoved', removed);
+
+        await registry.sweepDescriptors();
+        expect(conn.getAllInstances()).toHaveLength(1);
+
+        present = false;
+        await registry.sweepDescriptors();
+
         expect(conn.getAllInstances()).toHaveLength(0);
+        expect(removed).toHaveBeenCalledTimes(1);
     });
 
-    test('0.0.0.0 is rewritten to 127.0.0.1 in endpoint', () => {
-        const { registry } = makeRegistry({ now: () => 0 });
-        const msg = Buffer.from(JSON.stringify({
-            type: 'unity_announce',
-            n: 'Proj',
-            port: 27185,
-        }));
-        const rinfo = { address: '0.0.0.0', port: 1 } as any;
-        const r = registry.handleUdpMessage(msg, rinfo);
-        expect(r!.endpoint).toBe('http://127.0.0.1:27185');
+    test('a reappearing descriptor resets an unhealthy instance to healthy', async () => {
+        let t = 1000;
+        const { registry, conn } = makeRegistry({
+            now: () => t,
+            descriptors: async () => [makeDescriptor()],
+        });
+
+        await registry.sweepDescriptors();
+        registry.applyPollOutcome('MyGame-27182', false);
+        expect(conn.getInstanceById('MyGame-27182')!.state).toBe('reloading');
+
+        t = 2000;
+        await registry.sweepDescriptors();
+
+        expect(conn.getInstanceById('MyGame-27182')!.state).toBe('healthy');
+        expect(conn.getInstanceById('MyGame-27182')!.consecutiveFailures).toBe(0);
+    });
+
+    test('registers several Editors independently', async () => {
+        const { registry, conn } = makeRegistry({
+            now: () => 0,
+            descriptors: async () => [
+                makeDescriptor({ projectName: 'A', port: 27182 }),
+                makeDescriptor({ projectName: 'B', port: 27185 }),
+            ],
+        });
+
+        await registry.sweepDescriptors();
+
+        expect(conn.getAllInstances().map(i => i.id).sort()).toEqual(['A-27182', 'B-27185']);
+    });
+
+    test('a failing reader does not throw or disturb the registry', async () => {
+        const { registry, conn } = makeRegistry({
+            now: () => 0,
+            descriptors: async () => { throw new Error('permission denied'); },
+        });
+
+        await expect(registry.sweepDescriptors()).resolves.toEqual([]);
+        expect(conn.getAllInstances()).toHaveLength(0);
     });
 });
 
@@ -114,6 +172,7 @@ describe('ProjectRegistry.applyPollOutcome (state machine)', () => {
             unityVersion: '',
             endpoint: 'http://127.0.0.1:1',
             version: '',
+            token: 'test-token',
             state: 'healthy',
             lastSeen: now,
             lastContact: now,
@@ -195,26 +254,8 @@ describe('ProjectRegistry.applyPollOutcome (state machine)', () => {
         expect(conn.getInstanceById('P-1')!.consecutiveFailures).toBe(0);
     });
 
-    test('UDP announce resets state → healthy from any prior state', () => {
-        let t = 1000;
-        const { registry, conn } = makeRegistry({ now: () => t, cooldownMs: 100 });
-        seed(t, conn);
-        t = 2000; registry.applyPollOutcome('P-1', false);
-        t = 3000; registry.applyPollOutcome('P-1', false);
-        expect(conn.getInstanceById('P-1')!.state).toBe('unhealthy');
-
-        t = 10_000;
-        const msg = Buffer.from(JSON.stringify({
-            type: 'unity_announce', n: 'P', port: 1,
-        }));
-        const rinfo = { address: '127.0.0.1', port: 1 } as any;
-        registry.handleUdpMessage(msg, rinfo);
-
-        const inst = conn.getInstanceById('P-1')!;
-        expect(inst.state).toBe('healthy');
-        expect(inst.lastSeen).toBe(10_000);
-        expect(inst.consecutiveFailures).toBe(0);
-    });
+    // "announce resets state to healthy" is now covered by
+    // sweepDescriptors › 'a reappearing descriptor resets an unhealthy instance to healthy'.
 
     test('sweepStaleUnhealthy removes unhealthy instances past staleThreshold', () => {
         let t = 1000;

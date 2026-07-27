@@ -1,9 +1,11 @@
 import { EventEmitter } from 'events';
 import { JObject } from '../types/index.js';
 import { McpErrorCode } from "../types/ErrorCodes.js";
+import { matchByWorkingDirectory } from './ProjectMatch.js';
 import {
     retryableFetch,
     RetryableFetchError,
+    RetryableFetchInit,
     Idempotency,
 } from './retryableFetch.js';
 
@@ -56,6 +58,12 @@ export interface UnityInstance {
     unityVersion: string;
     endpoint: string;
     version: string;
+    /**
+     * Bearer token read from the instance's descriptor file.
+     * Every request must carry it: loopback binding is not access control, and
+     * `/execute_code` runs arbitrary C# with full Editor privileges.
+     */
+    token: string;
     /** state machine (design §3.4). */
     state: UnityInstanceState;
     /** Last time a success observation was made (/health 200 or UDP announce). */
@@ -156,7 +164,7 @@ export class UnityConnection extends EventEmitter {
      *
      * NOTE: We DO NOT auto-select the first instance as active (design §3.2).
      * `activeInstanceId` is only set when the user explicitly calls
-     * `unity_setActiveClient` or `unity_connectToProject`.
+     * `unity_set_active_client`.
      */
     public registerInstance(instance: UnityInstance): void {
         const existing = this.instances.get(instance.id);
@@ -260,7 +268,7 @@ export class UnityConnection extends EventEmitter {
      *   3. target omitted + active not set + exactly 1 instance → use it
      *   4. target omitted + active not set + 0 instances → ResolveInstanceError(no_instance)
      *   5. target omitted + active not set + multiple instances →
-     *        ResolveInstanceError(target_required, hint about unity_listClients)
+     *        ResolveInstanceError(target_required, hint about unity_list_clients)
      */
     public resolveInstance(target?: string): UnityInstance {
         const all = Array.from(this.instances.values());
@@ -273,8 +281,20 @@ export class UnityConnection extends EventEmitter {
                     `No Unity instance matches target "${target}"`
                 );
             }
-            // Pick first match. Ambiguity at MCP-tool level is tolerated
-            // (first-hit); /proxy has stricter semantics via its own resolver.
+            if (matches.length > 1) {
+                // Previously the first match won. With "MyGame" and "MyGame Sandbox" both
+                // open, asking for "MyGame" then resolved by registration order — and the
+                // call succeeded against whichever it happened to pick, so a write could land
+                // in the wrong project with nothing to indicate it. Exact matches are already
+                // preferred above; only an ambiguous substring reaches here.
+                throw new ResolveInstanceError(
+                    ResolveErrorCode.TargetRequired,
+                    `"${target}" matches more than one Unity instance: ` +
+                    matches.map(m => m.projectName).join(', ') +
+                    '. Use the full project name or the clientId.'
+                );
+            }
+
             return matches[0];
         }
 
@@ -300,11 +320,20 @@ export class UnityConnection extends EventEmitter {
         if (usable.length === 1) {
             return usable[0];
         }
+
+        // An MCP client launches this server in the directory it was opened in, so when that
+        // directory is inside exactly one open project the caller has already said which one
+        // they mean. Using it is not a guess.
+        const fromCwd = matchByWorkingDirectory(usable, process.cwd());
+        if (fromCwd !== null) {
+            return fromCwd;
+        }
+
         throw new ResolveInstanceError(
             ResolveErrorCode.TargetRequired,
             'Multiple Unity instances are registered but no target was specified. ' +
-            'Call unity_listClients to see options, then pass `target` or ' +
-            'call unity_setActiveClient.'
+            'Call unity_list_clients to see them, then either pass `target` on this call or ' +
+            'call unity_set_active_client to fix the destination.'
         );
     }
 
@@ -330,6 +359,7 @@ export class UnityConnection extends EventEmitter {
             target?: string;
             retryMaxMs?: number;
             idempotency?: Idempotency;
+            method?: 'GET' | 'POST';
         }
     ): Promise<JObject> {
         const retryMaxMs =
@@ -346,16 +376,27 @@ export class UnityConnection extends EventEmitter {
             opts?.idempotency
             ?? this.getHandlerIdempotency(cacheKey);
 
-        const body = JSON.stringify(payload);
+        const method = opts?.method ?? 'POST';
+
+        // A GET carrying a body is rejected by Unity's HttpListener, so the payload is
+        // dropped for reads (the catalog fetch has nothing to send anyway).
+        const authHeaders: Record<string, string> = instance.token
+            ? { Authorization: `Bearer ${instance.token}` }
+            : {};
+
+        const init: RetryableFetchInit =
+            method === 'GET'
+                ? { method, headers: authHeaders }
+                : {
+                    method,
+                    headers: { 'Content-Type': 'application/json', ...authHeaders },
+                    body: JSON.stringify(payload),
+                };
 
         try {
             const { response } = await retryableFetch(
                 `${instance.endpoint}${path}`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body,
-                },
+                init,
                 {
                     idempotency,
                     retryMaxMs,
@@ -448,6 +489,24 @@ export class UnityConnection extends EventEmitter {
         }
     ): Promise<JObject> {
         return this._sendCore(endpoint, body as Record<string, unknown>, body, opts);
+    }
+
+    /**
+     * GETs an absolute endpoint on a Unity instance and unwraps the envelope.
+     * Used for `/tools`, which is a read and therefore always safe to retry.
+     */
+    public async getFromEndpoint(
+        endpoint: string,
+        opts?: {
+            target?: string;
+            retryMaxMs?: number;
+        }
+    ): Promise<JObject> {
+        return this._sendCore(endpoint, null, null, {
+            ...opts,
+            method: 'GET',
+            idempotency: 'safe',
+        });
     }
 
     // ──────────────────────────────────────────────

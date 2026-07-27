@@ -1,5 +1,8 @@
-﻿name: Auto Build and Release
+name: Release
 
+# Tags, releases and publishes to npm when the version in the Unity package's package.json
+# changes on main. The tag check makes a re-run of the same version a no-op, so pushing an
+# unrelated commit to main does not republish.
 on:
   push:
     branches:
@@ -8,9 +11,12 @@ on:
 
 permissions:
   contents: write
+  # Required for npm provenance, which records in the registry which workflow and commit
+  # produced the tarball.
+  id-token: write
 
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,70 +25,58 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Get version from package.json
       - name: Get version
         id: package-version
         run: |
           VERSION=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Package version: $VERSION"
+          TS_VERSION=$(node -p "require('./unity-mcp-ts/package.json').version")
 
-      # Check if tag already exists
+          # The Editor and the server speak one protocol. Releasing them at different
+          # versions is the failure this whole release exists to design out, so it stops here.
+          if [ "$VERSION" != "$TS_VERSION" ]; then
+            echo "Unity package is $VERSION but the npm package is $TS_VERSION; they must match."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing $VERSION"
+
       - name: Check tag
         id: check-tag
         run: |
           TAG="v${{ steps.package-version.outputs.version }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Existing tag $TAG found. No new release will be created."
+            echo "Tag $TAG already exists; nothing to release."
             echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "Creating new release $TAG."
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      # Set up Node.js
       - name: Set up Node.js
         if: steps.check-tag.outputs.exists != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
           cache-dependency-path: unity-mcp-ts/package-lock.json
 
-      # Install dependencies
-      - name: Install dependencies
+      - name: Install
         if: steps.check-tag.outputs.exists != 'true'
-        run: |
-          cd unity-mcp-ts
-          npm install
+        working-directory: unity-mcp-ts
+        run: npm ci
 
-      # Build TypeScript
-      - name: Build TypeScript
+      # A release that fails its own tests is worse than a late one. CI covers pull requests;
+      # this covers the path that actually publishes.
+      - name: Verify
         if: steps.check-tag.outputs.exists != 'true'
+        working-directory: unity-mcp-ts
         run: |
-          cd unity-mcp-ts
+          npx tsc --noEmit
+          npm run lint
+          npm test
           npm run build
 
-      # Archive build artifacts
-      - name: Archive build artifacts
-        if: steps.check-tag.outputs.exists != 'true'
-        run: |
-          cd unity-mcp-ts
-          
-          # Copy necessary files
-          mkdir -p dist
-          cp -r build/* dist/
-          cp package.json dist/
-          
-          # Install production dependencies only
-          cd dist
-          npm install --omit=dev --no-package-lock
-          
-          # Create ZIP file
-          zip -r ../../unity-mcp-build.zip ./*
-          cd ../..
-
-      # Create tag
       - name: Create tag
         if: steps.check-tag.outputs.exists != 'true'
         run: |
@@ -91,9 +85,7 @@ jobs:
           git tag "v${{ steps.package-version.outputs.version }}"
           git push origin "v${{ steps.package-version.outputs.version }}"
 
-      # Create release
       - name: Create release
-        id: create_release
         if: steps.check-tag.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
         with:
@@ -102,15 +94,45 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: false
-          files: |
-            unity-mcp-build.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Upload artifact for manual workflow
-      - name: Upload artifact for manual workflow
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: unity-mcp-build
-          path: unity-mcp-build.zip
+      # Publishing is separate from the release so a registry outage does not leave the tag
+      # uncreated, and so the "already published" check can be explicit rather than relying on
+      # npm's error text.
+      - name: Already on npm?
+        id: npm-check
+        if: steps.check-tag.outputs.exists != 'true'
+        working-directory: unity-mcp-ts
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=${{ steps.package-version.outputs.version }}
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published."
+            echo "published=true" >> $GITHUB_OUTPUT
+          else
+            echo "published=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to npm
+        if: steps.check-tag.outputs.exists != 'true' && steps.npm-check.outputs.published != 'true'
+        working-directory: unity-mcp-ts
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Summary
+        if: steps.check-tag.outputs.exists != 'true'
+        run: |
+          VERSION=${{ steps.package-version.outputs.version }}
+          NAME=$(node -p "require('./unity-mcp-ts/package.json').name")
+          {
+            echo "## Released v$VERSION"
+            echo ""
+            echo "- Unity package: \`https://github.com/${{ github.repository }}.git?path=jp.shiranui-isuzu.unity-mcp#v$VERSION\`"
+            if [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
+              echo "- npm: already published, skipped"
+            else
+              echo "- npm: \`npm install $NAME@$VERSION\`"
+            fi
+          } >> $GITHUB_STEP_SUMMARY

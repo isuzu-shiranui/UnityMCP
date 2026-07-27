@@ -31,6 +31,11 @@ namespace UnityMCP.Editor.Core
             AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
             AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
 
+            // Quitting is not a domain reload, so nothing else would tear the server down —
+            // without this the Editor exits leaving its descriptor behind, and clients keep
+            // trying to reach a port that is gone.
+            EditorApplication.quitting += OnEditorQuitting;
+
             // Initial setup via delayCall (first load only — afterAssemblyReload handles reloads)
             EditorApplication.delayCall += Initialize;
         }
@@ -148,7 +153,21 @@ namespace UnityMCP.Editor.Core
             SessionState.SetInt(SessionKeyBoundPort, server.BoundPort);
             SessionState.SetBool(SessionKeyWasRunning, server.IsRunning);
 
-            server.Dispose();
+            // The descriptor stays: the server returns on the same port in a moment, and
+            // withdrawing it would make clients drop the instance and any active selection.
+            server.Dispose(withdrawDescriptor: false);
+            McpServiceManager.Instance.RemoveService<McpHttpServer>();
+        }
+
+        private static void OnEditorQuitting()
+        {
+            if (!McpServiceManager.Instance.TryGetService<McpHttpServer>(out var server))
+            {
+                return;
+            }
+
+            SessionState.SetBool(SessionKeyWasRunning, false);
+            server.Dispose(withdrawDescriptor: true);
             McpServiceManager.Instance.RemoveService<McpHttpServer>();
         }
 

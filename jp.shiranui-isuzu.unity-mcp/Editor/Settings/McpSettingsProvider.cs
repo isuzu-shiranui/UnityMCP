@@ -94,18 +94,16 @@ namespace UnityMCP.Editor.Settings
 
             EditorGUILayout.Space(5);
 
-            // UDP Broadcast settings
             EditorGUILayout.LabelField("Discovery", this.subHeaderStyle);
-            settings.useUdpBroadcast = EditorGUILayout.Toggle("UDP Broadcast", settings.useUdpBroadcast);
-
-            using (new EditorGUI.DisabledScope(!settings.useUdpBroadcast))
-            {
-                settings.udpBroadcastPort = EditorGUILayout.IntField("Broadcast Port", settings.udpBroadcastPort);
-                settings.broadcastIntervalSeconds = EditorGUILayout.IntSlider("Broadcast Interval (sec)", settings.broadcastIntervalSeconds, 5, 120);
-            }
+            EditorGUILayout.SelectableLabel(
+                UnityMCP.Editor.Core.McpInstanceDescriptor.PathFor(Application.dataPath),
+                EditorStyles.textField,
+                GUILayout.Height(EditorGUIUtility.singleLineHeight));
 
             EditorGUILayout.HelpBox(
-                "UDP Broadcast allows the TypeScript MCP server to automatically discover this Unity instance.",
+                "While the server runs it publishes this descriptor file, holding the port and the " +
+                "bearer token clients authenticate with. The MCP server reads it to find this Editor. " +
+                "Treat the file as a credential: anything that can read it can run code in this Editor.",
                 MessageType.Info);
 
             EditorGUILayout.Space(10);

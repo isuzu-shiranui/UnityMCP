@@ -1,0 +1,190 @@
+name: CI
+
+# The release workflow only runs on main and only builds, so nothing checked pull
+# requests at all. That is how the TypeScript server ended up shipping resource handlers
+# that posted to an endpoint the Editor never registered: no job would have noticed.
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: unity-mcp-ts/package-lock.json
+
+      - name: Install
+        working-directory: unity-mcp-ts
+        run: npm ci
+
+      - name: Type-check
+        working-directory: unity-mcp-ts
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: unity-mcp-ts
+        run: npm run lint
+
+      - name: Test
+        working-directory: unity-mcp-ts
+        run: npm test
+
+      # Catches the case where src compiles but the published entry points do not exist.
+      - name: Build
+        working-directory: unity-mcp-ts
+        run: npm run build
+
+      - name: Check bin entry points exist
+        working-directory: unity-mcp-ts
+        run: |
+          node -e "
+            const bin = require('./package.json').bin;
+            const fs = require('fs');
+            for (const [name, path] of Object.entries(bin)) {
+              if (!fs.existsSync(path)) {
+                console.error(\`bin.\${name} points at \${path}, which the build did not produce\`);
+                process.exit(1);
+              }
+              console.log(\`\${name} -> \${path} ok\`);
+            }
+          "
+
+      - name: CLI runs without a Unity Editor
+        working-directory: unity-mcp-ts
+        run: |
+          # No Editor is running here, so this asserts the CLI fails on purpose rather than
+          # crashing, and that its help works standalone.
+          node build/cli.js --help > /dev/null
+          if node build/cli.js projects; then
+            echo "expected a non-zero exit when no Editor is running"
+            exit 1
+          fi
+
+  editor-versions:
+    name: Package manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The two packages ship together; a mismatch means the version a client sees in
+      # /health does not identify the code it is talking to.
+      - name: Versions match
+        run: |
+          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          TS=$(node -p "require('./unity-mcp-ts/package.json').version")
+          echo "unity package: $UNITY"
+          echo "ts package:    $TS"
+          if [ "$UNITY" != "$TS" ]; then
+            echo "package versions disagree"
+            exit 1
+          fi
+
+      - name: Advertised protocol version matches the package
+        run: |
+          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          SERVER=$(grep -oP 'ProtocolVersion = "\K[^"]+' \
+            jp.shiranui-isuzu.unity-mcp/Editor/Core/McpHttpServer.cs)
+          echo "package:  $UNITY"
+          echo "protocol: $SERVER"
+          if [ "$UNITY" != "$SERVER" ]; then
+            echo "McpHttpServer.ProtocolVersion is stale; clients would be told the wrong version"
+            exit 1
+          fi
+
+      # Redistributing a binary without attributing it is a licensing problem, and the list
+      # is exactly the kind of thing that goes stale silently when a dependency is swapped.
+      - name: Every bundled assembly is attributed
+        run: |
+          NOTICES="jp.shiranui-isuzu.unity-mcp/Third Party Notices.md"
+          STATUS=0
+          for dll in jp.shiranui-isuzu.unity-mcp/Editor/Plugins/*.dll; do
+            name=$(basename "$dll")
+            if ! grep -qF "$name" "$NOTICES"; then
+              echo "$name ships in the package but is not listed in Third Party Notices.md"
+              STATUS=1
+            fi
+          done
+          # And the reverse: a name left behind after its assembly was dropped.
+          grep -oP '`\K[A-Za-z0-9.]+\.dll(?=`)' "$NOTICES" | sort -u | while read -r listed; do
+            if [ ! -f "jp.shiranui-isuzu.unity-mcp/Editor/Plugins/$listed" ]; then
+              echo "note: $listed is attributed but no longer shipped"
+            fi
+          done
+          exit $STATUS
+
+      # The package runs an HTTP server that compiles and executes arbitrary C#. That is
+      # acceptable in the Editor and would be a remote code execution hole in a shipped game,
+      # so "cannot reach a player build" has to be a checked property, not a convention
+      # someone remembers. Two independent guarantees, both asserted here.
+      - name: Nothing can reach a player build
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const root = 'jp.shiranui-isuzu.unity-mcp';
+            let failed = false;
+
+            const walk = (dir, out = []) => {
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                e.isDirectory() ? walk(p, out) : out.push(p);
+              }
+              return out;
+            };
+
+            const files = walk(root);
+
+            // 1. Every assembly definition is Editor-only.
+            for (const f of files.filter(f => f.endsWith('.asmdef'))) {
+              const platforms = JSON.parse(fs.readFileSync(f, 'utf8')).includePlatforms || [];
+              if (platforms.length !== 1 || platforms[0] !== 'Editor') {
+                console.error(f + ' includePlatforms is ' + JSON.stringify(platforms) + ', expected [\"Editor\"]');
+                failed = true;
+              }
+            }
+
+            // 2. Every compiled source and binary sits under an Editor folder, which Unity
+            //    excludes from player builds regardless of importer settings.
+            const inEditor = f => f.split(path.sep).includes('Editor');
+            for (const f of files.filter(f => f.endsWith('.cs') || f.endsWith('.dll'))) {
+              if (!inEditor(f)) {
+                console.error(f + ' is outside an Editor folder and would ship in builds');
+                failed = true;
+              }
+            }
+
+            if (failed) process.exit(1);
+            console.log(files.filter(f => f.endsWith('.cs') || f.endsWith('.dll')).length +
+                        ' source and binary files, all Editor-only');
+          "
+
+      # Unreferenced binaries are dead weight the user still downloads, and something we
+      # would otherwise have to keep attributing.
+      - name: No unreferenced assemblies in Plugins
+        run: |
+          node -e "
+            const fs = require('fs');
+            const root = 'jp.shiranui-isuzu.unity-mcp';
+            const asmdef = JSON.parse(fs.readFileSync(root + '/Editor/UnityMCP.Editor.asmdef', 'utf8'));
+            const referenced = new Set(asmdef.precompiledReferences || []);
+            const shipped = fs.readdirSync(root + '/Editor/Plugins').filter(f => f.endsWith('.dll'));
+            const orphans = shipped.filter(f => !referenced.has(f));
+            if (orphans.length) {
+              console.error('shipped but not referenced by the asmdef: ' + orphans.join(', '));
+              process.exit(1);
+            }
+            console.log(shipped.length + ' assemblies, all referenced');
+          "

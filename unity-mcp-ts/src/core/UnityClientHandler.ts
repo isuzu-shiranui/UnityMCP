@@ -1,199 +1,111 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { UnityConnection } from "./UnityConnection.js";
+import { LocalTool } from './ToolRouter.js';
+import { UnityConnection } from './UnityConnection.js';
 
 /**
- * Registers Unity client management tools with the MCP server.
- * These tools allow listing, selecting, and managing connected Unity instances.
+ * Tools for choosing between connected Unity instances.
+ *
+ * These stay in the MCP server rather than moving to `[McpTool]` in C#: no single Editor can
+ * answer "which Editors are there", and they must keep working when none is connected at all.
+ * Everything else now lives in the Editor and is discovered through `/tools`.
  */
-export function registerUnityClientTools(server: McpServer): void {
+export function createUnityClientTools(): LocalTool[] {
     const connection = UnityConnection.getInstance();
 
-    // List all connected Unity instances
-    server.tool(
-        "unity_listClients",
-        "Lists all connected Unity projects",
-        {},
-        async () => {
-            const clients = connection.getConnectedClients();
-
-            if (clients.length === 0) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: "No Unity projects are currently connected."
-                    }]
-                };
-            }
-
-            const activeId = connection.getActiveClientId();
-            const lines: string[] = ["Connected Unity projects:", ""];
-            clients.forEach((client, index) => {
-                const info = client.info || {};
-                const isActive = client.isActive || client.id === activeId;
-                lines.push(
-                    `${index + 1}. ${isActive ? '> ' : '  '}` +
-                    `${info.productName || 'Unknown Project'} [${client.state}]`
-                );
-                lines.push(`   clientId: ${client.id}`);
-                lines.push(`   unity:    ${info.unityVersion || 'Unknown'}`);
-                lines.push(`   endpoint: ${info.endpoint || 'Unknown'}`);
-                lines.push('');
-            });
-
-            // Machine-readable JSON summary appended so callers can parse.
-            const summary = {
-                activeClientId: activeId,
-                clients: clients.map(c => ({
-                    clientId: c.id,
-                    isActive: c.isActive || c.id === activeId,
-                    state: c.state,
-                    projectName: c.info?.productName,
-                    unityVersion: c.info?.unityVersion,
-                    endpoint: c.info?.endpoint,
-                    port: c.info?.port,
-                })),
-            };
-            lines.push("---");
-            lines.push(JSON.stringify(summary));
-
-            return {
-                content: [{
-                    type: "text",
-                    text: lines.join('\n')
-                }]
-            };
-        }
-    );
-
-    // Set active client by clientId or projectName
-    server.tool(
-        "unity_setActiveClient",
-        "Sets the active Unity project. Accepts either a clientId or a projectName " +
-        "(exact or substring, case-insensitive).",
+    return [
         {
-            clientId: z
-                .string()
-                .optional()
-                .describe("The clientId (exact) of the client to activate."),
-            projectName: z
-                .string()
-                .optional()
-                .describe("A project name (exact or substring, case-insensitive).")
+            name: 'unity_list_clients',
+            description:
+                'List the Unity projects currently connected to this server, with their state and ' +
+                'endpoint. Call this first when a tool reports that a target is required.',
+            inputSchema: { type: 'object', properties: {} },
+            handler: async () => {
+                const clients = connection.getConnectedClients();
+
+                if (clients.length === 0) {
+                    return 'No Unity projects are currently connected.';
+                }
+
+                const activeId = connection.getActiveClientId();
+
+                return JSON.stringify({
+                    activeClientId: activeId,
+                    clients: clients.map(c => ({
+                        clientId: c.id,
+                        isActive: c.isActive || c.id === activeId,
+                        state: c.state,
+                        projectName: c.info?.productName,
+                        unityVersion: c.info?.unityVersion,
+                        endpoint: c.info?.endpoint,
+                        port: c.info?.port,
+                    })),
+                });
+            },
         },
-        async (params) => {
-            const target = params.clientId ?? params.projectName;
-            if (!target) {
-                return {
-                    isError: true,
-                    content: [{
-                        type: "text",
-                        text: "Error: one of `clientId` or `projectName` is required."
-                    }]
-                };
-            }
-
-            const picked = connection.setActiveClientByTarget(target);
-            if (!picked) {
-                return {
-                    isError: true,
-                    content: [{
-                        type: "text",
-                        text: `Error: no Unity instance matches "${target}"`
-                    }]
-                };
-            }
-
-            return {
-                content: [{
-                    type: "text",
-                    text: `Active client set to ${picked.projectName} (clientId=${picked.id}, endpoint=${picked.endpoint})`
-                }]
-            };
-        }
-    );
-
-    // Connect to project by name (alias of setActiveClient with projectName).
-    server.tool(
-        "unity_connectToProject",
-        "Connect to a Unity project by name (alias of unity_setActiveClient with projectName).",
         {
-            projectName: z.string().describe("The name of the Unity project to connect to")
+            name: 'unity_set_active_client',
+            description:
+                'Choose which Unity project subsequent tool calls go to, by clientId or project ' +
+                'name (exact or substring, case-insensitive). Avoids passing `target` every time.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    target: {
+                        type: 'string',
+                        description: 'A clientId, or a project name (exact or substring).',
+                    },
+                },
+                required: ['target'],
+            },
+            handler: async (args) => {
+                const target = typeof args.target === 'string' ? args.target : '';
+
+                if (target === '') {
+                    throw new Error('`target` is required. Call unity_list_clients to see the options.');
+                }
+
+                const picked = connection.setActiveClientByTarget(target);
+                if (!picked) {
+                    throw new Error(
+                        `No Unity instance matches "${target}". Call unity_list_clients to see the options.`
+                    );
+                }
+
+                return JSON.stringify({
+                    activeClientId: picked.id,
+                    projectName: picked.projectName,
+                    endpoint: picked.endpoint,
+                });
+            },
         },
-        async (params) => {
-            const picked = connection.setActiveClientByTarget(params.projectName);
-            if (!picked) {
-                return {
-                    isError: true,
-                    content: [{
-                        type: "text",
-                        text: `Error: no projects found matching "${params.projectName}"`
-                    }]
-                };
-            }
-            return {
-                content: [{
-                    type: "text",
-                    text: `Successfully connected to "${picked.projectName}" (${picked.endpoint})`
-                }]
-            };
-        }
-    );
+        {
+            name: 'unity_get_active_client',
+            description:
+                'Report which Unity project tool calls currently go to. Use this to confirm the ' +
+                'target before running anything that changes the project.',
+            inputSchema: { type: 'object', properties: {} },
+            handler: async () => {
+                if (!connection.hasConnectedClients()) {
+                    return 'No Unity projects are currently connected.';
+                }
 
-    // Get active client info
-    server.tool(
-        "unity_getActiveClient",
-        "Get information about the currently active Unity project",
-        {},
-        async () => {
-            if (!connection.hasConnectedClients()) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: "No Unity projects are currently connected."
-                    }]
-                };
-            }
+                const activeClientId = connection.getActiveClientId();
+                if (!activeClientId) {
+                    return 'No active Unity project is selected. Call unity_set_active_client to choose one.';
+                }
 
-            const activeClientId = connection.getActiveClientId();
-            if (!activeClientId) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: "No active Unity project is selected."
-                    }]
-                };
-            }
+                const active = connection.getConnectedClients().find(c => c.id === activeClientId);
+                if (!active) {
+                    return 'The previously active Unity project is no longer connected.';
+                }
 
-            const clients = connection.getConnectedClients();
-            const activeClient = clients.find(c => c.id === activeClientId);
-
-            if (!activeClient) {
-                return {
-                    content: [{
-                        type: "text",
-                        text: "Active client information not found."
-                    }]
-                };
-            }
-
-            const info = activeClient.info || {};
-            const lines = [
-                "Active Unity project:",
-                "",
-                `Project:       ${info.productName}`,
-                `State:         ${activeClient.state}`,
-                `Unity Version: ${info.unityVersion || 'Unknown'}`,
-                `Endpoint:      ${info.endpoint || 'Unknown'}`,
-                `clientId:      ${activeClient.id}`,
-            ];
-
-            return {
-                content: [{
-                    type: "text",
-                    text: lines.join('\n')
-                }]
-            };
-        }
-    );
+                return JSON.stringify({
+                    clientId: active.id,
+                    state: active.state,
+                    projectName: active.info?.productName,
+                    unityVersion: active.info?.unityVersion,
+                    endpoint: active.info?.endpoint,
+                });
+            },
+        },
+    ];
 }

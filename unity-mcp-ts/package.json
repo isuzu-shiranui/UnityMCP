@@ -1,10 +1,10 @@
 {
-  "name": "unity-mcp-ts",
-  "version": "2.1.1",
+  "name": "@shiranui_isuzu/unity-mcp",
+  "version": "3.0.0",
   "main": "build/index.js",
   "type": "module",
   "bin": {
-    "unity-mcp": "./build/index.js"
+    "isuzu-unity-mcp": "./build/cli.js"
   },
   "scripts": {
     "clean": "node -e \"import('node:fs/promises').then(fs => fs.rm('build', {recursive:true, force:true}))\"",
@@ -13,17 +13,20 @@
     "dev": "tsx src/index.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "lint": "eslint src --ext .ts",
-    "lint:fix": "eslint src --ext .ts --fix"
+    "lint:fix": "eslint src --ext .ts --fix",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "unity",
     "mcp",
+    "model-context-protocol",
     "claude",
-    "ai"
+    "codex",
+    "cli"
   ],
   "author": "",
-  "license": "ISC",
-  "description": "Unity Model Context Protocol integration",
+  "license": "MIT",
+  "description": "MCP server and CLI for driving the Unity Editor. Pairs with the jp.shiranui-isuzu.unity-mcp Unity package.",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.0",
     "zod": "^3.24.2"
@@ -32,13 +35,33 @@
     "@jest/globals": "^29.7.0",
     "@types/jest": "^29.5.12",
     "@types/node": "^22.13.10",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "eslint": "^8.57.0",
-    "eslint-config-standard-with-typescript": "^43.0.1",
     "jest": "^29.7.0",
     "ts-jest": "^29.1.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
-    "undici": "^6.19.8",
-    "vitest": "^3.0.8"
+    "undici": "^6.19.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isuzu-shiranui/UnityMCP.git",
+    "directory": "unity-mcp-ts"
+  },
+  "homepage": "https://github.com/isuzu-shiranui/UnityMCP#readme",
+  "bugs": {
+    "url": "https://github.com/isuzu-shiranui/UnityMCP/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "build/",
+    "skills/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

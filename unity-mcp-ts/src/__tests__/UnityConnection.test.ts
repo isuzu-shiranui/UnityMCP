@@ -31,6 +31,7 @@ function makeInstance(overrides: Partial<UnityInstance> = {}): UnityInstance {
         unityVersion: overrides.unityVersion ?? '2022.3',
         endpoint: overrides.endpoint ?? 'http://127.0.0.1:27182',
         version: overrides.version ?? '2.0.0',
+        token: overrides.token ?? 'test-token',
         state: overrides.state ?? 'healthy',
         lastSeen: overrides.lastSeen ?? Date.now(),
         lastContact: overrides.lastContact ?? Date.now(),
@@ -65,6 +66,31 @@ describe('UnityConnection.resolveInstance', () => {
         conn.registerInstance(makeInstance({ id: 'Y-2', projectName: 'Other' }));
         const r = conn.resolveInstance('super');
         expect(r.id).toBe('X-1');
+    });
+
+    test('an exact project name wins over a longer name containing it', () => {
+        // "MyGame" is a substring of "MyGame Sandbox". Resolving by first-hit would pick by
+        // registration order, and the call would succeed against the wrong project.
+        const conn = UnityConnection.getInstance();
+        conn.registerInstance(makeInstance({ id: 'B-2', projectName: 'MyGame Sandbox' }));
+        conn.registerInstance(makeInstance({ id: 'A-1', projectName: 'MyGame' }));
+
+        expect(conn.resolveInstance('MyGame').id).toBe('A-1');
+    });
+
+    test('an ambiguous substring is refused rather than guessed', () => {
+        const conn = UnityConnection.getInstance();
+        conn.registerInstance(makeInstance({ id: 'A-1', projectName: 'MyGame Alpha' }));
+        conn.registerInstance(makeInstance({ id: 'B-2', projectName: 'MyGame Beta' }));
+
+        try {
+            conn.resolveInstance('MyGame');
+            fail('expected an ambiguity error');
+        } catch (err) {
+            expect((err as ResolveInstanceError).code).toBe('target_required');
+            expect((err as Error).message).toMatch(/MyGame Alpha/);
+            expect((err as Error).message).toMatch(/MyGame Beta/);
+        }
     });
 
     test('case 1 — target explicit, no match → TargetNotFoundError', () => {
@@ -123,7 +149,7 @@ describe('UnityConnection.resolveInstance', () => {
             fail('expected TargetRequiredError');
         } catch (err) {
             expect((err as ResolveInstanceError).code).toBe('target_required');
-            expect((err as Error).message).toMatch(/unity_listClients|unity_setActiveClient/);
+            expect((err as Error).message).toMatch(/unity_list_clients|unity_set_active_client/);
         }
     });
 
