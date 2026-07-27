@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { JObject } from '../types/index.js';
 import { McpErrorCode } from "../types/ErrorCodes.js";
+import { matchByWorkingDirectory } from './ProjectMatch.js';
 import {
     retryableFetch,
     RetryableFetchError,
@@ -319,6 +320,15 @@ export class UnityConnection extends EventEmitter {
         if (usable.length === 1) {
             return usable[0];
         }
+
+        // An MCP client launches this server in the directory it was opened in, so when that
+        // directory is inside exactly one open project the caller has already said which one
+        // they mean. Using it is not a guess.
+        const fromCwd = matchByWorkingDirectory(usable, process.cwd());
+        if (fromCwd !== null) {
+            return fromCwd;
+        }
+
         throw new ResolveInstanceError(
             ResolveErrorCode.TargetRequired,
             'Multiple Unity instances are registered but no target was specified. ' +

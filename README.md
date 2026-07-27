@@ -91,6 +91,16 @@ unity-mcp call execute_code --file snippet.cs
 unity-mcp call play_mode_status --project MyGame
 ```
 
+**プロジェクト内で実行していれば `--project` は不要です。** Editor が複数起動していても、カレントディレクトリがどれか1つのプロジェクト配下にあれば、そのプロジェクトが選ばれます。
+
+```bash
+cd "H:/Unity Projects/MyGame/Assets/Scripts"
+unity-mcp call play_mode_status
+# [using MyGame — the project this directory belongs to]
+```
+
+`unity-mcp projects` の `containsWorkingDirectory` が、いまここから届く Editor を示します。どのプロジェクトの外でもない場所から曖昧なまま実行した場合は、推測せずに候補を挙げて止まります。同じ判定は MCP サーバ側でも働くので、Claude Code をプロジェクトで開いていれば `target` の指定は要りません。
+
 エラーは stderr に出て終了コードが非ゼロになるので、そのままスクリプトに組み込めます。
 
 > **`--file` を使う理由**: C# のスニペットをシェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。結果は「呼び出し側に見えない生成ソース中のコンパイルエラー」になり、原因の特定が非常に困難です。ファイルから読めばそのどちらも経由しません。

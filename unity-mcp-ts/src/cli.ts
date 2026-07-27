@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { InstanceDescriptor, readDescriptors } from './core/InstanceDescriptors.js';
 import { buildToolArguments, matchByProjectName, parseArgs } from './core/CliArgs.js';
+import { matchByWorkingDirectory, projectRootOf } from './core/ProjectMatch.js';
 import {
     detectAgents,
     findAgent,
@@ -86,14 +87,22 @@ async function resolveInstance(projectName?: string): Promise<InstanceDescriptor
         return matchByProjectName(descriptors, projectName);
     }
 
-    if (descriptors.length > 1) {
-        throw new Error(
-            'Several Editors are running; pass --project to choose one: ' +
-            descriptors.map(d => d.projectName).join(', ')
-        );
+    if (descriptors.length === 1) {
+        return descriptors[0];
     }
 
-    return descriptors[0];
+    // Running from inside a project says which one is meant, so there is nothing to guess.
+    const fromCwd = matchByWorkingDirectory(descriptors, process.cwd());
+    if (fromCwd !== null) {
+        console.error(`[using ${fromCwd.projectName} — the project this directory belongs to]`);
+        return fromCwd;
+    }
+
+    throw new Error(
+        'Several Editors are running and this directory is not inside any of them. ' +
+        'Pass --project to choose one: ' +
+        descriptors.map(d => d.projectName).join(', ')
+    );
 }
 
 async function request(
@@ -337,13 +346,17 @@ async function main(): Promise<number> {
             return 1;
         }
 
+        // Marked so it is obvious which one a bare command would reach from here.
+        const here = matchByWorkingDirectory(descriptors, process.cwd());
+
         print(descriptors.map(d => ({
             projectName: d.projectName,
-            projectPath: d.projectPath,
+            projectRoot: projectRootOf(d.projectPath),
             unityVersion: d.unityVersion,
             endpoint: d.endpoint,
             pid: d.pid,
             protocolVersion: d.protocolVersion,
+            containsWorkingDirectory: here !== null && here.pid === d.pid,
         })));
         return 0;
     }

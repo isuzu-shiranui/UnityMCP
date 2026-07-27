@@ -92,6 +92,20 @@ unity-mcp call execute_code --file snippet.cs
 unity-mcp call play_mode_status --project MyGame
 ```
 
+**Inside a project, `--project` is unnecessary.** With several Editors open, a working
+directory that sits inside exactly one of them selects that one.
+
+```bash
+cd "H:/Unity Projects/MyGame/Assets/Scripts"
+unity-mcp call play_mode_status
+# [using MyGame — the project this directory belongs to]
+```
+
+`unity-mcp projects` marks the reachable one with `containsWorkingDirectory`. Run from
+outside every project and it names the candidates and stops, rather than guessing. The MCP
+server applies the same rule, so opening Claude Code in a Unity project removes the need for
+`target`.
+
 Errors go to stderr with a non-zero exit code, so it composes in scripts.
 
 > **Why `--file`**: passing a C# snippet through both a shell and a JSON encoder loses the backslashes in its string literals. The result is a compile error inside generated source the caller never sees, which is close to undiagnosable. Reading from a file goes through neither.
