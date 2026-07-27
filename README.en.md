@@ -269,6 +269,24 @@ project's `Packages/manifest.json`.
 - **Treat the descriptor file as a credential.** Anything that can read it can run code in the Editor.
 - `execute_code` and `menu_execute` run with full Editor privileges. Do not feed them untrusted code.
 
+### It cannot ship in a build
+
+This package runs an HTTP server that compiles and executes arbitrary C#. In the Editor that
+is the point; in a shipped game it would be a remote code execution hole. Two independent
+guarantees keep it out:
+
+1. The assembly definition is `"includePlatforms": ["Editor"]`, so it is never compiled into
+   a player build.
+2. Every source file and binary lives under an `Editor/` folder, which Unity excludes from
+   builds regardless of importer settings.
+
+**Nothing reaches a player, Development Build included** — there is no runtime assembly at
+all. If runtime functionality is ever added, gate it explicitly on `DEVELOPMENT_BUILD`.
+
+This is a checked property rather than a remembered convention: CI asserts both on every
+change, and both were verified to fail the build when violated — one by adding a script under
+`Runtime/`, the other by emptying `includePlatforms`.
+
 ## 🧹 What this puts on your machine
 
 All state lives under a single root, so there is one thing to delete.

@@ -61,6 +61,11 @@ what it finds rather than keeping its own copy.
 - Two bundled Roslyn Scripting assemblies were never referenced and are removed (160 kB).
 
 ### Notes
+- Build exclusion is asserted in CI rather than left to convention: every assembly definition
+  must be Editor-only, and every source file and binary must live under an `Editor/` folder.
+  The package compiles and runs arbitrary C#, so reaching a player build would be a remote
+  code execution hole. Nothing reaches a player today, Development Build included, because no
+  runtime assembly exists.
 - Third-party notices are added for the redistributed Roslyn and .NET assemblies.
 - CI now type-checks, lints, tests and builds on every pull request; previously nothing ran.
 

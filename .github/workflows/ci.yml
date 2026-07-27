@@ -125,6 +125,52 @@ jobs:
           done
           exit $STATUS
 
+      # The package runs an HTTP server that compiles and executes arbitrary C#. That is
+      # acceptable in the Editor and would be a remote code execution hole in a shipped game,
+      # so "cannot reach a player build" has to be a checked property, not a convention
+      # someone remembers. Two independent guarantees, both asserted here.
+      - name: Nothing can reach a player build
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const root = 'jp.shiranui-isuzu.unity-mcp';
+            let failed = false;
+
+            const walk = (dir, out = []) => {
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                e.isDirectory() ? walk(p, out) : out.push(p);
+              }
+              return out;
+            };
+
+            const files = walk(root);
+
+            // 1. Every assembly definition is Editor-only.
+            for (const f of files.filter(f => f.endsWith('.asmdef'))) {
+              const platforms = JSON.parse(fs.readFileSync(f, 'utf8')).includePlatforms || [];
+              if (platforms.length !== 1 || platforms[0] !== 'Editor') {
+                console.error(f + ' includePlatforms is ' + JSON.stringify(platforms) + ', expected [\"Editor\"]');
+                failed = true;
+              }
+            }
+
+            // 2. Every compiled source and binary sits under an Editor folder, which Unity
+            //    excludes from player builds regardless of importer settings.
+            const inEditor = f => f.split(path.sep).includes('Editor');
+            for (const f of files.filter(f => f.endsWith('.cs') || f.endsWith('.dll'))) {
+              if (!inEditor(f)) {
+                console.error(f + ' is outside an Editor folder and would ship in builds');
+                failed = true;
+              }
+            }
+
+            if (failed) process.exit(1);
+            console.log(files.filter(f => f.endsWith('.cs') || f.endsWith('.dll')).length +
+                        ' source and binary files, all Editor-only');
+          "
+
       # Unreferenced binaries are dead weight the user still downloads, and something we
       # would otherwise have to keep attributing.
       - name: No unreferenced assemblies in Plugins
