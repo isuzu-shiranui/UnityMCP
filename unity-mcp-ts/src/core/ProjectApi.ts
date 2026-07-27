@@ -394,7 +394,8 @@ export class ProjectApi {
         }
 
         // Convert WHATWG Readable to Node Readable and pipe.
-        // @ts-ignore — Node 18+ provides fromWeb
+        // The @ts-ignore that used to sit here is gone: fromWeb is in the typings now, and
+        // the suppression was hiding nothing.
         const nodeReadable = Readable.fromWeb(response.body as any);
         nodeReadable.on('error', (err) => {
             console.error(`[ERROR] Proxy stream error: ${err.message}`);

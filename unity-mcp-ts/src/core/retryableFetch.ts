@@ -207,6 +207,9 @@ export async function retryableFetch(
     let lastError: unknown = null;
     let lastStatus: number | undefined;
 
+    // Every exit is a return or a throw: success, a fatal classification, or the retry
+    // budget running out. A loop condition would have to duplicate that logic.
+    // eslint-disable-next-line no-constant-condition
     while (true) {
         attempts++;
         if (opts.onAttempt) opts.onAttempt(attempts);

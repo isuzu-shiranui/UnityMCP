@@ -452,14 +452,19 @@ namespace UnityMCP.Editor.Core
                         this.HandleBuiltinCommand(request, response, InspectorAccess.Access, "/inspect");
                         break;
 
-                    // ── Phase 3-5 stubs ──
-                    case "/compile/errors" when method == "GET":
-                    case "/compile/status" when method == "GET":
+                    // /compile/* is implemented as the compile_status and compile_request
+                    // tools; /eval duplicated /execute_code and is withdrawn. The remaining
+                    // stubs are still unbuilt, and say so with a pointer rather than a bare
+                    // "not implemented".
                     case "/hlsl/errors" when method == "GET":
                     case "/test/run" when method == "POST":
                     case "/test/results" when method == "GET":
-                    case "/eval" when method == "POST":
-                        this.WriteEnvelope(response, 501, null, errorCode: "not_implemented", errorMessage: "Not implemented yet");
+                        this.WriteEnvelope(
+                            response,
+                            501,
+                            null,
+                            errorCode: "not_implemented",
+                            errorMessage: $"{path} is not implemented. GET /tools lists what this Editor does offer.");
                         break;
 
                     default:

@@ -1,0 +1,105 @@
+name: CI
+
+# The release workflow only runs on main and only builds, so nothing checked pull
+# requests at all. That is how the TypeScript server ended up shipping resource handlers
+# that posted to an endpoint the Editor never registered: no job would have noticed.
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: unity-mcp-ts/package-lock.json
+
+      - name: Install
+        working-directory: unity-mcp-ts
+        run: npm ci
+
+      - name: Type-check
+        working-directory: unity-mcp-ts
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: unity-mcp-ts
+        run: npm run lint
+
+      - name: Test
+        working-directory: unity-mcp-ts
+        run: npm test
+
+      # Catches the case where src compiles but the published entry points do not exist.
+      - name: Build
+        working-directory: unity-mcp-ts
+        run: npm run build
+
+      - name: Check bin entry points exist
+        working-directory: unity-mcp-ts
+        run: |
+          node -e "
+            const bin = require('./package.json').bin;
+            const fs = require('fs');
+            for (const [name, path] of Object.entries(bin)) {
+              if (!fs.existsSync(path)) {
+                console.error(\`bin.\${name} points at \${path}, which the build did not produce\`);
+                process.exit(1);
+              }
+              console.log(\`\${name} -> \${path} ok\`);
+            }
+          "
+
+      - name: CLI runs without a Unity Editor
+        working-directory: unity-mcp-ts
+        run: |
+          # No Editor is running here, so this asserts the CLI fails on purpose rather than
+          # crashing, and that its help works standalone.
+          node build/cli.js --help > /dev/null
+          if node build/cli.js projects; then
+            echo "expected a non-zero exit when no Editor is running"
+            exit 1
+          fi
+
+  editor-versions:
+    name: Package manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The two packages ship together; a mismatch means the version a client sees in
+      # /health does not identify the code it is talking to.
+      - name: Versions match
+        run: |
+          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          TS=$(node -p "require('./unity-mcp-ts/package.json').version")
+          echo "unity package: $UNITY"
+          echo "ts package:    $TS"
+          if [ "$UNITY" != "$TS" ]; then
+            echo "package versions disagree"
+            exit 1
+          fi
+
+      - name: Advertised protocol version matches the package
+        run: |
+          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          SERVER=$(grep -oP 'ProtocolVersion = "\K[^"]+' \
+            jp.shiranui-isuzu.unity-mcp/Editor/Core/McpHttpServer.cs)
+          echo "package:  $UNITY"
+          echo "protocol: $SERVER"
+          if [ "$UNITY" != "$SERVER" ]; then
+            echo "McpHttpServer.ProtocolVersion is stale; clients would be told the wrong version"
+            exit 1
+          fi

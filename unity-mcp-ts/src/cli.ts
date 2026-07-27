@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { InstanceDescriptor, readDescriptors } from './core/InstanceDescriptors.js';
-import { ParsedArgs, buildToolArguments, parseArgs } from './core/CliArgs.js';
+import { buildToolArguments, parseArgs } from './core/CliArgs.js';
 
 /**
  * Terminal front end for a running Unity Editor.
