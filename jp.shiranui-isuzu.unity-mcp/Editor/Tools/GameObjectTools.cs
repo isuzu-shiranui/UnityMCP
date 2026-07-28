@@ -80,7 +80,7 @@ namespace UnityMCP.Editor.Tools
             ApplyTransform(go.transform, position, rotation, scale);
             Selection.activeGameObject = go;
 
-            return Describe(go);
+            return Describe(go, transform: true);
         }
 
         [McpTool(
@@ -164,7 +164,7 @@ namespace UnityMCP.Editor.Tools
                 go.transform.SetSiblingIndex(siblingIndex.Value);
             }
 
-            return Describe(go);
+            return Describe(go, transform: true);
         }
 
         [McpTool(
@@ -218,7 +218,7 @@ namespace UnityMCP.Editor.Tools
             Undo.RecordObject(go.transform, "MCP Set Transform");
             ApplyTransform(go.transform, position, rotation, scale, world);
 
-            return Describe(go);
+            return Describe(go, transform: true);
         }
 
         [McpTool(
@@ -269,7 +269,7 @@ namespace UnityMCP.Editor.Tools
                     "may be missing, or the component may already be present and disallow duplicates.");
             }
 
-            return Describe(go);
+            return Describe(go, components: true);
         }
 
         [McpTool(
@@ -299,7 +299,7 @@ namespace UnityMCP.Editor.Tools
 
             Undo.DestroyObjectImmediate(component);
 
-            return Describe(go);
+            return Describe(go, components: true);
         }
 
         private static Type FindComponentType(string typeName)
@@ -424,27 +424,47 @@ namespace UnityMCP.Editor.Tools
             return new Vector3(Axis("x", fallback.x), Axis("y", fallback.y), Axis("z", fallback.z));
         }
 
-        private static JObject Describe(GameObject go)
+        /// <summary>
+        /// Describes the object a call acted on.
+        /// </summary>
+        /// <remarks>
+        /// Only what the operation was about. This used to return the name, path, instance id,
+        /// both active flags, the parent, all three transform vectors, every component name and
+        /// the child count, on every call — including gameobject_set_active, where the only
+        /// thing a caller wants to know is that it worked. That is a few hundred characters per
+        /// call of mostly unasked-for detail, and unlike the tool catalogue it is paid again
+        /// every time. The transform and the component list are added by the tools that change
+        /// them; scene_browse_hierarchy and inspect_read answer the rest when it is the actual
+        /// question.
+        /// </remarks>
+        private static JObject Describe(GameObject go, bool transform = false, bool components = false)
         {
             var t = go.transform;
 
-            return EditorNotes.SceneChange(new JObject
+            var result = new JObject
             {
                 ["name"] = go.name,
                 ["path"] = ObjectResolve.PathOf(go),
                 ["instanceId"] = go.GetInstanceID(),
                 ["active"] = go.activeSelf,
-                ["activeInHierarchy"] = go.activeInHierarchy,
-                ["parent"] = t.parent == null ? null : (JToken)ObjectResolve.PathOf(t.parent.gameObject),
-                ["localPosition"] = Vector(t.localPosition),
-                ["localEulerAngles"] = Vector(t.localEulerAngles),
-                ["localScale"] = Vector(t.localScale),
-                ["components"] = new JArray(go.GetComponents<Component>()
+            };
+
+            if (transform)
+            {
+                result["localPosition"] = Vector(t.localPosition);
+                result["localEulerAngles"] = Vector(t.localEulerAngles);
+                result["localScale"] = Vector(t.localScale);
+            }
+
+            if (components)
+            {
+                result["components"] = new JArray(go.GetComponents<Component>()
                     .Where(c => c != null)
                     .Select(c => (object)c.GetType().Name)
-                    .ToArray()),
-                ["childCount"] = t.childCount,
-            });
+                    .ToArray());
+            }
+
+            return EditorNotes.SceneChange(result);
         }
 
         private static JObject Vector(Vector3 v)

@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.2.0] - 2026-07-28
+
+Released in step with the Unity package, which went from 23 tools to 57. No
+change was needed here: this server forwards whatever the Editor publishes at
+`GET /tools`. Thirty-four new tools appeared through it without a line of
+TypeScript, which is the property the v3 architecture exists to have.
+
+### Changed
+- The bundled skill covers the authoring, rendering and inspection tools, and
+  the two things about them that are not obvious: a path from
+  `scene_browse_hierarchy` is the identifier every editing tool takes, and a
+  scene edit made during Play Mode is reverted when it stops.
+
 ## [3.1.0] - 2026-07-28
 
 Released to keep the version in step with the Unity package, which gained `test_run` and
