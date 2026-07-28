@@ -59,26 +59,7 @@ namespace UnityMCP.Editor.Tools
                     "'path' is required, e.g. 'UnityEngine.QualitySettings/renderPipeline'.");
             }
 
-            var segments = SplitPath(path);
-            var type = ResolveType(segments[0]);
-            object current = null;
-            var walked = segments[0].Raw;
-
-            for (var i = 1; i < segments.Count; i++)
-            {
-                var step = segments[i];
-
-                current = i == 1
-                    ? ReadMember(type, null, step, walked)
-                    : ReadMember(current?.GetType(), current, step, walked);
-
-                walked += "/" + step.Raw;
-
-                if (current == null && i < segments.Count - 1)
-                {
-                    throw new McpToolException("not_found", $"'{walked}' is null; cannot go further.");
-                }
-            }
+            var current = ResolvePath(path, out var type, out var walked);
 
             if (members)
             {
@@ -129,6 +110,39 @@ namespace UnityMCP.Editor.Tools
                 .ToArray();
 
             return new JObject { ["count"] = matches.Length, ["types"] = new JArray(matches) };
+        }
+
+        /// <summary>
+        /// Walks a type-and-member path and returns whatever it lands on.
+        /// </summary>
+        /// <remarks>
+        /// Shared with gpu_readback, which needs the same walk to reach the buffer or texture it
+        /// is asked to read. Two implementations of "what does this path mean" would drift.
+        /// </remarks>
+        internal static object ResolvePath(string path, out Type rootType, out string walked)
+        {
+            var segments = SplitPath(path);
+            rootType = ResolveType(segments[0]);
+            object current = null;
+            walked = segments[0].Raw;
+
+            for (var i = 1; i < segments.Count; i++)
+            {
+                var step = segments[i];
+
+                current = i == 1
+                    ? ReadMember(rootType, null, step, walked)
+                    : ReadMember(current?.GetType(), current, step, walked);
+
+                walked += "/" + step.Raw;
+
+                if (current == null && i < segments.Count - 1)
+                {
+                    throw new McpToolException("not_found", $"'{walked}' is null; cannot go further.");
+                }
+            }
+
+            return current;
         }
 
         // ── path parsing ──
