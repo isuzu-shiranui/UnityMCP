@@ -37,7 +37,20 @@ namespace UnityMCP.Editor.Tools
             int grid = 8)
         {
             var a = LoadPng(before, "before");
-            var b = LoadPng(after, "after");
+            Texture2D b;
+
+            try
+            {
+                b = LoadPng(after, "after");
+            }
+            catch
+            {
+                // Without this the first texture outlives every failed call. A caller comparing
+                // against a path that does not exist yet — polling for a capture, say — would
+                // leak one texture per attempt and never learn why memory grew.
+                UnityEngine.Object.DestroyImmediate(a);
+                throw;
+            }
 
             if (a.width != b.width || a.height != b.height)
             {
