@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- The release refuses to publish Editor sources that no recorded test run covers.
+  `scripts/run-editmode-tests.ps1` runs the EditMode suite in a real Editor and writes an
+  attestation naming the sources it ran against; the release compares that against the sources
+  being published. No runner here has a Unity licence, so nothing automated compiled a line of
+  C# — a regression could have reached npm without a single test having run.
+
+  The attestation names the sources rather than the commit, so a documentation change still
+  releases without re-running anything, while any edit to a `.cs` or `.asmdef` requires a fresh
+  run.
+
+### Known
+- The package does not compile on Unity 6000.5. `Object.GetInstanceID()`,
+  `EditorUtility.InstanceIDToObject` and `SerializedProperty.objectReferenceInstanceIDValue`
+  became obsolete-as-error there and the package has not been migrated to `EntityId` — ten call
+  sites across six files. Found by the script above on its first run, which had picked the
+  newest installed Editor. The tested version is now pinned to 6000.0.x and recorded in the
+  attestation.
+
 ## [3.2.0] - 2026-07-28
 
 Thirty-four tools, taking the count from 23 to 57. Until now the only way to

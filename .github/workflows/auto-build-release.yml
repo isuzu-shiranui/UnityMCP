@@ -122,6 +122,41 @@ jobs:
           npm test
           npm run build
 
+      # Nothing automated compiles a line of C#: the Verify step above is TypeScript, and no
+      # runner here has a Unity licence. So the Editor tests run on a workstation, and this
+      # checks that they ran against the sources being released rather than against something
+      # earlier. A docs-only change releases without re-running them, which is the point — the
+      # attestation names the sources, not the commit.
+      - name: Editor tests cover these sources
+        if: steps.work.outputs.needed == 'true'
+        run: |
+          ATTESTATION=scripts/editmode-attestation.json
+
+          if [ ! -f "$ATTESTATION" ]; then
+            echo "$ATTESTATION is missing. Run: pwsh scripts/run-editmode-tests.ps1"
+            exit 1
+          fi
+
+          EXPECTED=$(node scripts/source-hash.js .)
+          RECORDED=$(node -p "require('./$ATTESTATION').sourceHash")
+          FAILED=$(node -p "require('./$ATTESTATION').failed")
+          PASSED=$(node -p "require('./$ATTESTATION').passed")
+
+          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed)"
+          echo "sources:  $EXPECTED"
+
+          if [ "$EXPECTED" != "$RECORDED" ]; then
+            echo ""
+            echo "The Editor sources have changed since the tests were last run."
+            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the attestation it writes."
+            exit 1
+          fi
+
+          if [ "$FAILED" != "0" ] || [ "$PASSED" = "0" ]; then
+            echo "The recorded run is not a clean pass."
+            exit 1
+          fi
+
       - name: Create tag
         if: steps.check-tag.outputs.exists != 'true'
         run: |

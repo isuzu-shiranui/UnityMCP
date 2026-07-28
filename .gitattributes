@@ -1,0 +1,14 @@
+# Text is stored with LF and checked out as the platform prefers. The source hash in
+# scripts/source-hash.js strips line endings before hashing for the same reason: without it the
+# attestation written on Windows would never match what a Linux runner computes.
+* text=auto eol=lf
+
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.png   binary
+*.jpg   binary
+*.dll   binary
+*.pdb   binary
+*.unitypackage binary
