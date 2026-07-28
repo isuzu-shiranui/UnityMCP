@@ -204,6 +204,13 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `material_read` | safe | マテリアルの**現在値**・有効キーワード・render queue |
 | `material_set` | unsafe | プロパティ / キーワード / render queue を変更 |
 
+**Timeline（動画制作・ライブ）** — `com.unity.timeline` がある時だけ現れます。
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `timeline_inspect` | safe | トラック / クリップ / バインディングと director の時刻。**ControlTrack を辿って子 Timeline を再帰展開**する（ライブの多層構造向け） |
+| `timeline_evaluate` | unsafe | director を時刻 / フレームに評価（Play mode 不要）。`capture_screenshot` と組んで1コマ検証 |
+
 **内部状態・GPU**
 
 | ツール | 冪等性 | 用途 |

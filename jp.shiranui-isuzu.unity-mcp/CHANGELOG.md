@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Added
+- **Timeline tools**, for the video and live work these projects are for: `timeline_inspect`
+  reports a director's tracks, clips and bindings, and — the point — follows Control tracks into
+  the child timelines they drive, recursively. A live stage is routinely a root timeline whose
+  Control clips each start a character or effect timeline several layers down, and a tool that
+  stops at the first layer cannot see where anything happens. `timeline_evaluate` moves a director
+  to a time or frame and evaluates it in the Editor without entering Play Mode, so
+  `capture_screenshot` and `render_compare` can check one exact frame.
+
+  Their own assembly, constrained to `UNITY_TIMELINE`: a project without `com.unity.timeline`
+  loses the two tools rather than failing to compile. Verified against a fixture whose nested
+  structure the test defined — a Root timeline whose Control clip drives a Child timeline with a
+  muted Activation track and two Animation clips — checking that the nesting resolves, the child's
+  tracks and clip timings come back, the depth limit stops where asked, and a director evaluated
+  to frame 60 reads back at 2.0s. `timeline_evaluate` saves and restores the director's update
+  mode, so scrubbing in the Editor does not leave it unable to advance under Play.
+
 - Compiles and runs on Unity 6.5, which made the int instance-id API obsolete-as-error. The ten
   call sites that identified an object go through one `EntityIdCompat` helper that uses
   `EntityId` on 6.5+ and the int API below it. The wire contract is unchanged: the field is still

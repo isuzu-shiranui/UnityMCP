@@ -6,3 +6,8 @@ using System.Runtime.CompilerServices;
 // framework loses those two tools instead of failing to compile the package. They still
 // need McpToolException to report a bad argument the way every other tool does.
 [assembly: InternalsVisibleTo("UnityMCP.Editor.TestRunner")]
+
+// Timeline tools live in their own assembly too, constrained to projects that have
+// com.unity.timeline. They reach ObjectResolve, McpToolException and EntityIdCompat the same
+// way every other tool does.
+[assembly: InternalsVisibleTo("UnityMCP.Editor.Timeline")]

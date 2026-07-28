@@ -209,6 +209,13 @@ MCP client (Claude)                        terminal / scripts
 | `material_read` | safe | A material's **current** values, keywords and render queue |
 | `material_set` | unsafe | Set a property, keyword or render queue |
 
+**Timeline (video / live)** — appear only when `com.unity.timeline` is present.
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `timeline_inspect` | safe | Tracks, clips, bindings and the director's time. **Follows Control tracks into the child timelines they drive**, for the layered structure a live stage uses |
+| `timeline_evaluate` | unsafe | Evaluate a director at a time or frame, without Play mode. Pair with `capture_screenshot` to check one frame |
+
 **Live state and GPU**
 
 | Tool | Idempotency | Purpose |

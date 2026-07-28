@@ -1,0 +1,31 @@
+{
+  "name": "UnityMCP.Editor.Timeline",
+  "rootNamespace": "",
+  "references": [
+    "UnityMCP.Editor",
+    "Unity.Timeline",
+    "Unity.Timeline.Editor",
+    "Newtonsoft.Json"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_TIMELINE"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.timeline",
+      "expression": "1.0.0",
+      "define": "UNITY_TIMELINE"
+    }
+  ],
+  "noEngineReferences": false
+}
