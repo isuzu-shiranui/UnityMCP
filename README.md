@@ -1,7 +1,7 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -137,32 +137,102 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 ## 組み込みツール
 
-### Editor が公開するもの（23個）
+### Editor が公開するもの（57個）
+
+**診断（見る）**
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `execute_code` | unsafe | C# スニペットのコンパイル・実行 |
-| `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
-| `compile_request` | unsafe | 再コンパイルを要求 |
-| `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
-| `test_results` | safe | 実行中・直近のテスト結果（**実行中でも読める**） |
 | `console_read_logs` | safe | コンソールのエントリを読む |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（**Editor が固まっていても動く**） |
-| `scene_browse_hierarchy` | safe | シーン階層の走査 |
-| `inspect_read` / `inspect_list` | safe | シリアライズプロパティの読み取り・一覧 |
-| `inspect_write` | unsafe | シリアライズプロパティの書き込み（Undo 1操作にまとまる） |
+| `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
+| `compile_request` | unsafe | 再コンパイルを要求 |
+| `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
+| `test_results` | safe | 実行中・直近のテスト結果（**実行中でも読める**） |
+| `scene_browse_hierarchy` | safe | シーン階層の走査。**`path` を返す**ので編集系にそのまま渡せる |
+| `scene_list` | safe | 開いているシーンとビルド設定のシーン |
+| `inspect_read` | safe | シリアライズプロパティの読み取り |
+| `inspect_list` | safe | シリアライズプロパティの一覧 |
 | `play_mode_status` | safe | 再生中 / 一時停止中 / コンパイル中 |
-| `play_mode_play` / `_stop` / `_pause` / `_unpause` / `_step` | unsafe | Play mode 制御 |
-| `capture_screenshot` | safe | Game / Scene ビューや Editor パネルの画像 |
-| `menu_execute` | unsafe | メニュー項目の実行 |
 | `project_assemblies` | safe | ロード済みアセンブリ一覧 |
 | `project_packages` | safe | UPM パッケージ一覧 |
+| `capture_screenshot` | safe | Game / Scene ビューや Editor パネルの画像。`save_path` でファイル出力 |
+
+**オーサリング（作る・変える）** — すべて Undo 1操作にまとまります。
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `gameobject_create` | unsafe | GameObject / プリミティブの生成 |
+| `gameobject_delete` | unsafe | 削除（Undo で戻せる） |
+| `gameobject_duplicate` | unsafe | 複製 |
+| `gameobject_reparent` | unsafe | 親子付け。ワールド位置は既定で維持 |
+| `gameobject_set_transform` | unsafe | 位置 / 回転 / スケール。**指定した軸だけ**変える |
+| `gameobject_set_active` | unsafe | 有効・無効の切り替え |
+| `gameobject_add_component` | unsafe | コンポーネント追加 |
+| `gameobject_remove_component` | unsafe | コンポーネント削除 |
+| `inspect_write` | unsafe | シリアライズプロパティの書き込み |
+| `asset_find` | safe | 型 / 名前 / フォルダ / ラベルでアセット検索 |
+| `asset_info` | safe | 型・GUID・importer・依存の詳細 |
+| `asset_create_folder` | unsafe | フォルダ作成（親も作る、冪等） |
+| `asset_move` | unsafe | 移動・リネーム（GUID を維持） |
+| `asset_delete` | unsafe | 削除。**OS のゴミ箱行きなので戻せる** |
+| `asset_reimport` | unsafe | 再インポート |
+| `scene_open` | unsafe | シーンを開く（未保存があれば拒否） |
+| `scene_save` | unsafe | 保存 / 別名保存 |
+| `scene_create` | unsafe | 新規シーン |
+| `prefab_create` | unsafe | シーンオブジェクトを Prefab 化 |
+| `prefab_instantiate` | unsafe | Prefab をシーンに配置 |
+| `prefab_apply` | unsafe | インスタンスのオーバーライドを Prefab へ適用 |
+| `menu_execute` | unsafe | メニュー項目の実行 |
+| `play_mode_play` | unsafe | 再生開始 |
+| `play_mode_stop` | unsafe | 停止 |
+| `play_mode_pause` | unsafe | 一時停止 |
+| `play_mode_unpause` | unsafe | 一時停止解除 |
+| `play_mode_step` | unsafe | 1フレーム進める |
+
+**描画・シェーダーのデバッグ**
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `render_compare` | safe | 2枚のキャプチャの差を**数値で**返す（差分画素数・平均/最大デルタ・矩形・グリッド） |
+| `render_pipeline_info` | safe | 実効 RP、色空間、Graphics API、品質レベル。**Quality 側の RP 上書き**も併記 |
+| `render_camera_info` | safe | カメラと view / projection / **GPU projection** 行列 |
+| `shader_errors` | safe | シェーダーのコンパイルエラー（**黙って magenta になるので聞かないと分からない**） |
+| `shader_info` | safe | パス数、プロパティ、キーワード空間、render queue |
+| `material_read` | safe | マテリアルの**現在値**・有効キーワード・render queue |
+| `material_set` | unsafe | プロパティ / キーワード / render queue を変更 |
+
+**内部状態・GPU**
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `reflect_read` | safe | 型とメンバーパスで**private を含む live な状態**を読む |
+| `reflect_find_type` | safe | ロード済み型の検索 |
+| `gpu_readback` | safe | バッファ / テクスチャを読み戻し、**中身でなく統計**（range / mean / zeroCount / histogram）を返す |
+| `execute_code` | unsafe | C# スニペットのコンパイル・実行（**専用ツールで届かないときの最後の手段**） |
+
+**ビルド**
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `build_settings` | safe | 実効ビルドターゲット、ビルドに入るシーン、モジュールの有無 |
+| `build_player` | unsafe | プレイヤービルド。コールドは job、増分はインラインで返る |
+| `build_switch_target` | unsafe | ビルドターゲット切替（再インポートを伴う） |
 
 Editor パネルのキャプチャ（`inspector` / `hierarchy` / `project` / `console` / `window:<title>`）は Windows 限定です。`game` と `scene` は全プラットフォームで動きます。
 
 `test_run` / `test_results` は `com.unity.test-framework` が入っているときだけ現れます（Unity の既定パッケージなので通常は入っています）。専用のアセンブリに分けて `UNITY_INCLUDE_TESTS` で制約しているため、無い環境ではこの2つが一覧に出ないだけで、パッケージ全体は変わらず動きます。
+
+Unity Hub の操作（Editor やモジュールのインストール）は**あえて持ちません**。Hub 自身に CLI があるので、未インストールのビルドターゲットを指定したときに実行すべきコマンドを返します。
+
+### 知っておくと事故らないこと
+
+- **編集系ツールが受け取る `path` は `scene_browse_hierarchy` が返すものです。** 非アクティブなオブジェクトも解決でき、兄弟に同名がいるときだけ `/Canvas/Button[1]/Text` と添字が付きます。
+- **Play Mode 中のシーン編集は、成功したように見えて終了時に破棄されます。** その状況では応答に `playModeWarning` が付きます。アセットの変更は残るので、そちらには付きません。
+- **削除は確認を求めず、戻せるようにしてあります。** アセットは OS のゴミ箱へ、GameObject は Undo 経由です。ただし**未保存シーンへの上書きは拒否します**（これだけは Undo でも戻せないため）。
+- **`execute_code` は Undo に乗りません。** オーサリングは専用ツールを使ってください。
 
 ### MCP サーバが提供するもの（3個）
 

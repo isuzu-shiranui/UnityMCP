@@ -111,6 +111,46 @@ jobs:
             exit 1
           fi
 
+      # A README that lists 23 tools while the package publishes 57 is how v2's docs ended up
+      # describing seven tools that did not exist. The catalogue is generated from the
+      # attributes, so the only thing that can drift is the prose — checked here rather than
+      # remembered.
+      - name: Every tool is documented
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const root = 'jp.shiranui-isuzu.unity-mcp/Editor';
+
+            const walk = (dir, out = []) => {
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                e.isDirectory() ? walk(p, out) : p.endsWith('.cs') && out.push(p);
+              }
+              return out;
+            };
+
+            const names = new Set();
+            for (const f of walk(root)) {
+              if (f.includes(path.sep + 'Tests' + path.sep)) continue;
+              const src = fs.readFileSync(f, 'utf8');
+              for (const m of src.matchAll(/McpTool\(\s*\"([a-z0-9_]+)\"/g)) names.add(m[1]);
+            }
+
+            let failed = false;
+            for (const readme of ['README.md', 'README.en.md']) {
+              const text = fs.readFileSync(readme, 'utf8');
+              const missing = [...names].filter(n => !text.includes('\`' + n + '\`')).sort();
+              if (missing.length) {
+                console.error(readme + ' does not mention: ' + missing.join(', '));
+                failed = true;
+              }
+            }
+
+            if (failed) process.exit(1);
+            console.log(names.size + ' tools, all documented in both READMEs');
+          "
+
       # Redistributing a binary without attributing it is a licensing problem, and the list
       # is exactly the kind of thing that goes stale silently when a dependency is swapped.
       - name: Every bundled assembly is attributed

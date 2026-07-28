@@ -32,6 +32,47 @@ namespace UnityMCP.Editor.Handlers
                 ["scene_view_window"] = "UnityEditor.SceneView",
             };
 
+        /// <summary>
+        /// Returns the capture as base64, or writes it to disk and returns the path instead.
+        /// </summary>
+        /// <remarks>
+        /// A 1024px PNG is a few hundred kilobytes of base64, and comparing two of them means
+        /// carrying both through the conversation. Writing to a file and passing paths to
+        /// render_compare keeps the pixels out of the transcript entirely, which is the whole
+        /// point of having a comparison tool rather than asking a model to eyeball two images.
+        /// </remarks>
+        private static JObject Deliver(byte[] pngBytes, string view, int width, int height, string savePath)
+        {
+            var result = new JObject
+            {
+                ["view"] = view,
+                ["width"] = width,
+                ["height"] = height,
+                ["bytes"] = pngBytes.Length,
+            };
+
+            if (string.IsNullOrWhiteSpace(savePath))
+            {
+                result["image"] = Convert.ToBase64String(pngBytes);
+                return result;
+            }
+
+            var full = System.IO.Path.GetFullPath(savePath);
+            var directory = System.IO.Path.GetDirectoryName(full);
+
+            if (!string.IsNullOrEmpty(directory))
+            {
+                System.IO.Directory.CreateDirectory(directory);
+            }
+
+            System.IO.File.WriteAllBytes(full, pngBytes);
+
+            result["path"] = full.Replace('\\', '/');
+            result["note"] = "Written to disk rather than returned inline. Pass this path to render_compare.";
+
+            return result;
+        }
+
         private const string WindowPrefix = "window:";
         private const uint SRCCOPY = 0x00CC0020;
         private const uint DIB_RGB_COLORS = 0;
@@ -42,17 +83,18 @@ namespace UnityMCP.Editor.Handlers
             var maxSize = parameters["maxSize"]?.Value<int>() ?? 1024;
             int? requestedWidth = parameters["width"]?.Value<int>();
             int? requestedHeight = parameters["height"]?.Value<int>();
+            var savePath = parameters["savePath"]?.ToString();
 
             // Editor panel views (or explicit window:<title>) route to desktop capture.
             if (IsEditorPanelView(view))
             {
-                return CaptureEditorWindow(view, maxSize, requestedWidth, requestedHeight);
+                return CaptureEditorWindow(view, maxSize, requestedWidth, requestedHeight, savePath);
             }
 
             // Camera-based views: "game" / "scene" only.
             if (view == "game" || view == "scene")
             {
-                return CaptureCameraView(view, maxSize, requestedWidth, requestedHeight);
+                return CaptureCameraView(view, maxSize, requestedWidth, requestedHeight, savePath);
             }
 
             // Unknown view name — surface as invalid_params so clients get a proper error envelope.
@@ -75,7 +117,7 @@ namespace UnityMCP.Editor.Handlers
         //  Camera-based capture (existing path, preserved)
         // ──────────────────────────────────────────────
 
-        private static JObject CaptureCameraView(string view, int maxSize, int? requestedWidth, int? requestedHeight)
+        private static JObject CaptureCameraView(string view, int maxSize, int? requestedWidth, int? requestedHeight, string savePath)
         {
             try
             {
@@ -159,16 +201,7 @@ namespace UnityMCP.Editor.Handlers
                     tex2d.Apply();
                     RenderTexture.active = previousActiveRT;
 
-                    var pngBytes = tex2d.EncodeToPNG();
-                    var base64 = Convert.ToBase64String(pngBytes);
-
-                    return new JObject
-                    {
-                        ["image"] = base64,
-                        ["view"] = view,
-                        ["width"] = captureWidth,
-                        ["height"] = captureHeight
-                    };
+                    return Deliver(tex2d.EncodeToPNG(), view, captureWidth, captureHeight, savePath);
                 }
                 finally
                 {
@@ -192,7 +225,7 @@ namespace UnityMCP.Editor.Handlers
         //  EditorWindow capture (desktop DC, Windows only)
         // ──────────────────────────────────────────────
 
-        private static JObject CaptureEditorWindow(string view, int maxSize, int? requestedWidth, int? requestedHeight)
+        private static JObject CaptureEditorWindow(string view, int maxSize, int? requestedWidth, int? requestedHeight, string savePath)
         {
 #if UNITY_EDITOR_WIN
             var window = ResolveEditorWindow(view);
@@ -252,17 +285,9 @@ namespace UnityMCP.Editor.Handlers
                     finalTex = resized;
                 }
 
-                var pngBytes = finalTex.EncodeToPNG();
-                var base64 = Convert.ToBase64String(pngBytes);
-
-                return new JObject
-                {
-                    ["image"] = base64,
-                    ["view"] = view,
-                    ["width"] = finalTex.width,
-                    ["height"] = finalTex.height,
-                    ["windowTitle"] = window.titleContent.text
-                };
+                var delivered = Deliver(finalTex.EncodeToPNG(), view, finalTex.width, finalTex.height, savePath);
+                delivered["windowTitle"] = window.titleContent.text;
+                return delivered;
             }
             finally
             {
@@ -428,7 +453,12 @@ namespace UnityMCP.Editor.Handlers
                     {
                         biSize = (uint)Marshal.SizeOf(typeof(BITMAPINFOHEADER)),
                         biWidth = physicalW,
-                        biHeight = -physicalH, // top-down DIB
+                        // Positive height asks GDI for a bottom-up DIB, which is the row order
+                        // LoadRawTextureData already expects: Unity's textures put v=0 at the
+                        // bottom. Asking for top-down here, as this did, produces a texture that
+                        // is upside down — captures came out mirrored top to bottom, readable
+                        // only as a mirror image, for every Editor panel.
+                        biHeight = physicalH,
                         biPlanes = 1,
                         biBitCount = 32,
                         biCompression = 0, // BI_RGB

@@ -95,6 +95,39 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `compile_request` | Trigger a recompile (`AssetDatabase.Refresh` alone does not) |
 | `test_run --mode edit --assembly MyGame.Tests` | Start a test run; returns immediately |
 | `test_results` | Counts and failures; **answers while the run holds the main thread** |
+
+### Authoring — every one of these is a single undo step
+
+| Tool | Purpose |
+|---|---|
+| `gameobject_create --primitive Cube --name Enemy --parent_path /Root` | Create; returns the `path` to address it by |
+| `gameobject_delete` / `gameobject_duplicate` / `gameobject_reparent` | Undoable, so no confirmation is asked for |
+| `gameobject_set_transform --object_path /Root/Enemy --json '{"position":{"y":2}}'` | Only the axes given are changed |
+| `gameobject_add_component --component_type Rigidbody` / `gameobject_remove_component` | Returns the component list |
+| `asset_find --type Material --folder Assets/Art --limit 20` | Then `asset_info`, `asset_move`, `asset_delete` (to the OS trash) |
+| `asset_create_folder --path Assets/Art/Materials` | Creates parents too; calling it twice is not an error |
+| `scene_list` / `scene_open` / `scene_save` / `scene_create` | `scene_open` refuses over unsaved changes |
+| `prefab_create` / `prefab_instantiate` / `prefab_apply` | `prefab_apply` is not undoable and changes every instance |
+| `build_settings` then `build_player --output_path C:/out/Game.exe` | A cold build returns a job id; poll `jobs <id>` |
+
+### Rendering and shader debugging
+
+| Tool | Purpose |
+|---|---|
+| `shader_errors` | Compilation errors. **A broken shader renders magenta and never says so** — ask after every shader edit |
+| `shader_info` / `material_read` / `material_set` | What a frame is drawn from, as opposed to the shader's defaults |
+| `render_pipeline_info` | The pipeline actually in force. **The quality level overrides graphics settings** |
+| `render_camera_info` | View, projection and GPU projection matrices, for checking a value against a CPU replica |
+| `render_compare --before a.png --after b.png` | Differences as numbers |
+| `reflect_read --path "MyPipeline.Manager/ByCamera[0]/levels[2]"` | Live private state without writing a snippet |
+| `gpu_readback --path "MyPipeline.Manager/pool" --format uint` | **`allZero` answers "did the pass write anything"** in one line |
+
+### Two things that will cost you an afternoon otherwise
+
+- **The `path` these tools take is the one `scene_browse_hierarchy` returns.** It resolves
+  inactive objects, and carries an index only when a sibling name repeats: `/Canvas/Button[1]/Text`.
+- **A scene edit during Play Mode succeeds and is reverted when Play Mode stops.** The response
+  carries `playModeWarning` when that applies. Asset edits made at the same moment do survive.
 | `scene_browse_hierarchy --name Player --limit 20` | Hierarchy; also filters `component`, `tag`, `active_only`, `max_depth` |
 | `inspect_list --game_object_path Player --component_type Transform` | Discover property paths |
 | `inspect_read --game_object_path Player --component_type Transform --property_path m_LocalPosition` | Read one property |
@@ -133,6 +166,18 @@ isuzu-unity-mcp call test_results            # poll; status goes running -> comp
 whole duration. During that window `test_results` is the only tool that answers — poll it
 rather than retrying `test_run`. A `status` of `interrupted` means a domain reload happened
 mid-run and the outcome was lost; start the run again.
+
+### Prove a rendering change did something
+
+```bash
+isuzu-unity-mcp call capture_screenshot --view game --save_path /tmp/before.png
+# toggle the thing under test
+isuzu-unity-mcp call render_compare --before /tmp/before.png --after /tmp/after.png
+```
+
+Compare rather than look. Screenshot colours are post-tonemap, so absolute values do not settle
+an argument; changed-pixel counts and where they are do. Passing `save_path` keeps both images
+out of the conversation entirely.
 
 ### Save a screenshot to a file
 

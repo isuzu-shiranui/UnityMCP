@@ -30,13 +30,17 @@ namespace UnityMCP.Editor.Tools
             [McpArg("width", "Exact capture width; overrides max_size.")]
             int? width = null,
             [McpArg("height", "Exact capture height; overrides max_size.")]
-            int? height = null)
+            int? height = null,
+            [McpArg("save_path", "Write the PNG here and return the path instead of the image. " +
+                                 "Use this when the picture is going to render_compare rather than to a human.")]
+            string savePath = null)
         {
             return ScreenshotCapture.Capture(ToolArgs.Of(
                 ("view", view),
                 ("maxSize", maxSize),
                 ("width", width),
-                ("height", height)));
+                ("height", height),
+                ("savePath", savePath)));
         }
 
         [McpTool(

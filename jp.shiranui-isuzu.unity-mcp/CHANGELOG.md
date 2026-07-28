@@ -1,5 +1,61 @@
 # Changelog
 
+## [3.2.0] - 2026-07-28
+
+Thirty-four tools, taking the count from 23 to 57. Until now the only way to
+change anything was `execute_code`, which is not on the undo stack, cannot
+declare its idempotency, and costs a round trip whenever a type name is guessed
+wrong. The rendering tools were chosen from what a real pipeline port actually
+did over and over, not from what looked useful.
+
+### Added
+- **Authoring.** `gameobject_create` / `_delete` / `_reparent` / `_duplicate` /
+  `_set_transform` / `_set_active` / `_add_component` / `_remove_component`,
+  `asset_find` / `_info` / `_create_folder` / `_move` / `_delete` / `_reimport`,
+  `scene_list` / `_open` / `_save` / `_create`, `prefab_create` / `_instantiate` /
+  `_apply`. Every mutation is on the undo stack, so one call is one Ctrl+Z.
+- **Builds.** `build_settings`, `build_player`, `build_switch_target`. A cold
+  build crosses the synchronous window and comes back as a job; an incremental
+  one answers inline. Unity Hub is deliberately not wrapped — an uninstalled
+  target says so and gives the Hub CLI command to run.
+- **Rendering and shaders.** `render_compare` reports how two captures differ in
+  numbers rather than pictures; `render_pipeline_info` reports both the graphics
+  and quality-level pipelines, because the second overrides the first;
+  `render_camera_info` exposes the view, projection and GPU projection matrices
+  so a value read off a screenshot can be checked against one computed on the
+  CPU. `shader_errors`, `shader_info`, `material_read`, `material_set`.
+- **Live state.** `reflect_read` and `reflect_find_type` read private members by
+  path; `gpu_readback` reads a buffer or texture back and reports its range,
+  mean, zero count and histogram rather than its contents.
+- `capture_screenshot` takes `save_path`, writing the PNG to disk and returning
+  the path. Comparing two inline captures costs most of a context window, which
+  defeats the point of having a comparison tool.
+- `scene_browse_hierarchy` emits `path`. Without it, a caller who had just
+  browsed the hierarchy had to guess at the identifier every other tool takes.
+- Scene edits made during Play Mode carry a `playModeWarning`. They succeed,
+  report truthfully, and are reverted on exit; asset edits made at the same
+  moment survive, and nothing distinguished them.
+
+### Fixed
+- **One tool call is one undo step.** `ToolInvoker` captured the undo group
+  without incrementing first, so every call in a session shared a group and each
+  collapse merged everything recorded since — a single Ctrl+Z reversed the whole
+  conversation. Present since 3.0.0, and invisible to any test that made one
+  call.
+- **Editor window captures were upside down.** Every Inspector, Hierarchy,
+  Project and Console screenshot came back mirrored top to bottom. The DIB was
+  requested top-down while `LoadRawTextureData` expects bottom-up.
+- `render_compare` leaked a texture per failed call when the second image was
+  missing, and reported a mismatched pair as `tool_failed` because it read the
+  sizes after destroying them.
+
+### Changed
+- Mutating a GameObject returns what the operation was about rather than
+  everything about the object. The transform comes back from the tools that
+  move it and the component list from the tools that change it.
+- Tests: 94 to 163. The new ones are shaped around repetition and boundaries,
+  because every defect above was correct once and wrong afterwards.
+
 ## [3.1.0] - 2026-07-28
 
 ### Added

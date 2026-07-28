@@ -178,6 +178,10 @@ namespace UnityMCP.Editor.Handlers
             return new JObject
             {
                 ["name"] = go.name,
+                // The identifier every authoring tool takes. Without it a caller who has just
+                // browsed the hierarchy has to guess at the path of the thing they are looking
+                // at, and guesses fail on any name that repeats among siblings.
+                ["path"] = UnityMCP.Editor.Tools.ObjectResolve.PathOf(go),
                 ["id"] = go.GetInstanceID(),
                 ["instanceId"] = go.GetInstanceID(),
                 ["active"] = go.activeSelf,

@@ -1,7 +1,7 @@
 # Unity MCP Integration Framework
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.1.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -142,32 +142,105 @@ MCP client (Claude)                        terminal / scripts
 
 ## Built-in tools
 
-### Published by the Editor (23)
+### Published by the Editor (57)
+
+**Looking**
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
-| `execute_code` | unsafe | Compile and run a C# snippet |
+| `console_read_logs` | safe | Console entries |
+| `console_get_count` | safe | Error / warning / log counts |
+| `console_clear` | unsafe | Clear the console |
+| `editor_log_tail` | safe | `Editor.log` from disk (**works while the Editor is wedged**) |
 | `compile_status` | safe | Whether scripts are compiling, and whether the last compile succeeded |
 | `compile_request` | unsafe | Ask for a recompile |
 | `test_run` | unsafe | Start an EditMode or PlayMode test run |
 | `test_results` | safe | The current or most recent run (**readable while it runs**) |
-| `console_read_logs` | safe | Read console entries |
-| `console_get_count` | safe | Error / warning / log counts |
-| `console_clear` | unsafe | Clear the console |
-| `editor_log_tail` | safe | Read `Editor.log` from disk (**works while the Editor is wedged**) |
-| `scene_browse_hierarchy` | safe | Walk the scene hierarchy |
-| `inspect_read` / `inspect_list` | safe | Read and list serialized properties |
-| `inspect_write` | unsafe | Write a serialized property (collapses into one Undo step) |
+| `scene_browse_hierarchy` | safe | Walk the hierarchy. **Emits `path`**, which every editing tool takes |
+| `scene_list` | safe | Open scenes, and the scenes in the build settings |
+| `inspect_read` | safe | Read a serialized property |
+| `inspect_list` | safe | Discover property paths |
 | `play_mode_status` | safe | Playing / paused / compiling |
-| `play_mode_play` / `_stop` / `_pause` / `_unpause` / `_step` | unsafe | Play mode control |
-| `capture_screenshot` | safe | Game or Scene view, or an Editor panel |
-| `menu_execute` | unsafe | Invoke a menu item |
 | `project_assemblies` | safe | Loaded assemblies |
 | `project_packages` | safe | UPM packages |
+| `capture_screenshot` | safe | Game or Scene view, or an Editor panel. `save_path` writes it to disk |
+
+**Authoring** — every mutation collapses into one undo step.
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `gameobject_create` | unsafe | Create an object, optionally a primitive |
+| `gameobject_delete` | unsafe | Delete it (undoable) |
+| `gameobject_duplicate` | unsafe | Duplicate it |
+| `gameobject_reparent` | unsafe | Move it under another parent; world position kept by default |
+| `gameobject_set_transform` | unsafe | Position, rotation, scale. **Only the axes given** |
+| `gameobject_set_active` | unsafe | Activate or deactivate |
+| `gameobject_add_component` | unsafe | Add a component by type name |
+| `gameobject_remove_component` | unsafe | Remove one |
+| `inspect_write` | unsafe | Write a serialized property |
+| `asset_find` | safe | Search by type, name, folder or label |
+| `asset_info` | safe | Type, GUID, importer, dependencies |
+| `asset_create_folder` | unsafe | Create a folder and its parents, idempotently |
+| `asset_move` | unsafe | Move or rename, keeping the GUID |
+| `asset_delete` | unsafe | Delete. **Goes to the OS trash, so it is recoverable** |
+| `asset_reimport` | unsafe | Reimport |
+| `scene_open` | unsafe | Open a scene (refuses over unsaved changes) |
+| `scene_save` | unsafe | Save, or save as |
+| `scene_create` | unsafe | New scene |
+| `prefab_create` | unsafe | Save a scene object as a prefab |
+| `prefab_instantiate` | unsafe | Place a prefab |
+| `prefab_apply` | unsafe | Push instance overrides back into the asset |
+| `menu_execute` | unsafe | Invoke a menu item |
+| `play_mode_play` | unsafe | Enter play mode |
+| `play_mode_stop` | unsafe | Leave it |
+| `play_mode_pause` | unsafe | Pause |
+| `play_mode_unpause` | unsafe | Resume |
+| `play_mode_step` | unsafe | Step one frame |
+
+**Rendering and shaders**
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `render_compare` | safe | How two captures differ, **in numbers** (changed pixels, mean/max delta, bounding box, grid) |
+| `render_pipeline_info` | safe | Active pipeline, colour space, graphics API, quality level. **Reports the quality-level override too** |
+| `render_camera_info` | safe | Cameras with view, projection and **GPU projection** matrices |
+| `shader_errors` | safe | Shader compilation errors (**a broken shader renders magenta and says nothing**) |
+| `shader_info` | safe | Passes, properties, keyword space, render queue |
+| `material_read` | safe | A material's **current** values, keywords and render queue |
+| `material_set` | unsafe | Set a property, keyword or render queue |
+
+**Live state and GPU**
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `reflect_read` | safe | Read live state by type and member path, **private members included** |
+| `reflect_find_type` | safe | Find a loaded type by name |
+| `gpu_readback` | safe | Read a buffer or texture back and report **statistics, not contents** (range, mean, zero count, histogram) |
+| `execute_code` | unsafe | Compile and run a C# snippet (**the last resort when no tool reaches it**) |
+
+**Builds**
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `build_settings` | safe | Active target, the scenes in the build, whether the module is installed |
+| `build_player` | unsafe | Build a player. A cold build becomes a job; an incremental one answers inline |
+| `build_switch_target` | unsafe | Switch the active target (reimports assets) |
 
 Editor panel capture (`inspector`, `hierarchy`, `project`, `console`, `window:<title>`) is Windows-only; `game` and `scene` work everywhere.
 
 `test_run` and `test_results` appear only when `com.unity.test-framework` is present, which it is by default. They live in their own assembly constrained to `UNITY_INCLUDE_TESTS`, so a project without the framework loses those two tools rather than failing to compile the package.
+
+### Things that will bite otherwise
+
+- **The `path` an editing tool takes is the one `scene_browse_hierarchy` returns.** It resolves
+  inactive objects, and carries an index only where a sibling name repeats: `/Canvas/Button[1]/Text`.
+- **A scene edit made during Play Mode looks like it worked and is reverted when Play Mode stops.**
+  Those responses carry a `playModeWarning`. Asset edits made at the same moment do survive, so
+  they do not.
+- **Deletion is recoverable rather than gated.** Assets go to the OS trash and GameObjects go
+  through Undo, so neither asks for confirmation. Opening or replacing a scene over unsaved
+  changes *is* refused, because that is the one edit no undo stack can return.
+- **`execute_code` is not on the undo stack.** Use the authoring tools for authoring.
 
 ### Provided by the MCP server (3)
 
