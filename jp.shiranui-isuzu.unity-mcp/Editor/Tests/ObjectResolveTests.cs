@@ -116,7 +116,9 @@ namespace UnityMCP.Editor.Tests
         {
             var child = ObjectResolve.Object("/ResolveRoot/Child", null);
 
-            Assert.That(ObjectResolve.Object(null, child.GetInstanceID()), Is.SameAs(child));
+            // Through the same compat helper the tools use, so the test compiles on 6.5 where the
+            // raw GetInstanceID is obsolete-as-error, and exercises the real id round trip.
+            Assert.That(ObjectResolve.Object(null, EntityIdCompat.IdOf(child)), Is.SameAs(child));
         }
 
         [Test]

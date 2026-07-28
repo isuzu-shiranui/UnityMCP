@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+- Compiles and runs on Unity 6.5, which made the int instance-id API obsolete-as-error. The ten
+  call sites that identified an object go through one `EntityIdCompat` helper that uses
+  `EntityId` on 6.5+ and the int API below it. The wire contract is unchanged: the field is still
+  `instanceId` and still a JSON number, widened from int to long so a 64-bit id is not truncated.
+  Verified by running the EditMode suite on three Editors — 6.0 and 6.3 on the int path, 6.5 on
+  the EntityId path — 163 passing on each. The version boundary is 6.5, not 6.2: `EntityId.ToULong`,
+  `FromULong` and `objectReferenceEntityIdValue` do not exist on 6.3, established by compiling
+  against it.
+
 ### Changed
 - The release refuses to publish Editor sources that no recorded test run covers.
   `scripts/run-editmode-tests.ps1` runs the EditMode suite in a real Editor and writes an

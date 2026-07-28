@@ -38,7 +38,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("parent_path", "Hierarchy path of the parent; omit to create at the scene root.")]
             string parentPath = null,
             [McpArg("parent_instance_id", "Parent by instance id.")]
-            int? parentInstanceId = null,
+            long? parentInstanceId = null,
             [McpArg("position", "Local position, as {x, y, z}.")]
             JObject position = null,
             [McpArg("rotation", "Local euler angles, as {x, y, z}.")]
@@ -92,7 +92,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null)
+            long? instanceId = null)
         {
             var go = ObjectResolve.Object(objectPath, instanceId);
             var path = ObjectResolve.PathOf(go);
@@ -121,11 +121,11 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("parent_path", "Path of the new parent. Omit to move it to the scene root.")]
             string parentPath = null,
             [McpArg("parent_instance_id", "New parent by instance id.")]
-            int? parentInstanceId = null,
+            long? parentInstanceId = null,
             [McpArg("sibling_index", "Position among the new parent's children; omit to append.")]
             int? siblingIndex = null,
             [McpArg("keep_world_position", "Keep the object where it is in world space.")]
@@ -176,7 +176,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("name", "Name for the copy. Defaults to Unity's own numbering.")]
             string name = null)
         {
@@ -203,7 +203,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("position", "Position, as {x, y, z}. Any missing axis is left alone.")]
             JObject position = null,
             [McpArg("rotation", "Euler angles, as {x, y, z}.")]
@@ -230,7 +230,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("active", "Whether the object should be active.")]
             bool active = true)
         {
@@ -252,7 +252,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("component_type", "Type name of the component to add.")]
             string componentType = null)
         {
@@ -281,7 +281,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("component_type", "Type name of the component to remove.")]
             string componentType = null,
             [McpArg("index", "Which one, when the object carries several of the same type.")]
@@ -445,7 +445,7 @@ namespace UnityMCP.Editor.Tools
             {
                 ["name"] = go.name,
                 ["path"] = ObjectResolve.PathOf(go),
-                ["instanceId"] = go.GetInstanceID(),
+                ["instanceId"] = EntityIdCompat.IdOf(go),
                 ["active"] = go.activeSelf,
             };
 

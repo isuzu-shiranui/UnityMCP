@@ -182,8 +182,8 @@ namespace UnityMCP.Editor.Handlers
                 // browsed the hierarchy has to guess at the path of the thing they are looking
                 // at, and guesses fail on any name that repeats among siblings.
                 ["path"] = UnityMCP.Editor.Tools.ObjectResolve.PathOf(go),
-                ["id"] = go.GetInstanceID(),
-                ["instanceId"] = go.GetInstanceID(),
+                ["id"] = EntityIdCompat.IdOf(go),
+                ["instanceId"] = EntityIdCompat.IdOf(go),
                 ["active"] = go.activeSelf,
                 ["tag"] = go.tag,
                 ["layer"] = LayerMask.LayerToName(go.layer),

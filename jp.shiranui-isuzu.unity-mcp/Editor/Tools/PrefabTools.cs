@@ -27,7 +27,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("path", "Where to save it, e.g. Assets/Prefabs/Enemy.prefab.")]
             string path = null,
             [McpArg("connect", "Leave the scene object linked to the new prefab.")]
@@ -79,7 +79,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("parent_path", "Hierarchy path of the parent; omit for the scene root.")]
             string parentPath = null,
             [McpArg("parent_instance_id", "Parent by instance id.")]
-            int? parentInstanceId = null,
+            long? parentInstanceId = null,
             [McpArg("name", "Name for the instance. Defaults to the prefab's name.")]
             string name = null,
             [McpArg("position", "Local position, as {x, y, z}.")]
@@ -140,7 +140,7 @@ namespace UnityMCP.Editor.Tools
             {
                 ["name"] = instance.name,
                 ["path"] = ObjectResolve.PathOf(instance),
-                ["instanceId"] = instance.GetInstanceID(),
+                ["instanceId"] = EntityIdCompat.IdOf(instance),
                 ["prefab"] = normalised,
             });
         }
@@ -154,7 +154,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path of the instance, from scene_browse_hierarchy.")]
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
-            int? instanceId = null)
+            long? instanceId = null)
         {
             var go = ObjectResolve.Object(objectPath, instanceId);
             var root = PrefabUtility.GetOutermostPrefabInstanceRoot(go);

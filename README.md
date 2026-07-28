@@ -20,7 +20,7 @@ Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに
 
 ## 必要条件
 
-- Unity Editor 2022.3 以降（Unity 6 で検証）
+- Unity Editor 2022.3 以降（Unity 6.0 / 6.3 / 6.5 の EditMode で検証。6.5 の EntityId 移行にも対応）
 - Node.js 18 以降
 - `com.unity.nuget.newtonsoft-json` 3.2.1（依存として自動解決されます）
 

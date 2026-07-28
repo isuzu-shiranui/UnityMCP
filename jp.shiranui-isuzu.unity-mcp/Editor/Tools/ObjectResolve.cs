@@ -35,11 +35,11 @@ namespace UnityMCP.Editor.Tools
         /// <summary>
         /// Resolves a GameObject from a path, an instance id, or both.
         /// </summary>
-        public static GameObject Object(string path, int? instanceId, string argumentName = "object_path")
+        public static GameObject Object(string path, long? instanceId, string argumentName = "object_path")
         {
             if (instanceId.HasValue)
             {
-                var byId = EditorUtility.InstanceIDToObject(instanceId.Value) as GameObject;
+                var byId = EntityIdCompat.Find(instanceId.Value) as GameObject;
 
                 if (byId != null)
                 {

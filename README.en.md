@@ -20,7 +20,7 @@ Opens the Unity Editor to AI agents over the Model Context Protocol, and to peop
 
 ## Requirements
 
-- Unity Editor 2022.3 or newer (verified on Unity 6)
+- Unity Editor 2022.3 or newer (EditMode verified on Unity 6.0 / 6.3 / 6.5; the 6.5 EntityId migration is handled)
 - Node.js 18 or newer
 - `com.unity.nuget.newtonsoft-json` 3.2.1 (resolved automatically)
 

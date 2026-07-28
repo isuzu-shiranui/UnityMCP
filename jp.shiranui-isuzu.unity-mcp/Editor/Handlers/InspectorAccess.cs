@@ -19,7 +19,7 @@ namespace UnityMCP.Editor.Handlers
             try
             {
                 var mode = parameters["mode"]?.ToString() ?? "read";
-                var instanceId = parameters["instanceId"]?.Value<int?>();
+                var instanceId = parameters["instanceId"]?.Value<long?>();
                 var gameObjectPath = parameters["gameObjectPath"]?.ToString();
                 var componentType = parameters["componentType"]?.ToString();
                 var componentIndex = parameters["componentIndex"]?.Value<int>() ?? 0;
@@ -30,7 +30,7 @@ namespace UnityMCP.Editor.Handlers
                 GameObject go = null;
                 if (instanceId.HasValue)
                 {
-                    var obj = EditorUtility.InstanceIDToObject(instanceId.Value);
+                    var obj = EntityIdCompat.Find(instanceId.Value);
                     go = obj as GameObject;
                 }
 
@@ -184,7 +184,7 @@ namespace UnityMCP.Editor.Handlers
             return new JObject
             {
                 ["gameObject"] = go.name,
-                ["instanceId"] = go.GetInstanceID(),
+                ["instanceId"] = EntityIdCompat.IdOf(go),
                 ["components"] = page["items"],
                 ["truncated"] = page["truncated"],
                 ["next"] = page["next"]
@@ -374,7 +374,7 @@ namespace UnityMCP.Editor.Handlers
                     var objRef = prop.objectReferenceValue;
                     return new JObject
                     {
-                        ["instanceId"] = prop.objectReferenceInstanceIDValue,
+                        ["instanceId"] = EntityIdCompat.ObjectReferenceId(prop),
                         ["name"] = objRef != null ? objRef.name : null,
                         ["type"] = objRef != null ? objRef.GetType().Name : null
                     };

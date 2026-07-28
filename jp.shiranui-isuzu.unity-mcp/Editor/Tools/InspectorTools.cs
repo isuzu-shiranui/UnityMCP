@@ -25,7 +25,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
             string propertyPath,
             [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
             string gameObjectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
@@ -49,7 +49,7 @@ namespace UnityMCP.Editor.Tools
             Idempotency = McpIdempotency.Safe)]
         public static JObject List(
             [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
             string gameObjectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
@@ -89,7 +89,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("value", "New value; its JSON type must match the property's type.")]
             JToken value,
             [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
-            int? instanceId = null,
+            long? instanceId = null,
             [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
             string gameObjectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
