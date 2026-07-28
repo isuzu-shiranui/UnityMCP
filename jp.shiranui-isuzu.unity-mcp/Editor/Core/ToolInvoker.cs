@@ -99,6 +99,12 @@ namespace UnityMCP.Editor.Core
 
             if (usingUndo)
             {
+                // Increment first. GetCurrentGroup returns whichever group is already open, so
+                // without this every call in a session captures the same index and each collapse
+                // merges everything recorded since — one Ctrl+Z then undoes the whole
+                // conversation instead of the last call. It looks correct until a second tool
+                // call happens, which is why a single-call test passed while this was wrong.
+                Undo.IncrementCurrentGroup();
                 undoGroup = Undo.GetCurrentGroup();
                 Undo.SetCurrentGroupName(descriptor.UndoGroup);
             }
