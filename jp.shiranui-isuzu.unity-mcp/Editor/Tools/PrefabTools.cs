@@ -136,13 +136,13 @@ namespace UnityMCP.Editor.Tools
 
             Selection.activeGameObject = instance;
 
-            return new JObject
+            return EditorNotes.SceneChange(new JObject
             {
                 ["name"] = instance.name,
                 ["path"] = ObjectResolve.PathOf(instance),
                 ["instanceId"] = instance.GetInstanceID(),
                 ["prefab"] = normalised,
-            };
+            });
         }
 
         [McpTool(

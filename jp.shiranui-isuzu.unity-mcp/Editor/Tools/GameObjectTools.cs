@@ -103,12 +103,12 @@ namespace UnityMCP.Editor.Tools
             // work.
             Undo.DestroyObjectImmediate(go);
 
-            return new JObject
+            return EditorNotes.SceneChange(new JObject
             {
                 ["deleted"] = true,
                 ["name"] = name,
                 ["path"] = path,
-            };
+            });
         }
 
         [McpTool(
@@ -428,7 +428,7 @@ namespace UnityMCP.Editor.Tools
         {
             var t = go.transform;
 
-            return new JObject
+            return EditorNotes.SceneChange(new JObject
             {
                 ["name"] = go.name,
                 ["path"] = ObjectResolve.PathOf(go),
@@ -444,7 +444,7 @@ namespace UnityMCP.Editor.Tools
                     .Select(c => (object)c.GetType().Name)
                     .ToArray()),
                 ["childCount"] = t.childCount,
-            };
+            });
         }
 
         private static JObject Vector(Vector3 v)
