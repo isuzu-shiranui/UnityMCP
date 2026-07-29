@@ -30,7 +30,13 @@ namespace UnityMCP.Editor.Tools
             "Read entries from the Unity console, newest first, with optional severity filtering. " +
             "Reflects what the Editor console currently holds; if it reports zero entries but you " +
             "expect output, confirm with editor_log_tail before concluding nothing was logged.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            // Reading the console is the first step of nearly every diagnosis here, so paying a
+            // tool-search round trip for it every time costs more than the context it occupies.
+            AlwaysLoad = true,
+            // A stack trace per entry adds up; truncating the batch loses the earliest error,
+            // which is usually the one that caused the rest.
+            MaxResultSizeChars = 200000)]
         public static JObject ReadLogs(
             [McpArg("limit", "Maximum entries to return.")]
             int limit = 50,

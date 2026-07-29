@@ -100,10 +100,13 @@ export class ToolRouter {
             inputSchema: tool.inputSchema,
         }));
 
+        // _meta is forwarded only when the Editor sent one, so tools without hints stay byte for
+        // byte what they were. Spreading an undefined key would put `"_meta": null` on all of them.
         const unity = this.catalog.getTools().map(tool => ({
             name: tool.name,
             description: tool.description,
             inputSchema: withTargetParameter(tool.inputSchema),
+            ...(tool._meta ? { _meta: tool._meta } : {}),
         }));
 
         return [...local, ...unity];

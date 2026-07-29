@@ -101,7 +101,10 @@ namespace UnityMCP.Editor.Tools
             "Report whether scripts are compiling and whether the last compilation produced errors. " +
             "Always check this after editing scripts: a failed compile leaves the Editor running the " +
             "previous assembly with isCompiling back to false, so silence does not mean success.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            // Every script edit has to be followed by this check, and a caller who cannot find it
+            // is left believing an edit took effect when it did not.
+            AlwaysLoad = true)]
         public static JObject Status(
             [McpArg("include_warnings", "Include warnings alongside errors.")]
             bool includeWarnings = false,

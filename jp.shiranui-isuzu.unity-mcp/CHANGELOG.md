@@ -21,6 +21,34 @@
   back, `nest_depth` names the child without expanding it, a director evaluated to frame 60 reads
   back at 2.0s, and the update mode is left as it was found.
 
+- **Server instructions, and per-tool hints for clients that defer tool definitions.** A client with
+  a large catalogue no longer loads tool definitions upfront — it loads the names and the server's
+  instructions and searches for the rest. With 68 tools this server is firmly in that regime, and it
+  was sending no instructions at all, so the only thing a client had to go on at the start of a
+  session was the tool names. It now says which kinds of work live here, in the words someone would
+  use to ask for them, and lists the name prefixes first because those are what a search matches.
+  Kept to 1,176 bytes: clients truncate this at 2KB.
+
+  Two hints travel with the tools themselves, declared on `[McpTool]` and emitted into each tool's
+  `_meta`, so nothing has to be configured on the client side:
+  - `AlwaysLoad` keeps a definition loaded rather than deferred. Set on three tools only —
+    `console_read_logs`, `scene_browse_hierarchy`, `compile_status` — the ones wanted on nearly
+    every turn, where a search round trip each time costs more than the context they take. Marking
+    more would put the whole catalogue back in the prompt and defeat the mechanism.
+  - `MaxResultSizeChars` raises where a text result is spilled to a file instead of returned. Set on
+    the four tools whose useful answer is genuinely large. Deliberately not set on
+    `capture_screenshot`: the limit it would raise does not apply to image content.
+
+  Responses now state `charset=utf-8`. Tool descriptions contain non-ASCII punctuation, and a client
+  that falls back to Latin-1 on a bare `application/json` turns each em dash into three characters —
+  observed while auditing the catalogue.
+
+  Audited the rest of what a deferring client cares about and changed nothing, because it was
+  already right: `tools/list` is ordered by name and stable across calls (now a spec-level SHOULD,
+  for prompt-cache hit rates), no schema has a root-level `anyOf`/`oneOf`/`allOf`, all 68 tools come
+  back in one page, the longest description is 440 bytes, and no description contains a surrogate
+  pair.
+
 - **Timeline editing**, so the Timeline tools are no longer one-way. `timeline_edit_clip` retimes or
   renames a clip; `timeline_shift_clips` ripples everything at or after a time so a length change
   earlier in the sequence does not have to be repaired clip by clip; `timeline_set_track` mutes,

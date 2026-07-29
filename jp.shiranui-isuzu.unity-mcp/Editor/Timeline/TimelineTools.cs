@@ -48,7 +48,10 @@ namespace UnityMCP.Editor.Timeline
             "names the other timeline tools take, and it shows the nested structure — a live stage is " +
             "usually a root timeline whose Control clips start character and effect timelines several " +
             "layers down — in numbers rather than a screenshot of the Timeline window.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            // A nested stage expanded a couple of layers deep is a large report, and it is the one
+            // the editing tools take their addresses from.
+            MaxResultSizeChars = 200000)]
         public static JObject Inspect(
             [McpArg("object_path", "Hierarchy path of a GameObject with a PlayableDirector. " +
                                    "Omit to list every director in the open scenes.")]

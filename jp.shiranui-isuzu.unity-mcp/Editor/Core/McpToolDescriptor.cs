@@ -32,6 +32,12 @@ namespace UnityMCP.Editor.Core
         /// <summary>Undo group name, or null when the tool makes no undoable changes.</summary>
         public string UndoGroup { get; }
 
+        /// <summary>Whether this tool stays loaded rather than being deferred behind tool search.</summary>
+        public bool AlwaysLoad { get; }
+
+        /// <summary>Client-side inline result limit in characters, or zero for the default.</summary>
+        public int MaxResultSizeChars { get; }
+
         /// <summary>The static method to invoke.</summary>
         public MethodInfo Method { get; }
 
@@ -57,6 +63,8 @@ namespace UnityMCP.Editor.Core
             this.MainThread = attribute.MainThread;
             this.Destructive = attribute.Destructive;
             this.UndoGroup = attribute.UndoGroup;
+            this.AlwaysLoad = attribute.AlwaysLoad;
+            this.MaxResultSizeChars = attribute.MaxResultSizeChars;
             this.Method = method;
             this.Parameters = parameters;
             this.InputSchema = inputSchema;
@@ -76,6 +84,26 @@ namespace UnityMCP.Editor.Core
                 ["mainThread"] = this.MainThread,
                 ["destructive"] = this.Destructive,
             };
+
+            // Hints a client may act on, carried in the tool's own _meta so they travel with the
+            // definition rather than needing configuration on the client side. Only emitted when
+            // set: an empty _meta would be noise on every one of the tools that wants neither.
+            var meta = new JObject();
+
+            if (this.AlwaysLoad)
+            {
+                meta["anthropic/alwaysLoad"] = true;
+            }
+
+            if (this.MaxResultSizeChars > 0)
+            {
+                meta["anthropic/maxResultSizeChars"] = this.MaxResultSizeChars;
+            }
+
+            if (meta.HasValues)
+            {
+                entry["_meta"] = meta;
+            }
 
             return entry;
         }

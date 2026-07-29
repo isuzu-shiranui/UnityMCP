@@ -1135,7 +1135,12 @@ namespace UnityMCP.Editor.Core
         private void WriteRaw(HttpListenerResponse response, int statusCode, JObject body)
         {
             response.StatusCode = statusCode;
-            response.ContentType = "application/json";
+
+            // The charset is stated rather than left to the client's default. Tool descriptions
+            // contain non-ASCII punctuation, and a client that falls back to Latin-1 on a bare
+            // application/json turns each of those into mojibake — measured while auditing this
+            // catalogue, where an em dash came back as three characters.
+            response.ContentType = "application/json; charset=utf-8";
 
             if (body == null || statusCode == 204)
             {
