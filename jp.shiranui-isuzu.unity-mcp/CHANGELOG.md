@@ -19,6 +19,30 @@
   to frame 60 reads back at 2.0s. `timeline_evaluate` saves and restores the director's update
   mode, so scrubbing in the Editor does not leave it unable to advance under Play.
 
+- **Recorder tools**, so a timeline can be rendered out without leaving the agent:
+  `recorder_add_track` puts a Recorder track on a Timeline — movie (mp4, webm, mov) or image
+  sequence (png, jpeg, exr), capturing the game view, the active/main/tagged camera or a
+  RenderTexture, at a chosen resolution — and `recorder_list` reports what a timeline will record
+  and where it will land. Recording is set up as a track rather than through the Recorder API
+  directly because the frame rate then comes from the Timeline itself, so the recording cannot
+  drift from the animation, and because the surface reached this way has stayed put across
+  Recorder 2.x to 5.x.
+
+  Omitting `output_path` writes to a `Recording` folder beside `Assets`, named after the timeline.
+  An explicit absolute path needed a workaround: Recorder splits it into Root=Absolute plus the
+  directory in `Leaf`, but leaves its internal `absolutePath` null and only falls back to `Leaf`
+  while that field *is* null. Unity deserializes a null string as `""`, so the domain reload on
+  entering Play Mode made the root resolve to empty and the recording landed in the project folder
+  — silently, with the correct path still reported back. The tool now pins that field so the
+  destination survives the reload, and refuses the recording if it cannot, rather than writing
+  somewhere the caller did not ask for.
+
+  Their own assembly, constrained to `UNITY_RECORDER` and `UNITY_TIMELINE`. Verified by rendering
+  a nested stage — a root timeline whose Control clip drives a child timeline holding three
+  Activation-tracked cameras and an Animation track spinning a cube — to a 1920x1080 mp4, then
+  decoding every frame of the result: 180 frames, 180 distinct, exactly 6.000s. Frame count and
+  resolution alone do not show that anything moved.
+
 - Compiles and runs on Unity 6.5, which made the int instance-id API obsolete-as-error. The ten
   call sites that identified an object go through one `EntityIdCompat` helper that uses
   `EntityId` on 6.5+ and the int API below it. The wire contract is unchanged: the field is still

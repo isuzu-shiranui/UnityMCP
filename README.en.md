@@ -216,6 +216,18 @@ MCP client (Claude)                        terminal / scripts
 | `timeline_inspect` | safe | Tracks, clips, bindings and the director's time. **Follows Control tracks into the child timelines they drive**, for the layered structure a live stage uses |
 | `timeline_evaluate` | unsafe | Evaluate a director at a time or frame, without Play mode. Pair with `capture_screenshot` to check one frame |
 
+**Recorder (rendering out)** — appear only when both `com.unity.recorder` and `com.unity.timeline` are present.
+
+| Tool | Idempotency | Purpose |
+|---|---|---|
+| `recorder_add_track` | unsafe | Add a Recorder track to a Timeline, so **playing the director records it**. mp4 / webm / mov and png / jpeg / exr, capturing the game view, a camera or a RenderTexture, at a chosen resolution |
+| `recorder_list` | safe | What a Timeline will record, and **where it will be written** |
+
+Recording runs as a track on the Timeline rather than through the Recorder API directly: the
+frame rate then comes from the Timeline itself, so the recording cannot drift from the animation,
+and the setup is less exposed to the Recorder API's version drift. Omit `output_path` to write to
+a `Recording` folder beside `Assets`, named after the Timeline.
+
 **Live state and GPU**
 
 | Tool | Idempotency | Purpose |

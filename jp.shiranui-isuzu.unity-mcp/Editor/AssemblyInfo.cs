@@ -11,3 +11,7 @@ using System.Runtime.CompilerServices;
 // com.unity.timeline. They reach ObjectResolve, McpToolException and EntityIdCompat the same
 // way every other tool does.
 [assembly: InternalsVisibleTo("UnityMCP.Editor.Timeline")]
+
+// Recorder tools add a Recorder track to a Timeline; their assembly is constrained to projects
+// that have both com.unity.recorder and com.unity.timeline, and reaches the same shared internals.
+[assembly: InternalsVisibleTo("UnityMCP.Editor.Recorder")]

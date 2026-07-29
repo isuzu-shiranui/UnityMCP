@@ -211,6 +211,17 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `timeline_inspect` | safe | トラック / クリップ / バインディングと director の時刻。**ControlTrack を辿って子 Timeline を再帰展開**する（ライブの多層構造向け） |
 | `timeline_evaluate` | unsafe | director を時刻 / フレームに評価（Play mode 不要）。`capture_screenshot` と組んで1コマ検証 |
 
+**Recorder（書き出し）** — `com.unity.recorder` と `com.unity.timeline` が揃っている時だけ現れます。
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `recorder_add_track` | unsafe | Timeline に Recorder トラックを追加し、**director を再生するだけで録画**にする。mp4 / webm / mov と png / jpeg / exr、入力は game view / カメラ / RenderTexture、解像度指定可 |
+| `recorder_list` | safe | その Timeline が**何をどこへ書き出すか**（形式・出力先・有効/無効） |
+
+Recorder を直接叩かず Timeline のトラックとして持つのは、**フレームレートが Timeline 側から入る**ため
+（録画とタイムラインがズレない）で、かつ Recorder API のバージョン差の影響を受けにくいからです。
+`output_path` を省くと `Assets` と同階層の `Recording` フォルダに Timeline 名で書き出します。
+
 **内部状態・GPU**
 
 | ツール | 冪等性 | 用途 |
