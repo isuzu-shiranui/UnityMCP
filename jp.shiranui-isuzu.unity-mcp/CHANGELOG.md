@@ -12,12 +12,14 @@
   `capture_screenshot` and `render_compare` can check one exact frame.
 
   Their own assembly, constrained to `UNITY_TIMELINE`: a project without `com.unity.timeline`
-  loses the two tools rather than failing to compile. Verified against a fixture whose nested
-  structure the test defined — a Root timeline whose Control clip drives a Child timeline with a
-  muted Activation track and two Animation clips — checking that the nesting resolves, the child's
-  tracks and clip timings come back, the depth limit stops where asked, and a director evaluated
-  to frame 60 reads back at 2.0s. `timeline_evaluate` saves and restores the director's update
-  mode, so scrubbing in the Editor does not leave it unable to advance under Play.
+  loses the two tools rather than failing to compile. `timeline_evaluate` saves and restores the
+  director's update mode, so scrubbing in the Editor does not leave it unable to advance under Play.
+
+  `UnityMCP.Editor.Timeline.Tests` covers this against a fixture whose nested structure the test
+  defines — a Root timeline whose Control clip drives a Child timeline with an Activation track —
+  checking that the nesting resolves to the driven object, the child's tracks and clip timings come
+  back, `nest_depth` names the child without expanding it, a director evaluated to frame 60 reads
+  back at 2.0s, and the update mode is left as it was found.
 
 - **Recorder tools**, so a timeline can be rendered out without leaving the agent:
   `recorder_add_track` puts a Recorder track on a Timeline — movie (mp4, webm, mov) or image
@@ -37,11 +39,15 @@
   destination survives the reload, and refuses the recording if it cannot, rather than writing
   somewhere the caller did not ask for.
 
-  Their own assembly, constrained to `UNITY_RECORDER` and `UNITY_TIMELINE`. Verified by rendering
-  a nested stage — a root timeline whose Control clip drives a child timeline holding three
-  Activation-tracked cameras and an Animation track spinning a cube — to a 1920x1080 mp4, then
-  decoding every frame of the result: 180 frames, 180 distinct, exactly 6.000s. Frame count and
-  resolution alone do not show that anything moved.
+  Their own assembly, constrained to `UNITY_RECORDER` and `UNITY_TIMELINE`. Verified two ways.
+  `UnityMCP.Editor.Recorder.Tests` puts the settings back through Unity's serializer — the step a
+  domain reload performs, and the one that broke the absolute path — and checks the destination,
+  format, resolution and camera source survive it. Separately, a nested stage was rendered end to
+  end: a root timeline whose Control clip drives a child timeline holding three Activation-tracked
+  cameras and an Animation track spinning a cube, out to a 1920x1080 mp4, checked by decoding every
+  frame — 180 frames, 180 distinct, exactly 6.000s. An earlier run of that same stage reported the
+  right resolution, fps and frame count while being frozen for 5.5 of its 6 seconds, so the frame
+  content is what the check looks at.
 
 - Compiles and runs on Unity 6.5, which made the int instance-id API obsolete-as-error. The ten
   call sites that identified an object go through one `EntityIdCompat` helper that uses

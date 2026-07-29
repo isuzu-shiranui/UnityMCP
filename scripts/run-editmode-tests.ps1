@@ -92,7 +92,8 @@ $manifest = @'
     "com.unity.modules.physics": "1.0.0",
     "com.unity.modules.animation": "1.0.0",
     "com.unity.modules.director": "1.0.0",
-    "com.unity.timeline": "1.8.7"
+    "com.unity.timeline": "1.8.7",
+    "com.unity.recorder": "5.0.0"
   },
   "testables": [ "jp.shiranui-isuzu.unity-mcp" ]
 }

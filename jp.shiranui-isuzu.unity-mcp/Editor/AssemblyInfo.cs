@@ -15,3 +15,8 @@ using System.Runtime.CompilerServices;
 // Recorder tools add a Recorder track to a Timeline; their assembly is constrained to projects
 // that have both com.unity.recorder and com.unity.timeline, and reaches the same shared internals.
 [assembly: InternalsVisibleTo("UnityMCP.Editor.Recorder")]
+
+// Those two carry their own test assemblies, under the same package constraints, which address
+// objects through EntityIdCompat and assert on McpToolException like the other suites do.
+[assembly: InternalsVisibleTo("UnityMCP.Editor.Timeline.Tests")]
+[assembly: InternalsVisibleTo("UnityMCP.Editor.Recorder.Tests")]
