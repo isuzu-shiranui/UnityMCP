@@ -91,8 +91,11 @@ namespace UnityMCP.Editor.Recorder
             settings.name = trackName + " Settings";
 
             // The settings live as a sub-asset of the timeline, so they are saved and loaded with
-            // it rather than dangling.
+            // it rather than dangling. CreateTrack and CreateDefaultClip below register their own
+            // undo, but this object is created here and would otherwise be left behind inside the
+            // asset when the track it belongs to is undone.
             AssetDatabase.AddObjectToAsset(settings, timeline);
+            Undo.RegisterCreatedObjectUndo(settings, "MCP Add Recorder Track");
 
             var track = timeline.CreateTrack<RecorderTrack>(null, trackName);
             var clip = track.CreateDefaultClip();

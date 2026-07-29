@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using System.Linq;
 
+using Newtonsoft.Json.Linq;
+
 using NUnit.Framework;
 
 using UnityEditor;
@@ -228,6 +230,43 @@ namespace UnityMCP.Editor.Recorder.Tests
 
             Assert.That(error.Code, Is.EqualTo("invalid_params"));
             Assert.That(error.Message, Does.Contain("avi"));
+        }
+
+        [Test]
+        public void AddingATrackIsUndoableAndLeavesNothingBehind()
+        {
+            var playable = this.Director("Undoable");
+            var assetPath = AssetDatabase.GetAssetPath(playable.playableAsset);
+
+            AssetDatabase.SaveAssets();
+            var before = AssetDatabase.LoadAllAssetsAtPath(assetPath).Length;
+
+            var catalog = ToolCatalog.BuildFromTypes(new[] { typeof(RecorderTools) });
+            var descriptor = catalog.Tools.Single(t => t.Name == "recorder_add_track");
+
+            UnityEditor.Undo.IncrementCurrentGroup();
+
+            ToolInvoker.Invoke(descriptor, new JObject
+            {
+                ["instance_id"] = EntityIdCompat.IdOf(playable.gameObject),
+                ["output_path"] = this.folder + "/Undoable",
+                ["duration"] = 1,
+            });
+
+            Assert.That(((TimelineAsset)playable.playableAsset).GetOutputTracks().OfType<RecorderTrack>().Count(),
+                        Is.EqualTo(1));
+
+            UnityEditor.Undo.PerformUndo();
+            AssetDatabase.SaveAssets();
+
+            // The tool declares an UndoGroup, so it has to actually be undoable. The settings object
+            // is created by the tool rather than by Timeline, and without its own registration it
+            // would stay inside the .playable after the track that used it was undone away.
+            Assert.That(((TimelineAsset)playable.playableAsset).GetOutputTracks().OfType<RecorderTrack>().Count(),
+                        Is.EqualTo(0), "the recorder track survived an undo");
+
+            Assert.That(AssetDatabase.LoadAllAssetsAtPath(assetPath).Length, Is.EqualTo(before),
+                        "undo left an orphaned sub-asset inside the timeline");
         }
 
         [Test]

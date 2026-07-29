@@ -213,8 +213,12 @@ namespace UnityMCP.Editor.Timeline
                 var entry = new JObject
                 {
                     ["name"] = t.name,
+                    // The address the editing tools take. Track names repeat freely and a track can
+                    // sit inside a group, so the name alone is not enough to act on.
+                    ["path"] = TimelineResolve.PathOf(t),
                     ["type"] = t.GetType().Name,
                     ["muted"] = t.muted,
+                    ["locked"] = t.lockedInHierarchy,
                     ["clipCount"] = t.GetClips().Count(),
                     // The binding is what a track is pointing at — the wrong one is a common
                     // reason "the animation does nothing", and it does not show in the window.
@@ -288,20 +292,11 @@ namespace UnityMCP.Editor.Timeline
             return track.GetType().Name == "ControlTrack";
         }
 
+        // Kept as a thin forward so this file reads the same as before; the implementation moved to
+        // TimelineResolve when the editing tools needed it too, rather than being copied a third time.
         private static PlayableDirector ResolveDirector(string objectPath, long? instanceId)
         {
-            var go = ObjectResolve.Object(objectPath, instanceId);
-            var director = go.GetComponent<PlayableDirector>();
-
-            if (director == null)
-            {
-                throw new McpToolException(
-                    "not_found",
-                    $"'{ObjectResolve.PathOf(go)}' has no PlayableDirector. timeline_inspect with no " +
-                    "arguments lists the objects that do.");
-            }
-
-            return director;
+            return TimelineResolve.Director(objectPath, instanceId);
         }
 
         private static double FrameRateOf(TimelineAsset timeline)

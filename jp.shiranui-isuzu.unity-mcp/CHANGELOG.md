@@ -21,6 +21,35 @@
   back, `nest_depth` names the child without expanding it, a director evaluated to frame 60 reads
   back at 2.0s, and the update mode is left as it was found.
 
+- **Timeline editing**, so the Timeline tools are no longer one-way. `timeline_edit_clip` retimes or
+  renames a clip; `timeline_shift_clips` ripples everything at or after a time so a length change
+  earlier in the sequence does not have to be repaired clip by clip; `timeline_set_track` mutes,
+  locks, renames and binds; `timeline_delete` removes a track or a clip; and `timeline_create`,
+  `timeline_create_track` and `timeline_create_clip` build one from nothing, including the Control
+  clip that nests a child timeline inside a parent.
+
+  Two decisions shape the rest. **The result reports the value read back, not the value requested.**
+  Timeline's setters are gated on capabilities a clip's asset declares and discard what they do not
+  accept without raising anything — an Activation clip advertises no capabilities at all, so setting
+  its speed or blend does nothing — and a caller that trusted its own request would carry on
+  believing a change it never made. Anything that did not take is listed in `ignored` with the
+  effective value and the reason. **And the creation tools refuse before acting when the timeline is
+  not yet an asset.** Timeline writes a track into the file only if the timeline already is one, and
+  offers nothing to persist it afterwards, so a timeline built in the wrong order looks entirely
+  correct until the next domain reload discards it.
+
+  Tracks are addressed by path (`Cameras/CamFront`), which `timeline_inspect` now reports for every
+  track, because Timeline places no uniqueness requirement on track names and a track can sit inside
+  a group. Clips cannot be addressed that way — a `TimelineClip` is not a UnityEngine.Object and has
+  no id — so they are addressed by name, index or a time they cover, and every edit reports the
+  clip's address again, since changing a start re-sorts its track. A locked track is refused with the
+  tool that unlocks it named in the message; unlocking itself stays allowed, or the lock would be a
+  one-way door.
+
+  Reordering tracks is deliberately absent: Timeline exposes no public API for it, and the
+  serialized lists behind it need a cache invalidation that is also internal, so the failure would be
+  quiet. Extrapolation modes are internal-set and likewise out.
+
 - **Recorder tools**, so a timeline can be rendered out without leaving the agent:
   `recorder_add_track` puts a Recorder track on a Timeline — movie (mp4, webm, mov) or image
   sequence (png, jpeg, exr), capturing the game view, the active/main/tagged camera or a
@@ -29,6 +58,12 @@
   directly because the frame rate then comes from the Timeline itself, so the recording cannot
   drift from the animation, and because the surface reached this way has stayed put across
   Recorder 2.x to 5.x.
+
+  `recorder_add_track` declared an undo group without recording anything, so it claimed an undo it
+  did not provide: Timeline registers the track and clip it creates, but the recorder settings object
+  is created by the tool and would have been left inside the .playable after the track was undone
+  away. It registers that object now, and a test undoes a real call and counts the objects in the
+  file to confirm nothing is left behind.
 
   Omitting `output_path` writes to a `Recording` folder beside `Assets`, named after the timeline.
   An explicit absolute path needed a workaround: Recorder splits it into Root=Absolute plus the

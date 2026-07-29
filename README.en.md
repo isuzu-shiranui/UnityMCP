@@ -215,6 +215,20 @@ MCP client (Claude)                        terminal / scripts
 |---|---|---|
 | `timeline_inspect` | safe | Tracks, clips, bindings and the director's time. **Follows Control tracks into the child timelines they drive**, for the layered structure a live stage uses |
 | `timeline_evaluate` | unsafe | Evaluate a director at a time or frame, without Play mode. Pair with `capture_screenshot` to check one frame |
+| `timeline_edit_clip` | unsafe | One clip's start, length, name, ease, blend and speed. **Reports the values as they landed**, listing anything the clip type discarded in `ignored` |
+| `timeline_shift_clips` | unsafe | **Ripple edit**: move everything at or after a time together. Moves nothing at all if the shift would cross zero |
+| `timeline_set_track` | unsafe | Mute, lock, rename, or bind a track. **Resolves the component the track's type wants** — an Animator for an animation track |
+| `timeline_delete` | unsafe | Delete a track or a clip; a group takes its children. Undoable, so it does not ask for confirmation |
+| `timeline_create` | unsafe | Create a Timeline asset, optionally with a director. **The only entry point that makes track creation safe** |
+| `timeline_create_track` | unsafe | Add a track (activation, animation, audio, control, group, playable, signal), optionally inside a group and bound in the same call |
+| `timeline_create_clip` | unsafe | Add a clip. `control_source` **wires a Control clip's nesting in one call**; `animation_clip` sets the AnimationClip to play |
+
+The editing tools report the **effective** value read back after the write, not the requested one:
+Timeline's setters discard values a clip type does not support — the speed of an Activation clip,
+for instance — without raising anything, so echoing the request would leave the caller believing a
+change that never happened. The creation tools refuse before acting if the timeline is not yet an
+asset, because Timeline would then build the track in memory only, with no public API to persist it
+afterwards.
 
 **Recorder (rendering out)** — appear only when both `com.unity.recorder` and `com.unity.timeline` are present.
 
