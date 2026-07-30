@@ -286,16 +286,7 @@ namespace UnityMCP.Editor.Timeline
             return false;
         }
 
-        /// <summary>
-        /// Points a track at an object, resolving the component the track's type actually wants.
-        /// </summary>
-        /// <remarks>
-        /// An Animation track binds an Animator and an Activation track a GameObject. Handing the
-        /// GameObject to both is the natural thing for a caller to do, and Timeline accepts it without
-        /// complaint — the binding is simply wrong and the track does nothing when the graph is built.
-        /// So the component is resolved here, and a missing one is an error rather than a silent
-        /// half-binding.
-        /// </remarks>
+        /// <summary>Names a binding the way the caller addressed the object it points at.</summary>
         private static string Describe(UnityObject binding)
         {
             if (binding is GameObject go)
