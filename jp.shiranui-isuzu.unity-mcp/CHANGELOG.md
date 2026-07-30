@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [3.3.0] - 2026-07-31
 
 ### Added
 - **Timeline tools**, for the video and live work these projects are for: `timeline_inspect`
