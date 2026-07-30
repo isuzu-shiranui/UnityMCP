@@ -147,12 +147,23 @@ namespace UnityMCP.Editor.Timeline
             var wanted = trackPath.Trim().Trim('/');
 
             // The full path first, so an explicit address always wins over a coincidental bare name.
-            var byPath = AllTracks(timeline).FirstOrDefault(
-                t => string.Equals(PathOf(t), wanted, StringComparison.Ordinal));
+            // Nothing stops a track from being named "Cameras/Front" or "Front[0]", which would
+            // produce the same path as a real nesting, so a tie is refused rather than guessed.
+            var byPath = AllTracks(timeline)
+                .Where(t => string.Equals(PathOf(t), wanted, StringComparison.Ordinal))
+                .ToList();
 
-            if (byPath != null)
+            if (byPath.Count > 1)
             {
-                return byPath;
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{wanted}' matches {byPath.Count} tracks, because a track name contains '/' or " +
+                    "'[n]'. Rename one with timeline_set_track so they can be told apart.");
+            }
+
+            if (byPath.Count == 1)
+            {
+                return byPath[0];
             }
 
             var match = IndexedSegment.Match(wanted);
@@ -268,9 +279,9 @@ namespace UnityMCP.Editor.Timeline
 
             if (atTime.HasValue)
             {
-                var covering = clips.FirstOrDefault(c => atTime.Value >= c.start && atTime.Value < c.end);
+                var covering = clips.Where(c => atTime.Value >= c.start && atTime.Value < c.end).ToList();
 
-                if (covering == null)
+                if (covering.Count == 0)
                 {
                     var spans = string.Join(", ", clips.Take(MaxSuggestions).Select(c => $"{c.displayName} [{c.start:0.###}-{c.end:0.###}]"));
 
@@ -279,7 +290,19 @@ namespace UnityMCP.Editor.Timeline
                         $"No clip covers {atTime.Value:0.###}s on '{PathOf(track)}'. It has: {spans}.");
                 }
 
-                return covering;
+                // Clips overlap wherever they blend, so a time can name more than one. Editing
+                // whichever happened to be first in the list is not a choice the caller made.
+                if (covering.Count > 1)
+                {
+                    var names = string.Join(", ", covering.Select(c => $"{c.displayName} [{c.start:0.###}-{c.end:0.###}]"));
+
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"{covering.Count} clips overlap {atTime.Value:0.###}s on '{PathOf(track)}': {names}. " +
+                        "Address one by 'clip' or 'clip_index'.");
+                }
+
+                return covering[0];
             }
 
             var named = clips.Where(c => string.Equals(c.displayName, clipName, StringComparison.Ordinal)).ToList();

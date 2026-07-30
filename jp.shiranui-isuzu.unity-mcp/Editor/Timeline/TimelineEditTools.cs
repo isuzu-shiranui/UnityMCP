@@ -40,7 +40,14 @@ namespace UnityMCP.Editor.Timeline
             "only accepts speed, blend and ease if its type supports them, and Activation clips " +
             "support none of them. Addresses come from timeline_inspect.",
             Idempotency = McpIdempotency.Unsafe,
-            UndoGroup = "MCP Edit Clip")]
+            UndoGroup = "MCP Edit Clip",
+            // Shows the three ways a clip is addressed and that duration and end are alternatives,
+            // which the parameter list can state but not demonstrate.
+            Examples = new[]
+            {
+                @"{""object_path"":""/StageDirector"",""track"":""Cameras/CamFront"",""clip"":""CamFront shot"",""start"":2.5,""duration"":2.0}",
+                @"{""object_path"":""/StageDirector"",""track"":""Shots"",""at_time"":3.2,""end"":6.0}",
+            })]
         public static JObject EditClip(
             [McpArg("object_path", "Hierarchy path of the GameObject with the PlayableDirector.")]
             string objectPath = null,
@@ -103,6 +110,28 @@ namespace UnityMCP.Editor.Timeline
                 RejectNonFinite(pair.Item1, pair.Item2);
             }
 
+            // Everything that can be refused is refused here, before the first write. Validating as
+            // we go would leave the clip already moved when a later argument turns out to be bad,
+            // and the caller would be told the call failed.
+            if (duration.HasValue && duration.Value <= 0)
+            {
+                throw new McpToolException("invalid_params", "'duration' must be greater than zero.");
+            }
+
+            var startAfter = start ?? target.start;
+
+            if (end.HasValue && end.Value - startAfter <= 0)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'end' {end.Value:0.###} is at or before the clip's start {startAfter:0.###}, " +
+                    "which would leave it no length.");
+            }
+
+            var control = string.IsNullOrWhiteSpace(controlSource)
+                ? null
+                : ResolveControlSource(target, controlSource);
+
             // Recorded before the first write, and the whole method runs inside one undo group, so a
             // multi-field edit collapses to a single step for the human at the keyboard.
             UndoExtensions.RegisterClip(target, "MCP Edit Clip");
@@ -114,22 +143,8 @@ namespace UnityMCP.Editor.Timeline
 
             if (end.HasValue)
             {
-                var wanted = end.Value - target.start;
-
-                if (wanted <= 0)
-                {
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"'end' {end.Value:0.###} is at or before the clip's start {target.start:0.###}, " +
-                        "which would leave it no length.");
-                }
-
-                Assign("end", wanted, () => target.duration, v => target.duration = v, ignored, target, Clamped);
-            }
-
-            if (duration.HasValue && duration.Value <= 0)
-            {
-                throw new McpToolException("invalid_params", "'duration' must be greater than zero.");
+                Assign("end", end.Value - target.start, () => target.duration,
+                       v => target.duration = v, ignored, target, Clamped);
             }
 
             Assign("duration", duration, () => target.duration, v => target.duration = v, ignored, target, Clamped);
@@ -146,7 +161,7 @@ namespace UnityMCP.Editor.Timeline
                 target.displayName = displayName;
             }
 
-            var rebound = ApplyControlSource(target, director, controlSource);
+            var rebound = control == null ? null : ApplyControlSource(target, director, control);
 
             Commit(timeline, director, structural: false);
 
@@ -167,7 +182,14 @@ namespace UnityMCP.Editor.Timeline
             "the timeline does not have to be repaired clip by clip. Applies to one track or, by " +
             "default, all of them. Nothing is moved if the shift would push a clip before zero.",
             Idempotency = McpIdempotency.Unsafe,
-            UndoGroup = "MCP Shift Clips")]
+            UndoGroup = "MCP Shift Clips",
+            // by and to_time are mutually exclusive, and which one a caller wants is easier to see
+            // from a worked pair than from prose.
+            Examples = new[]
+            {
+                @"{""object_path"":""/StageDirector"",""from_time"":3.0,""by"":0.5}",
+                @"{""object_path"":""/StageDirector"",""track"":""Shots"",""from_time"":2.0,""to_time"":4.0}",
+            })]
         public static JObject ShiftClips(
             [McpArg("object_path", "Hierarchy path of the GameObject with the PlayableDirector.")]
             string objectPath = null,
@@ -251,11 +273,27 @@ namespace UnityMCP.Editor.Timeline
 
             // Ordered so clips never pass through each other mid-shift; the list is re-sorted by
             // Timeline on every start change regardless, but this keeps the intermediate states sane.
+            var landedWrong = new JArray();
+
             foreach (var item in delta >= 0
                          ? affected.OrderByDescending(x => x.Clip.start)
                          : affected.OrderBy(x => x.Clip.start))
             {
-                item.Clip.start += delta;
+                var wanted = item.Clip.start + delta;
+                item.Clip.start = wanted;
+
+                // Read back for the same reason a single edit does: the setter clamps, and a ripple
+                // that quietly moved one clip somewhere else has broken the spacing the caller was
+                // preserving — reporting the count alone would hide that.
+                if (Math.Abs(item.Clip.start - wanted) > Epsilon)
+                {
+                    landedWrong.Add(new JObject
+                    {
+                        ["clip"] = $"{TimelineResolve.PathOf(item.Track)}/{item.Clip.displayName}",
+                        ["requested"] = Math.Round(wanted, 4),
+                        ["effective"] = Math.Round(item.Clip.start, 4),
+                    });
+                }
             }
 
             Commit(timeline, director, structural: false);
@@ -266,6 +304,7 @@ namespace UnityMCP.Editor.Timeline
                 ["moved"] = affected.Count,
                 ["by"] = Math.Round(delta, 4),
                 ["duration"] = Math.Round(timeline.duration, 4),
+                ["clampedByTimeline"] = landedWrong,
                 ["clips"] = new JArray(affected
                     .OrderBy(x => x.Clip.start)
                     .Select(x => (object)Describe(x.Clip, x.Track, director))
@@ -319,15 +358,14 @@ namespace UnityMCP.Editor.Timeline
             }
         }
 
-        /// <summary>Points a Control clip at the object whose director it drives.</summary>
-        private static string ApplyControlSource(TimelineClip clip, PlayableDirector director, string sourcePath)
+        /// <summary>
+        /// Checks that this clip can take a control source and that the source exists, without
+        /// changing anything. Split from applying it so the whole call can be refused before the
+        /// first write.
+        /// </summary>
+        private static GameObject ResolveControlSource(TimelineClip clip, string sourcePath)
         {
-            if (string.IsNullOrWhiteSpace(sourcePath))
-            {
-                return null;
-            }
-
-            if (!(clip.asset is ControlPlayableAsset control))
+            if (!(clip.asset is ControlPlayableAsset))
             {
                 throw new McpToolException(
                     "invalid_params",
@@ -335,7 +373,13 @@ namespace UnityMCP.Editor.Timeline
                     $"{clip.asset?.GetType().Name ?? "clip with no asset"}.");
             }
 
-            var source = ObjectResolve.Object(sourcePath, null, "control_source");
+            return ObjectResolve.Object(sourcePath, null, "control_source");
+        }
+
+        /// <summary>Points a Control clip at the object whose director it drives.</summary>
+        private static string ApplyControlSource(TimelineClip clip, PlayableDirector director, GameObject source)
+        {
+            var control = (ControlPlayableAsset)clip.asset;
 
             // The name lives in the asset and the value in the director's table, so both are dirtied.
             if (string.IsNullOrEmpty(control.sourceGameObject.exposedName.ToString()))

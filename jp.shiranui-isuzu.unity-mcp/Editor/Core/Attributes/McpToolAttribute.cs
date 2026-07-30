@@ -68,6 +68,19 @@ namespace UnityMCP.Editor.Core.Attributes
         public string UndoGroup { get; set; }
 
         /// <summary>
+        /// Worked examples of a complete argument object, each written as a JSON object literal.
+        /// They are published as the input schema's <c>examples</c>, which is where a model looks
+        /// to see the shape rather than infer it.
+        /// </summary>
+        /// <remarks>
+        /// Worth the effort only where the shape is not obvious from the parameter list: nested
+        /// values, or arguments that constrain each other so that some combinations are wrong.
+        /// A tool taking three strings gains nothing. Each entry is parsed when the catalogue is
+        /// built and a malformed one fails discovery, so a broken example cannot reach a client.
+        /// </remarks>
+        public string[] Examples { get; set; }
+
+        /// <summary>
         /// Keeps this tool's definition loaded rather than deferred behind tool search.
         /// </summary>
         /// <remarks>

@@ -44,6 +44,26 @@ namespace UnityMCP.Editor.Tests
             }
         }
 
+        private static class ExampleTools
+        {
+            [McpTool("sample_examples", "Publishes worked examples.",
+                     Idempotency = McpIdempotency.Safe,
+                     Examples = new[] { @"{""path"":""Assets/A.mat"",""depth"":2}" })]
+            public static void Good([McpArg("path", "Asset path")] string path)
+            {
+                _ = path;
+            }
+        }
+
+        private static class BrokenExampleTool
+        {
+            [McpTool("sample_bad_example", "Its example is not JSON.",
+                     Examples = new[] { "not json at all" })]
+            public static void Run()
+            {
+            }
+        }
+
         private static class BadNameTool
         {
             [McpTool("sample.dotted", "Dots are not legal in MCP tool names.")]
@@ -177,6 +197,45 @@ namespace UnityMCP.Editor.Tests
             catalog.TryGet("sample_query", out var query);
 
             Assert.That(query.InputSchema["properties"]["confirm"], Is.Null);
+        }
+
+        [Test]
+        public void PublishesExamplesOnTheInputSchema()
+        {
+            var catalog = Build(typeof(ExampleTools));
+
+            Assert.That(catalog.TryGet("sample_examples", out var tool), Is.True);
+
+            var examples = tool.InputSchema["examples"];
+            Assert.That(examples, Is.Not.Null, "examples belong on the schema the client receives");
+            Assert.That(examples.Count(), Is.EqualTo(1));
+            Assert.That((string)examples[0]["path"], Is.EqualTo("Assets/A.mat"));
+            Assert.That((int)examples[0]["depth"], Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ATooWithoutExamplesHasNoExamplesKey()
+        {
+            var catalog = Build(typeof(ValidTools));
+
+            Assert.That(catalog.TryGet("sample_query", out var tool), Is.True);
+
+            // An empty array would be a claim that the tool was considered and found not to need
+            // any, which is a different thing from never having been annotated.
+            Assert.That(tool.InputSchema["examples"], Is.Null);
+        }
+
+        [Test]
+        public void RejectsAToolWhoseExampleIsNotJson()
+        {
+            var catalog = Build(typeof(BrokenExampleTool));
+
+            // Refused rather than published with the example dropped: a tool that still works
+            // hides the authoring mistake, and the schema it serves would be the one thing nobody
+            // rechecks.
+            Assert.That(catalog.Count, Is.Zero);
+            Assert.That(catalog.Errors.Count, Is.EqualTo(1));
+            Assert.That(catalog.Errors[0], Does.Contain("sample_bad_example"));
         }
 
         [Test]

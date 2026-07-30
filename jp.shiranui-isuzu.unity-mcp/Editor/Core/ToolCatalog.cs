@@ -309,7 +309,61 @@ namespace UnityMCP.Editor.Core
                 inputSchema["required"] = required;
             }
 
+            if (!TryBuildExamples(attribute, origin, errors, out var examples))
+            {
+                return;
+            }
+
+            if (examples != null)
+            {
+                inputSchema["examples"] = examples;
+            }
+
             this.tools[attribute.Name] = new McpToolDescriptor(attribute, method, parameters, inputSchema);
+        }
+
+        /// <summary>
+        /// Parses the tool's declared examples into the array the schema publishes, or null when it
+        /// declares none.
+        /// </summary>
+        /// <remarks>
+        /// Parsed here rather than passed through as text so a malformed example is caught while the
+        /// catalogue is being built, where the message names the tool. Shipped to a client, it would
+        /// instead be an invalid schema that the client either rejects wholesale or, worse, quietly
+        /// learns the wrong shape from.
+        /// </remarks>
+        private static bool TryBuildExamples(
+            McpToolAttribute attribute, string origin, List<string> errors, out JArray examples)
+        {
+            examples = null;
+
+            if (attribute.Examples == null || attribute.Examples.Length == 0)
+            {
+                return true;
+            }
+
+            var parsedAll = new JArray();
+
+            foreach (var text in attribute.Examples)
+            {
+                try
+                {
+                    parsedAll.Add(JObject.Parse(text));
+                }
+                catch (Exception ex)
+                {
+                    // Refused the same way a malformed name is: the tool does not register, and the
+                    // message names it. Publishing the tool with the example dropped would hide an
+                    // authoring mistake behind a tool that still appears to work.
+                    errors.Add(
+                        $"[McpTool] '{attribute.Name}' on {origin} has an example that is not a JSON " +
+                        $"object: {ex.Message}");
+                    return false;
+                }
+            }
+
+            examples = parsedAll;
+            return true;
         }
 
         /// <summary>

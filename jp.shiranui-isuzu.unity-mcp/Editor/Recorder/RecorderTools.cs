@@ -42,7 +42,15 @@ namespace UnityMCP.Editor.Recorder
             "source (game view, a camera, or a render texture), the resolution and the output path. " +
             "The frame rate is not set here — the Recorder takes it from the timeline.",
             Idempotency = McpIdempotency.Unsafe,
-            UndoGroup = "MCP Add Recorder Track")]
+            UndoGroup = "MCP Add Recorder Track",
+            // Several arguments constrain each other — camera_tag only means anything with
+            // source=tagged_camera, format only with type=movie — so the combinations are shown
+            // rather than left to be inferred from a list of independent-looking parameters.
+            Examples = new[]
+            {
+                @"{""object_path"":""/StageDirector"",""type"":""movie"",""format"":""mp4"",""source"":""game_view"",""width"":1920,""height"":1080}",
+                @"{""object_path"":""/StageDirector"",""type"":""png"",""source"":""tagged_camera"",""camera_tag"":""MainCamera"",""output_path"":""Assets/Shots/frame""}",
+            })]
         public static JObject AddTrack(
             [McpArg("object_path", "Hierarchy path of the GameObject with the PlayableDirector.")]
             string objectPath = null,

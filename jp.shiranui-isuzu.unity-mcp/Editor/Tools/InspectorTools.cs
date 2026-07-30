@@ -82,7 +82,14 @@ namespace UnityMCP.Editor.Tools
             "Write one serialized property on a component. Use inspect_list first if you are " +
             "unsure of the exact property_path.",
             Idempotency = McpIdempotency.Unsafe,
-            UndoGroup = "MCP Inspector Write")]
+            UndoGroup = "MCP Inspector Write",
+            // 'value' is whatever JSON the property's type needs, which the schema can only call
+            // "any". A scalar and a vector side by side say more than the sentence can.
+            Examples = new[]
+            {
+                @"{""game_object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalPosition.x"",""value"":2.5}",
+                @"{""game_object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalScale"",""value"":{""x"":2,""y"":2,""z"":2}}",
+            })]
         public static JObject Write(
             [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
             string propertyPath,

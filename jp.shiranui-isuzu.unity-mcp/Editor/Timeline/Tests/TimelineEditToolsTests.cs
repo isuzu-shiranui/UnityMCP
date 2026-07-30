@@ -177,6 +177,40 @@ namespace UnityMCP.Editor.Timeline.Tests
         }
 
         [Test]
+        public void ARefusedEndLeavesTheClipWhereItWas()
+        {
+            var playable = this.Stage("Partial", 1);
+
+            // start is written before end can be checked unless everything is validated first, and a
+            // caller told the call failed would have no reason to expect the clip had moved.
+            Assert.Throws<McpToolException>(() => TimelineEditTools.EditClip(
+                instanceId: this.Id, track: "Shots", clip: "Shot0", start: 5, end: 4));
+
+            var clip = TrackOf(playable).GetClips().Single();
+            Assert.That(clip.start, Is.EqualTo(1).Within(1e-4), "the clip should not have moved at all");
+        }
+
+        [Test]
+        public void ATimeCoveredByTwoClipsIsRefused()
+        {
+            var playable = this.Stage("Overlap", 0);
+            var track = TrackOf(playable);
+
+            // Clips overlap wherever they blend, so a time can name more than one and picking the
+            // first in the list is not a choice the caller made.
+            var second = track.CreateDefaultClip();
+            second.start = 0.5;
+            second.duration = 1;
+            second.displayName = "Shot1";
+
+            var error = Assert.Throws<McpToolException>(() => TimelineEditTools.EditClip(
+                instanceId: this.Id, track: "Shots", atTime: 0.75, start: 3));
+
+            Assert.That(error.Code, Is.EqualTo("invalid_params"));
+            Assert.That(error.Message, Does.Contain("clip_index"));
+        }
+
+        [Test]
         public void EditingALockedTrackIsRefused()
         {
             var playable = this.Stage("Locked", 0);

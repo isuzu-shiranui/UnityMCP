@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 
 using Newtonsoft.Json.Linq;
 
@@ -90,7 +91,9 @@ namespace UnityMCP.Editor.Timeline
                     $"No folder '{folder}'. Create it with asset_create_folder first.");
             }
 
-            if (AssetDatabase.LoadAssetAtPath<TimelineAsset>(path) != null)
+            // Any asset, not just a TimelineAsset: a typed load returns null for something else
+            // sitting at this path, and AssetDatabase.CreateAsset would then overwrite it.
+            if (AssetDatabase.LoadMainAssetAtPath(path) != null)
             {
                 throw new McpToolException(
                     "conflict",
@@ -102,6 +105,11 @@ namespace UnityMCP.Editor.Timeline
             {
                 throw new McpToolException("invalid_params", "'frame_rate' must be a positive number.");
             }
+
+            // Resolved before the asset is written. Doing it afterwards means an unresolvable path
+            // leaves a stray .playable behind on the way out.
+            var wantsDirector = !string.IsNullOrWhiteSpace(objectPath) || instanceId.HasValue;
+            var host = wantsDirector ? ObjectResolve.Object(objectPath, instanceId) : null;
 
             var timeline = ScriptableObject.CreateInstance<TimelineAsset>();
             timeline.name = System.IO.Path.GetFileNameWithoutExtension(path);
@@ -121,9 +129,9 @@ namespace UnityMCP.Editor.Timeline
                 ["created"] = true,
             };
 
-            if (!string.IsNullOrWhiteSpace(objectPath) || instanceId.HasValue)
+            if (host != null)
             {
-                var go = ObjectResolve.Object(objectPath, instanceId);
+                var go = host;
                 var director = go.GetComponent<PlayableDirector>();
 
                 if (director == null)
@@ -186,6 +194,24 @@ namespace UnityMCP.Editor.Timeline
                         $"'{TimelineResolve.PathOf(parentTrack)}' is a {parentTrack.GetType().Name}, " +
                         "and only a group track can hold other tracks.");
                 }
+
+                // Adding to a locked group is a change to that group, so the lock applies here too.
+                TimelineResolve.RefuseIfLocked(parentTrack);
+            }
+
+            // Resolved all the way to the object that will be bound — including the component the
+            // track's type requires — before the track exists. Resolving only the path here would
+            // still leave an unbound track behind when the object turns out to lack the component,
+            // which is the failure that actually happens. The required type comes from the track
+            // type's [TrackBindingType], so it is known without an instance.
+            UnityEngine.Object bindValue = null;
+
+            if (!string.IsNullOrWhiteSpace(binding))
+            {
+                var required = trackType.GetCustomAttribute<TrackBindingTypeAttribute>()?.type;
+                var go = ObjectResolve.Object(binding, null, "binding");
+
+                bindValue = ResolveBindingValue(required, go, name ?? trackType.Name);
             }
 
             TrackAsset track;
@@ -207,9 +233,13 @@ namespace UnityMCP.Editor.Timeline
 
             string bound = null;
 
-            if (!string.IsNullOrWhiteSpace(binding))
+            if (bindValue != null)
             {
-                bound = BindTo(director, track, binding);
+                Undo.RegisterCompleteObjectUndo(director, "MCP Create Track");
+                director.SetGenericBinding(track, bindValue);
+                EditorUtility.SetDirty(director);
+
+                bound = Describe(bindValue);
             }
 
             Commit(timeline, director);
@@ -238,7 +268,14 @@ namespace UnityMCP.Editor.Timeline
             "the GameObject whose director it drives, which is how one timeline is nested inside " +
             "another. On an animation track, 'animation_clip' is the AnimationClip asset to play.",
             Idempotency = McpIdempotency.Unsafe,
-            UndoGroup = "MCP Create Clip")]
+            UndoGroup = "MCP Create Clip",
+            // The Control-clip form is the one worth showing: nesting a timeline is a single call,
+            // but only if the caller knows control_source is what does it.
+            Examples = new[]
+            {
+                @"{""object_path"":""/StageDirector"",""track"":""CameraWork"",""start"":0,""duration"":6,""display_name"":""Run CameraWork"",""control_source"":""/CameraWorkDirector""}",
+                @"{""object_path"":""/CameraWorkDirector"",""track"":""CubeSpin"",""start"":0,""animation_clip"":""Assets/Stage/CubeSpin.anim""}",
+            })]
         public static JObject CreateClip(
             [McpArg("object_path", "Hierarchy path of the GameObject with the PlayableDirector.")]
             string objectPath = null,
@@ -290,16 +327,18 @@ namespace UnityMCP.Editor.Timeline
                 // Timeline logs and returns null when the clip's own creation hook throws, having
                 // already attached the clip. Left alone that is an invisible half-clip on the track.
                 var orphan = trackAsset.GetClips().FirstOrDefault(c => !before.Contains(c));
+                var cleaned = orphan == null || timeline.DeleteClip(orphan);
 
-                if (orphan != null)
-                {
-                    timeline.DeleteClip(orphan);
-                }
-
+                // Reported from the return value rather than assumed. Saying the track was left
+                // clean when the removal failed would send the caller looking in the wrong place.
                 throw new McpToolException(
                     "tool_failed",
                     $"Timeline could not create a clip on '{TimelineResolve.PathOf(trackAsset)}' " +
-                    $"({trackAsset.GetType().Name}). Any partial clip has been removed.");
+                    $"({trackAsset.GetType().Name}). " +
+                    (cleaned
+                        ? "No partial clip was left behind."
+                        : "A partial clip could not be removed and is still on the track; " +
+                          "delete it with timeline_delete."));
             }
 
             clip.start = start;
@@ -455,42 +494,49 @@ namespace UnityMCP.Editor.Timeline
             EditorUtility.SetDirty(animation);
         }
 
-        private static string BindTo(PlayableDirector director, TrackAsset track, string path)
+        /// <summary>
+        /// Works out what object actually gets bound, without touching anything.
+        /// </summary>
+        /// <remarks>
+        /// Timeline accepts a GameObject where a component is expected and then does nothing at
+        /// graph-build time, so the component is resolved here and a missing one is an error. Kept
+        /// free of side effects so it can run before the track it is for exists.
+        /// </remarks>
+        internal static UnityEngine.Object ResolveBindingValue(Type required, GameObject go, string trackLabel)
         {
-            var go = ObjectResolve.Object(path, null, "binding");
-            var wanted = track.outputs.FirstOrDefault().outputTargetType;
-
-            UnityEngine.Object value = go;
-
-            if (wanted != null && !wanted.IsInstanceOfType(go))
+            if (required == null || required.IsInstanceOfType(go))
             {
-                if (!typeof(Component).IsAssignableFrom(wanted))
-                {
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"'{TimelineResolve.PathOf(track)}' binds a {wanted.Name}, which a GameObject cannot provide.");
-                }
-
-                var component = go.GetComponent(wanted);
-
-                if (component == null)
-                {
-                    throw new McpToolException(
-                        "not_found",
-                        $"'{ObjectResolve.PathOf(go)}' has no {wanted.Name}, which " +
-                        $"'{TimelineResolve.PathOf(track)}' needs. Add one with gameobject_add_component.");
-                }
-
-                value = component;
+                return go;
             }
 
-            Undo.RegisterCompleteObjectUndo(director, "MCP Create Track");
-            director.SetGenericBinding(track, value);
-            EditorUtility.SetDirty(director);
+            if (!typeof(Component).IsAssignableFrom(required))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{trackLabel}' binds a {required.Name}, which a GameObject cannot provide.");
+            }
 
-            return value is Component c
-                ? $"{ObjectResolve.PathOf(c.gameObject)} ({c.GetType().Name})"
-                : ObjectResolve.PathOf(go);
+            var component = go.GetComponent(required);
+
+            if (component == null)
+            {
+                throw new McpToolException(
+                    "not_found",
+                    $"'{ObjectResolve.PathOf(go)}' has no {required.Name}, which '{trackLabel}' needs. " +
+                    "Add one with gameobject_add_component, or bind a different object.");
+            }
+
+            return component;
+        }
+
+        internal static string Describe(UnityEngine.Object value)
+        {
+            if (value is Component c)
+            {
+                return $"{ObjectResolve.PathOf(c.gameObject)} ({c.GetType().Name})";
+            }
+
+            return value is GameObject go ? ObjectResolve.PathOf(go) : $"{value.name} ({value.GetType().Name})";
         }
 
         private static void Commit(TimelineAsset timeline, PlayableDirector director)

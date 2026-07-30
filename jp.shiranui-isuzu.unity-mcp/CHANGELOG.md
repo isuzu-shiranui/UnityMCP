@@ -21,6 +21,47 @@
   back, `nest_depth` names the child without expanding it, a director evaluated to frame 60 reads
   back at 2.0s, and the update mode is left as it was found.
 
+- **Worked examples on the tools whose argument shape is not obvious.** Declared on `[McpTool]` and
+  published as the input schema's `examples`, which is standard JSON Schema and where a model looks
+  to see the shape rather than infer it. Added to the five tools where the parameter list can state
+  a rule but not demonstrate it: arguments that constrain each other (`recorder_add_track`'s
+  `camera_tag` only means something with `source=tagged_camera`), alternatives that cannot both be
+  given (`timeline_edit_clip`'s `duration` and `end`, `timeline_shift_clips`'s `by` and `to_time`),
+  a value whose type the schema can only call "any" (`inspect_write`), and the one-call form of
+  nesting a timeline (`timeline_create_clip`'s `control_source`). Each is parsed while the catalogue
+  is built, and a malformed one fails that tool's registration rather than shipping a broken schema.
+
+### Fixed
+
+- **A cross-model review of the Timeline editing tools found eleven defects; ten are fixed here and
+  the eleventh is now refused rather than guessed.** Most were places where the code broke a rule the
+  rest of it follows.
+
+  The one that could lose work: `timeline_create` checked for an existing timeline with a typed load,
+  which returns null for an asset of any other kind — so a path holding a material was reported free
+  and then overwritten. It now checks for any asset at all.
+
+  Four were mutations that ran before everything had been validated, so a refused call left part of
+  its change behind: a clip moved by `start` before `end` was checked, a track created before its
+  binding was resolved, a mute applied before the same, and a timeline asset written before the
+  GameObject meant to host its director was resolved. All of them now resolve and validate first.
+  Note that resolving the *path* was not enough — the failure that actually happens is "this object
+  has no Animator", so the component is resolved too, which for a track that does not exist yet
+  means reading the required type from `[TrackBindingType]`.
+
+  Two were holes in the lock policy: a child track could be added to a locked group, and deleting a
+  group deleted locked tracks inside it, which made a lock avoidable by deleting its parent.
+  Deleting a group also left its children's bindings on the director, pointing at tracks that no
+  longer existed.
+
+  Three were the code not holding itself to its own standard: `timeline_shift_clips` did not read
+  back what it wrote although single-clip editing does, and both track paths and `at_time` picked
+  the first match silently where name collisions were already an error. Ambiguity is now refused in
+  all three.
+
+  The last was a false claim: the rollback after a failed clip creation ignored whether the deletion
+  succeeded and reported the track clean regardless.
+
 - **Server instructions, and per-tool hints for clients that defer tool definitions.** A client with
   a large catalogue no longer loads tool definitions upfront — it loads the names and the server's
   instructions and searches for the rest. With 68 tools this server is firmly in that regime, and it

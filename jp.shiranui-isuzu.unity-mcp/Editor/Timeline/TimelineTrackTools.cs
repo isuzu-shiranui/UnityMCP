@@ -77,6 +77,21 @@ namespace UnityMCP.Editor.Timeline
                 TimelineResolve.RefuseIfLocked(trackAsset);
             }
 
+            // Resolved all the way to the object that gets bound before the first write, component
+            // lookup included: the failure that actually happens is "this object has no Animator",
+            // and finding that out after the mute was applied leaves it applied behind a failed call.
+            UnityObject bindValue = null;
+
+            if (binding != null)
+            {
+                var go = ObjectResolve.Object(binding, null, "binding");
+
+                bindValue = TimelineCreateTools.ResolveBindingValue(
+                    trackAsset.outputs.FirstOrDefault().outputTargetType,
+                    go,
+                    TimelineResolve.PathOf(trackAsset));
+            }
+
             var changed = new JArray();
             var touchedScene = false;
 
@@ -111,10 +126,13 @@ namespace UnityMCP.Editor.Timeline
                 changed.Add("binding cleared");
                 touchedScene = true;
             }
-            else if (binding != null)
+            else if (bindValue != null)
             {
-                var bound = Bind(director, trackAsset, binding);
-                changed.Add($"binding = {bound}");
+                Undo.RegisterCompleteObjectUndo(director, "MCP Set Track");
+                director.SetGenericBinding(trackAsset, bindValue);
+                EditorUtility.SetDirty(director);
+
+                changed.Add($"binding = {TimelineCreateTools.Describe(bindValue)}");
                 touchedScene = true;
             }
 
@@ -205,13 +223,35 @@ namespace UnityMCP.Editor.Timeline
             }
 
             var trackPath = TimelineResolve.PathOf(trackAsset);
-            var childCount = TimelineResolve.AllTracks(timeline).Count(t => t != trackAsset && IsUnder(t, trackAsset));
+            var descendants = TimelineResolve.AllTracks(timeline)
+                .Where(t => t != trackAsset && IsUnder(t, trackAsset))
+                .ToList();
             var clipCount = trackAsset.GetClips().Count();
 
-            // Deleting clears the binding too; leaving it behind would keep the scene pointing at a
-            // track that no longer exists.
+            // DeleteTrack takes the whole subtree, so a locked track further down would be removed
+            // without its lock ever being consulted. Checked before anything is touched.
+            var lockedChild = descendants.FirstOrDefault(t => t.locked);
+
+            if (lockedChild != null)
+            {
+                throw new McpToolException(
+                    "conflict",
+                    $"'{trackPath}' contains the locked track '{TimelineResolve.PathOf(lockedChild)}', " +
+                    "which deleting the group would remove too. Unlock it with timeline_set_track, " +
+                    "or delete it separately.",
+                    409);
+            }
+
+            // Bindings are cleared for the whole subtree, not just the named track: DeleteTrack
+            // removes the children as well, and each one left bound leaves the director pointing at
+            // a track that no longer exists.
             Undo.RegisterCompleteObjectUndo(director, "MCP Delete Timeline Item");
-            director.ClearGenericBinding(trackAsset);
+
+            foreach (var going in descendants.Concat(new[] { trackAsset }))
+            {
+                director.ClearGenericBinding(going);
+            }
+
             EditorUtility.SetDirty(director);
 
             if (!timeline.DeleteTrack(trackAsset))
@@ -226,7 +266,7 @@ namespace UnityMCP.Editor.Timeline
                 ["deleted"] = trackPath,
                 ["kind"] = "track",
                 ["clipsRemoved"] = clipCount,
-                ["tracksRemoved"] = childCount + 1,
+                ["tracksRemoved"] = descendants.Count + 1,
                 ["duration"] = Math.Round(timeline.duration, 4),
             });
         }
@@ -256,43 +296,6 @@ namespace UnityMCP.Editor.Timeline
         /// So the component is resolved here, and a missing one is an error rather than a silent
         /// half-binding.
         /// </remarks>
-        private static string Bind(PlayableDirector director, TrackAsset track, string path)
-        {
-            var go = ObjectResolve.Object(path, null, "binding");
-            var wanted = track.outputs.FirstOrDefault().outputTargetType;
-
-            UnityObject value = go;
-
-            if (wanted != null && !wanted.IsInstanceOfType(go))
-            {
-                if (!typeof(Component).IsAssignableFrom(wanted))
-                {
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"'{TimelineResolve.PathOf(track)}' binds a {wanted.Name}, which a GameObject cannot provide.");
-                }
-
-                var component = go.GetComponent(wanted);
-
-                if (component == null)
-                {
-                    throw new McpToolException(
-                        "not_found",
-                        $"'{ObjectResolve.PathOf(go)}' has no {wanted.Name}, which " +
-                        $"'{TimelineResolve.PathOf(track)}' needs. Add one with " +
-                        "gameobject_add_component, or bind a different object.");
-                }
-
-                value = component;
-            }
-
-            Undo.RegisterCompleteObjectUndo(director, "MCP Set Track");
-            director.SetGenericBinding(track, value);
-            EditorUtility.SetDirty(director);
-
-            return Describe(value);
-        }
-
         private static string Describe(UnityObject binding)
         {
             if (binding is GameObject go)

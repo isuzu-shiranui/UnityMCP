@@ -244,6 +244,67 @@ namespace UnityMCP.Editor.Timeline.Tests
         }
 
         [Test]
+        public void WritingOverSomethingThatIsNotATimelineIsRefused()
+        {
+            // A typed load returns null for an asset of another kind, and CreateAsset would then
+            // overwrite whatever was there. Checked with a material because it is the mistake a
+            // caller actually makes: a path that is occupied, not one that holds a timeline.
+            var occupied = this.folder + "/Taken.playable";
+            AssetDatabase.CreateAsset(new Material(Shader.Find("Unlit/Color")), occupied);
+
+            var error = Assert.Throws<McpToolException>(() =>
+                TimelineCreateTools.Create(assetPath: occupied));
+
+            Assert.That(error.Code, Is.EqualTo("conflict"));
+            Assert.That(AssetDatabase.LoadAssetAtPath<Material>(occupied), Is.Not.Null,
+                        "the existing asset must still be there");
+        }
+
+        [Test]
+        public void ADirectorPathThatCannotBeResolvedLeavesNoStrayAsset()
+        {
+            var path = this.Path("Stray");
+
+            Assert.Throws<McpToolException>(() =>
+                TimelineCreateTools.Create(assetPath: path, objectPath: "/NoSuchObject"));
+
+            // The asset is written before the director is attached, so resolving the host after
+            // creating it would leave this behind on the way out.
+            Assert.That(AssetDatabase.LoadAssetAtPath<TimelineAsset>(path), Is.Null,
+                        "a failed call should not leave a timeline behind");
+        }
+
+        [Test]
+        public void ABindingThatCannotBeSatisfiedLeavesNoTrack()
+        {
+            var playable = this.Stage();
+            var timeline = (TimelineAsset)playable.playableAsset;
+
+            this.child = new GameObject("NoAnimator");
+
+            Assert.Throws<McpToolException>(() => TimelineCreateTools.CreateTrack(
+                instanceId: this.Id, type: "animation", name: "Motion",
+                binding: ObjectResolve.PathOf(this.child)));
+
+            Assert.That(timeline.GetRootTracks().Count(), Is.EqualTo(0),
+                        "the track was created before the binding was checked");
+        }
+
+        [Test]
+        public void AddingToALockedGroupIsRefused()
+        {
+            this.Stage();
+
+            TimelineCreateTools.CreateTrack(instanceId: this.Id, type: "group", name: "Cameras");
+            TimelineTrackTools.SetTrack(instanceId: this.Id, track: "Cameras", locked: true);
+
+            var error = Assert.Throws<McpToolException>(() => TimelineCreateTools.CreateTrack(
+                instanceId: this.Id, type: "activation", name: "Front", parent: "Cameras"));
+
+            Assert.That(error.Code, Is.EqualTo("conflict"));
+        }
+
+        [Test]
         public void WritingOverAnExistingTimelineIsRefused()
         {
             this.Stage();

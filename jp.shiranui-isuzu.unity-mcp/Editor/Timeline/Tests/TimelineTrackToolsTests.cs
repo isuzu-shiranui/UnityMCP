@@ -278,6 +278,75 @@ namespace UnityMCP.Editor.Timeline.Tests
         }
 
         [Test]
+        public void DeletingAGroupHoldingALockedTrackIsRefused()
+        {
+            var timeline = ScriptableObject.CreateInstance<TimelineAsset>();
+            timeline.name = "Grouped";
+            AssetDatabase.CreateAsset(timeline, this.folder + "/Grouped.playable");
+
+            var group = timeline.CreateTrack<GroupTrack>(null, "Cameras");
+            timeline.CreateTrack<ActivationTrack>(group, "Front");
+            var locked = timeline.CreateTrack<ActivationTrack>(group, "Side");
+            locked.locked = true;
+
+            this.director = new GameObject("GroupedDirector");
+            this.director.AddComponent<PlayableDirector>().playableAsset = timeline;
+
+            // DeleteTrack takes the whole subtree, so the lock on a child has to be consulted before
+            // the group goes; otherwise a lock is silently bypassed by deleting its parent.
+            var error = Assert.Throws<McpToolException>(() =>
+                TimelineTrackTools.Delete(instanceId: this.Id, track: "Cameras"));
+
+            Assert.That(error.Code, Is.EqualTo("conflict"));
+            Assert.That(error.Message, Does.Contain("Cameras/Side"));
+            Assert.That(timeline.GetRootTracks().Count(), Is.EqualTo(1), "nothing should have been deleted");
+        }
+
+        [Test]
+        public void DeletingAGroupClearsTheBindingsOfItsChildren()
+        {
+            var timeline = ScriptableObject.CreateInstance<TimelineAsset>();
+            timeline.name = "Bound";
+            AssetDatabase.CreateAsset(timeline, this.folder + "/Bound.playable");
+
+            var group = timeline.CreateTrack<GroupTrack>(null, "Cameras");
+            var child = timeline.CreateTrack<ActivationTrack>(group, "Front");
+
+            this.director = new GameObject("BoundDirector");
+            var playable = this.director.AddComponent<PlayableDirector>();
+            playable.playableAsset = timeline;
+
+            this.subject = new GameObject("Target");
+            playable.SetGenericBinding(child, this.subject);
+            Assert.That(playable.GetGenericBinding(child), Is.Not.Null);
+
+            TimelineTrackTools.Delete(instanceId: this.Id, track: "Cameras");
+
+            // The child track is gone with the group, and a binding left pointing at it would keep
+            // the scene referencing a track that no longer exists.
+            Assert.That(playable.GetGenericBinding(child), Is.Null);
+        }
+
+        [Test]
+        public void AFailedBindingLeavesTheOtherChangesUnapplied()
+        {
+            var playable = this.Stage();
+            this.subject = new GameObject("NoAnimator");
+
+            // An Activation track binds a GameObject, so force the failure with a track that wants a
+            // component the object does not have.
+            var timeline = TimelineOf(playable);
+            timeline.CreateTrack<AnimationTrack>(null, "Motion");
+
+            Assert.Throws<McpToolException>(() => TimelineTrackTools.SetTrack(
+                instanceId: this.Id, track: "Motion", muted: true,
+                binding: ObjectResolve.PathOf(this.subject)));
+
+            Assert.That(TimelineResolve.Track(timeline, "Motion").muted, Is.False,
+                        "the mute was applied before the binding was checked");
+        }
+
+        [Test]
         public void DeletingAMissingTrackNamesTheOnesThatExist()
         {
             this.Stage();
