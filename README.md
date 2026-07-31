@@ -204,6 +204,37 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `material_read` | safe | マテリアルの**現在値**・有効キーワード・render queue |
 | `material_set` | unsafe | プロパティ / キーワード / render queue を変更 |
 
+**Timeline（動画制作・ライブ）** — `com.unity.timeline` がある時だけ現れます。
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `timeline_inspect` | safe | トラック / クリップ / バインディングと director の時刻。**ControlTrack を辿って子 Timeline を再帰展開**する（ライブの多層構造向け） |
+| `timeline_evaluate` | unsafe | director を時刻 / フレームに評価（Play mode 不要）。`capture_screenshot` と組んで1コマ検証 |
+| `timeline_edit_clip` | unsafe | 1クリップの start / duration / 表示名 / ease / blend / 速度。**要求値でなく実効値を返し**、効かなかった引数は理由付きで `ignored` に出す |
+| `timeline_shift_clips` | unsafe | **リップル編集**。指定時刻以降をまとめてずらす。0秒を割る場合は**1つも動かさず**拒否 |
+| `timeline_set_track` | unsafe | mute / lock / リネーム / バインディング。トラックの型に必要なコンポーネントを**自前で解決**（Animation なら Animator） |
+| `timeline_delete` | unsafe | トラック / クリップの削除。グループは配下ごと。Undo 可能なので確認を求めない |
+| `timeline_create` | unsafe | Timeline アセットの新規作成（+ director 付与）。**トラック追加の前提となる唯一の入口** |
+| `timeline_create_track` | unsafe | トラック追加（activation / animation / audio / control / group / playable / signal）。グループへのネストとバインド同時指定可 |
+| `timeline_create_clip` | unsafe | クリップ追加。`control_source` で**ControlTrack のネストを一発で構成**、`animation_clip` で AnimationClip を指定 |
+
+編集系は**書き込んだ後に読み直した実効値**を返します。Timeline の setter は
+クリップ型が対応していない値（Activation クリップの速度など）を**エラーなく捨てる**ため、
+要求値をそのまま返すと「設定したつもり」が残るからです。
+また作成系は、対象の Timeline が**まだアセットでなければ着手前に拒否**します
+（Timeline はその状態だとトラックをメモリ上にしか作らず、後から永続化する公開 API が無いため）。
+
+**Recorder（書き出し）** — `com.unity.recorder` と `com.unity.timeline` が揃っている時だけ現れます。
+
+| ツール | 冪等性 | 用途 |
+|---|---|---|
+| `recorder_add_track` | unsafe | Timeline に Recorder トラックを追加し、**director を再生するだけで録画**にする。mp4 / webm / mov と png / jpeg / exr、入力は game view / カメラ / RenderTexture、解像度指定可 |
+| `recorder_list` | safe | その Timeline が**何をどこへ書き出すか**（形式・出力先・有効/無効） |
+
+Recorder を直接叩かず Timeline のトラックとして持つのは、**フレームレートが Timeline 側から入る**ため
+（録画とタイムラインがズレない）で、かつ Recorder API のバージョン差の影響を受けにくいからです。
+`output_path` を省くと `Assets` と同階層の `Recording` フォルダに Timeline 名で書き出します。
+
 **内部状態・GPU**
 
 | ツール | 冪等性 | 用途 |

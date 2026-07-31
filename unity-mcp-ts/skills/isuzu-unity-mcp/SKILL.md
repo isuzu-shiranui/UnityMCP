@@ -137,6 +137,65 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `menu_execute --menu_item "File/Save"` | Invoke a menu item |
 | `project_packages` / `project_assemblies` | Project metadata |
 
+**Timeline and Recorder** — present only when `com.unity.timeline` / `com.unity.recorder` are installed.
+
+| Tool | Purpose |
+|---|---|
+| `timeline_inspect --object_path /StageDirector --nest_depth 2` | Tracks, clips and bindings. **Follows Control tracks into the child timelines they drive** |
+| `timeline_evaluate --object_path /StageDirector --time 3.5` | Scrub a director to a time or frame without Play Mode |
+| `recorder_add_track --object_path /StageDirector --type movie --format mp4 --width 1920 --height 1080` | Add a Recorder track, so playing the director records it |
+| `recorder_list --object_path /StageDirector` | What a timeline records, and where it lands |
+| `timeline_edit_clip --track Cameras/Front --clip "Wide" --start 2 --duration 3` | Retime or rename one clip |
+| `timeline_shift_clips --from_time 3 --by 0.5` | Ripple: move everything at or after a time together |
+| `timeline_set_track --track Motion --binding /Cube` | Mute, lock, rename, or bind a track |
+| `timeline_delete --track Shots --clip "Wide"` | Delete a clip, or the whole track |
+| `timeline_create --asset_path Assets/Stage/Stage.playable --object_path /Stage` | New timeline, with a director |
+| `timeline_create_track --type control --name Drive` | Add a track |
+| `timeline_create_clip --track Drive --control_source /ChildDirector` | Add a clip; nests a child timeline in one call |
+
+Two things about the editing tools worth knowing before trusting a result:
+
+- **They report the value that landed, not the one you asked for.** Timeline silently discards
+  writes a clip type does not support — an Activation clip accepts a speed multiplier and keeps
+  1.0 — so anything that did not take is listed in `ignored` with the reason. Read it.
+- **Create the timeline before adding tracks to it.** `timeline_create_track` refuses on a timeline
+  that is not yet an asset, because Timeline would build the track in memory only and drop it at the
+  next domain reload, with no public API to persist it afterwards. `timeline_create` is the entry
+  point that gets the order right.
+
+Recording is a track on the timeline, so **the frame rate comes from the timeline** and is not an
+argument here. Sources: `game_view`, `active_camera`, `main_camera`, `tagged_camera`
+(`--camera_tag`), `render_texture` (`--render_texture_path`). Omitting `output_path` writes to a
+`Recording` folder beside `Assets`, named after the timeline.
+
+### Rendering a timeline, and checking it actually rendered
+
+```bash
+unity-mcp call recorder_add_track --object_path /StageDirector --type movie --format mp4 \
+  --source game_view --width 1920 --height 1080
+unity-mcp call play_mode_play
+sleep 12                      # the timeline's length, plus encoder flush
+unity-mcp call play_mode_stop
+```
+
+**Check the content, not the container.** Resolution, fps and frame count come from the mp4 header
+and say nothing about whether anything moved — a frozen render still reports the full frame count.
+Decode the frames and count distinct ones:
+
+```bash
+ffmpeg -v error -i out.mp4 -vf scale=160:90 f_%03d.png   # distinct ≈ frames → moving
+```
+
+Two failure modes worth knowing, because both look like "the tool did nothing":
+
+- **Play Mode defers script compilation.** Unity postpones domain reload until Play Mode exits, so
+  an edited script keeps running its old build and `isCompiling` sticks true. `play_mode_stop` is
+  itself deferred to the next frame, which a backgrounded Editor never draws. Check
+  `play_mode_status` first.
+- **Timeline tracks must be created after the asset exists.** `CreateTrack` only persists a track
+  when the timeline is already an asset, so tracks built before `AssetDatabase.CreateAsset` live in
+  memory and disappear at the next domain reload — correct in the Editor, empty under Play.
+
 ## Common workflows
 
 ### Debug: find errors, then the object they name

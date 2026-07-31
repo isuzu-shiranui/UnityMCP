@@ -18,9 +18,37 @@ async function main() {
   try {
     // listChanged is declared because the tool list is not static: it comes from whichever
     // Editor is connected, and changes when one connects or recompiles.
+    //
+    // The instructions matter more than their length suggests. A client with a large tool
+    // catalogue defers the definitions and discovers them by search, which means this text and the
+    // tool names are all it has at the start of a session — so it says which kinds of work live
+    // here, in the words someone would use to ask for them. Kept short because clients truncate
+    // it, with the tool-name prefixes first since those are what a search matches.
     const mcpServer = new McpServer(
       { name: "unity-mcp", version: serverVersion() },
-      { capabilities: { tools: { listChanged: true }, prompts: {} } }
+      {
+        capabilities: { tools: { listChanged: true }, prompts: {} },
+        instructions: [
+          "Controls a running Unity Editor. Search this server's tools for any Unity work:",
+          "inspecting or editing a scene, assets and prefabs, Timeline and Recorder, shaders and",
+          "rendering, play mode, the console, tests, and builds.",
+          "",
+          "Tool name prefixes: scene_ gameobject_ inspect_ asset_ prefab_ console_ compile_",
+          "play_mode_ timeline_ recorder_ render_ shader_ material_ reflect_ gpu_ test_ build_",
+          "project_ editor_ menu_ capture_ execute_.",
+          "",
+          "Reach for these when asked to look at, change or debug anything in a Unity project,",
+          "including questions like why a material renders wrong, what a Timeline does at a given",
+          "moment, why a script did not compile, or what the console reported. Read the console",
+          "(console_read_logs) before building any instrumentation of your own; Unity has usually",
+          "already written down the cause. Prefer a specific tool over execute_code, which cannot",
+          "be undone and is the last resort when nothing else reaches.",
+          "",
+          "Requires a Unity Editor to be running with the jp.shiranui-isuzu.unity-mcp package",
+          "installed; it is discovered automatically. Which tools exist depends on that project's",
+          "packages, so Timeline and Recorder tools appear only where those packages are present.",
+        ].join("\n"),
+      }
     );
 
     // Initialize UnityConnection (HTTP client)

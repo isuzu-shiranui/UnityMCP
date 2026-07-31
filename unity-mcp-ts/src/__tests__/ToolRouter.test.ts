@@ -103,6 +103,28 @@ describe('ToolRouter.listTools', () => {
         ]);
     });
 
+    test('forwards the Editor _meta, and omits the key when there is none', () => {
+        const hinted: UnityToolDefinition = {
+            ...EDITOR_TOOL,
+            name: 'console_read_logs',
+            _meta: { 'anthropic/alwaysLoad': true, 'anthropic/maxResultSizeChars': 200000 },
+        };
+
+        const { router } = makeRouter({ tools: [hinted, WRITE_TOOL] });
+        const listed = router.listTools();
+
+        const withHints = listed.find(t => t.name === 'console_read_logs')! as any;
+        expect(withHints._meta).toEqual({
+            'anthropic/alwaysLoad': true,
+            'anthropic/maxResultSizeChars': 200000,
+        });
+
+        // Spreading an absent _meta would put an explicit null on every other tool, which is a
+        // different thing on the wire from not having sent the field at all.
+        const plain = listed.find(t => t.name === 'inspect_write')! as any;
+        expect('_meta' in plain).toBe(false);
+    });
+
     test('forwards the Editor schema unchanged apart from target', () => {
         const { router } = makeRouter();
         const scene = router.listTools().find(t => t.name === 'scene_browse_hierarchy')!;

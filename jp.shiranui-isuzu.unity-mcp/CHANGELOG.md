@@ -1,8 +1,158 @@
 # Changelog
 
-## Unreleased
+## [3.3.0] - 2026-07-31
 
 ### Added
+- **Timeline tools**, for the video and live work these projects are for: `timeline_inspect`
+  reports a director's tracks, clips and bindings, and — the point — follows Control tracks into
+  the child timelines they drive, recursively. A live stage is routinely a root timeline whose
+  Control clips each start a character or effect timeline several layers down, and a tool that
+  stops at the first layer cannot see where anything happens. `timeline_evaluate` moves a director
+  to a time or frame and evaluates it in the Editor without entering Play Mode, so
+  `capture_screenshot` and `render_compare` can check one exact frame.
+
+  Their own assembly, constrained to `UNITY_TIMELINE`: a project without `com.unity.timeline`
+  loses the two tools rather than failing to compile. `timeline_evaluate` saves and restores the
+  director's update mode, so scrubbing in the Editor does not leave it unable to advance under Play.
+
+  `UnityMCP.Editor.Timeline.Tests` covers this against a fixture whose nested structure the test
+  defines — a Root timeline whose Control clip drives a Child timeline with an Activation track —
+  checking that the nesting resolves to the driven object, the child's tracks and clip timings come
+  back, `nest_depth` names the child without expanding it, a director evaluated to frame 60 reads
+  back at 2.0s, and the update mode is left as it was found.
+
+- **Worked examples on the tools whose argument shape is not obvious.** Declared on `[McpTool]` and
+  published as the input schema's `examples`, which is standard JSON Schema and where a model looks
+  to see the shape rather than infer it. Added to the five tools where the parameter list can state
+  a rule but not demonstrate it: arguments that constrain each other (`recorder_add_track`'s
+  `camera_tag` only means something with `source=tagged_camera`), alternatives that cannot both be
+  given (`timeline_edit_clip`'s `duration` and `end`, `timeline_shift_clips`'s `by` and `to_time`),
+  a value whose type the schema can only call "any" (`inspect_write`), and the one-call form of
+  nesting a timeline (`timeline_create_clip`'s `control_source`). Each is parsed while the catalogue
+  is built, and a malformed one fails that tool's registration rather than shipping a broken schema.
+
+### Fixed
+
+- **A cross-model review of the Timeline editing tools found eleven defects; ten are fixed here and
+  the eleventh is now refused rather than guessed.** Most were places where the code broke a rule the
+  rest of it follows.
+
+  The one that could lose work: `timeline_create` checked for an existing timeline with a typed load,
+  which returns null for an asset of any other kind — so a path holding a material was reported free
+  and then overwritten. It now checks for any asset at all.
+
+  Four were mutations that ran before everything had been validated, so a refused call left part of
+  its change behind: a clip moved by `start` before `end` was checked, a track created before its
+  binding was resolved, a mute applied before the same, and a timeline asset written before the
+  GameObject meant to host its director was resolved. All of them now resolve and validate first.
+  Note that resolving the *path* was not enough — the failure that actually happens is "this object
+  has no Animator", so the component is resolved too, which for a track that does not exist yet
+  means reading the required type from `[TrackBindingType]`.
+
+  Two were holes in the lock policy: a child track could be added to a locked group, and deleting a
+  group deleted locked tracks inside it, which made a lock avoidable by deleting its parent.
+  Deleting a group also left its children's bindings on the director, pointing at tracks that no
+  longer existed.
+
+  Three were the code not holding itself to its own standard: `timeline_shift_clips` did not read
+  back what it wrote although single-clip editing does, and both track paths and `at_time` picked
+  the first match silently where name collisions were already an error. Ambiguity is now refused in
+  all three.
+
+  The last was a false claim: the rollback after a failed clip creation ignored whether the deletion
+  succeeded and reported the track clean regardless.
+
+- **Server instructions, and per-tool hints for clients that defer tool definitions.** A client with
+  a large catalogue no longer loads tool definitions upfront — it loads the names and the server's
+  instructions and searches for the rest. With 68 tools this server is firmly in that regime, and it
+  was sending no instructions at all, so the only thing a client had to go on at the start of a
+  session was the tool names. It now says which kinds of work live here, in the words someone would
+  use to ask for them, and lists the name prefixes first because those are what a search matches.
+  Kept to 1,176 bytes: clients truncate this at 2KB.
+
+  Two hints travel with the tools themselves, declared on `[McpTool]` and emitted into each tool's
+  `_meta`, so nothing has to be configured on the client side:
+  - `AlwaysLoad` keeps a definition loaded rather than deferred. Set on three tools only —
+    `console_read_logs`, `scene_browse_hierarchy`, `compile_status` — the ones wanted on nearly
+    every turn, where a search round trip each time costs more than the context they take. Marking
+    more would put the whole catalogue back in the prompt and defeat the mechanism.
+  - `MaxResultSizeChars` raises where a text result is spilled to a file instead of returned. Set on
+    the four tools whose useful answer is genuinely large. Deliberately not set on
+    `capture_screenshot`: the limit it would raise does not apply to image content.
+
+  Responses now state `charset=utf-8`. Tool descriptions contain non-ASCII punctuation, and a client
+  that falls back to Latin-1 on a bare `application/json` turns each em dash into three characters —
+  observed while auditing the catalogue.
+
+  Audited the rest of what a deferring client cares about and changed nothing, because it was
+  already right: `tools/list` is ordered by name and stable across calls (now a spec-level SHOULD,
+  for prompt-cache hit rates), no schema has a root-level `anyOf`/`oneOf`/`allOf`, all 68 tools come
+  back in one page, the longest description is 440 bytes, and no description contains a surrogate
+  pair.
+
+- **Timeline editing**, so the Timeline tools are no longer one-way. `timeline_edit_clip` retimes or
+  renames a clip; `timeline_shift_clips` ripples everything at or after a time so a length change
+  earlier in the sequence does not have to be repaired clip by clip; `timeline_set_track` mutes,
+  locks, renames and binds; `timeline_delete` removes a track or a clip; and `timeline_create`,
+  `timeline_create_track` and `timeline_create_clip` build one from nothing, including the Control
+  clip that nests a child timeline inside a parent.
+
+  Two decisions shape the rest. **The result reports the value read back, not the value requested.**
+  Timeline's setters are gated on capabilities a clip's asset declares and discard what they do not
+  accept without raising anything — an Activation clip advertises no capabilities at all, so setting
+  its speed or blend does nothing — and a caller that trusted its own request would carry on
+  believing a change it never made. Anything that did not take is listed in `ignored` with the
+  effective value and the reason. **And the creation tools refuse before acting when the timeline is
+  not yet an asset.** Timeline writes a track into the file only if the timeline already is one, and
+  offers nothing to persist it afterwards, so a timeline built in the wrong order looks entirely
+  correct until the next domain reload discards it.
+
+  Tracks are addressed by path (`Cameras/CamFront`), which `timeline_inspect` now reports for every
+  track, because Timeline places no uniqueness requirement on track names and a track can sit inside
+  a group. Clips cannot be addressed that way — a `TimelineClip` is not a UnityEngine.Object and has
+  no id — so they are addressed by name, index or a time they cover, and every edit reports the
+  clip's address again, since changing a start re-sorts its track. A locked track is refused with the
+  tool that unlocks it named in the message; unlocking itself stays allowed, or the lock would be a
+  one-way door.
+
+  Reordering tracks is deliberately absent: Timeline exposes no public API for it, and the
+  serialized lists behind it need a cache invalidation that is also internal, so the failure would be
+  quiet. Extrapolation modes are internal-set and likewise out.
+
+- **Recorder tools**, so a timeline can be rendered out without leaving the agent:
+  `recorder_add_track` puts a Recorder track on a Timeline — movie (mp4, webm, mov) or image
+  sequence (png, jpeg, exr), capturing the game view, the active/main/tagged camera or a
+  RenderTexture, at a chosen resolution — and `recorder_list` reports what a timeline will record
+  and where it will land. Recording is set up as a track rather than through the Recorder API
+  directly because the frame rate then comes from the Timeline itself, so the recording cannot
+  drift from the animation, and because the surface reached this way has stayed put across
+  Recorder 2.x to 5.x.
+
+  `recorder_add_track` declared an undo group without recording anything, so it claimed an undo it
+  did not provide: Timeline registers the track and clip it creates, but the recorder settings object
+  is created by the tool and would have been left inside the .playable after the track was undone
+  away. It registers that object now, and a test undoes a real call and counts the objects in the
+  file to confirm nothing is left behind.
+
+  Omitting `output_path` writes to a `Recording` folder beside `Assets`, named after the timeline.
+  An explicit absolute path needed a workaround: Recorder splits it into Root=Absolute plus the
+  directory in `Leaf`, but leaves its internal `absolutePath` null and only falls back to `Leaf`
+  while that field *is* null. Unity deserializes a null string as `""`, so the domain reload on
+  entering Play Mode made the root resolve to empty and the recording landed in the project folder
+  — silently, with the correct path still reported back. The tool now pins that field so the
+  destination survives the reload, and refuses the recording if it cannot, rather than writing
+  somewhere the caller did not ask for.
+
+  Their own assembly, constrained to `UNITY_RECORDER` and `UNITY_TIMELINE`. Verified two ways.
+  `UnityMCP.Editor.Recorder.Tests` puts the settings back through Unity's serializer — the step a
+  domain reload performs, and the one that broke the absolute path — and checks the destination,
+  format, resolution and camera source survive it. Separately, a nested stage was rendered end to
+  end: a root timeline whose Control clip drives a child timeline holding three Activation-tracked
+  cameras and an Animation track spinning a cube, out to a 1920x1080 mp4, checked by decoding every
+  frame — 180 frames, 180 distinct, exactly 6.000s. An earlier run of that same stage reported the
+  right resolution, fps and frame count while being frozen for 5.5 of its 6 seconds, so the frame
+  content is what the check looks at.
+
 - Compiles and runs on Unity 6.5, which made the int instance-id API obsolete-as-error. The ten
   call sites that identified an object go through one `EntityIdCompat` helper that uses
   `EntityId` on 6.5+ and the int API below it. The wire contract is unchanged: the field is still

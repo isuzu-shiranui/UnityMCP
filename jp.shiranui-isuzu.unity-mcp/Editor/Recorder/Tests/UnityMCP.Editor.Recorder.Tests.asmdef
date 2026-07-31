@@ -1,0 +1,43 @@
+{
+  "name": "UnityMCP.Editor.Recorder.Tests",
+  "rootNamespace": "",
+  "references": [
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner",
+    "UnityMCP.Editor",
+    "UnityMCP.Editor.Recorder",
+    "Unity.Timeline",
+    "Unity.Timeline.Editor",
+    "Unity.Recorder.Editor",
+    "Newtonsoft.Json"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll",
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS",
+    "UNITY_RECORDER",
+    "UNITY_TIMELINE"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.recorder",
+      "expression": "2.0.0",
+      "define": "UNITY_RECORDER"
+    },
+    {
+      "name": "com.unity.timeline",
+      "expression": "1.0.0",
+      "define": "UNITY_TIMELINE"
+    }
+  ],
+  "noEngineReferences": false
+}

@@ -23,7 +23,11 @@ namespace UnityMCP.Editor.Tools
             "Walk the open scenes' GameObject hierarchy, optionally filtered by name, component " +
             "type, or tag. Prefer narrowing with a filter and a small limit over fetching the " +
             "whole tree: a full hierarchy dump is large and mostly irrelevant to any one question.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            // Produces the object paths every other tool takes as an argument, so it is needed
+            // before most of them rather than instead of them.
+            AlwaysLoad = true,
+            MaxResultSizeChars = 200000)]
         public static JObject BrowseHierarchy(
             [McpArg("name", "Only include objects whose name contains this text.")]
             string name = null,

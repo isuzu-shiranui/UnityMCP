@@ -68,6 +68,44 @@ namespace UnityMCP.Editor.Core.Attributes
         public string UndoGroup { get; set; }
 
         /// <summary>
+        /// Worked examples of a complete argument object, each written as a JSON object literal.
+        /// They are published as the input schema's <c>examples</c>, which is where a model looks
+        /// to see the shape rather than infer it.
+        /// </summary>
+        /// <remarks>
+        /// Worth the effort only where the shape is not obvious from the parameter list: nested
+        /// values, or arguments that constrain each other so that some combinations are wrong.
+        /// A tool taking three strings gains nothing. Each entry is parsed when the catalogue is
+        /// built and a malformed one fails discovery, so a broken example cannot reach a client.
+        /// </remarks>
+        public string[] Examples { get; set; }
+
+        /// <summary>
+        /// Keeps this tool's definition loaded rather than deferred behind tool search.
+        /// </summary>
+        /// <remarks>
+        /// Clients with more tools than fit comfortably in context defer tool definitions and
+        /// discover them by searching, which costs a round trip before the first call. For the
+        /// handful of tools that are wanted on almost every turn — reading the console, browsing
+        /// the hierarchy — paying that repeatedly is worse than the context they occupy. Set this
+        /// sparingly: marking everything defeats the mechanism and puts the whole catalogue back
+        /// in the prompt. Surfaced as <c>anthropic/alwaysLoad</c> in the tool's <c>_meta</c>.
+        /// </remarks>
+        public bool AlwaysLoad { get; set; }
+
+        /// <summary>
+        /// Raises the size at which this tool's text result is spilled to a file instead of
+        /// being returned inline, in characters. Zero leaves the client's default in place.
+        /// </summary>
+        /// <remarks>
+        /// For tools whose useful answer is genuinely large — a deep hierarchy, a long log tail —
+        /// the default truncation loses the part the caller asked for. This does nothing for image
+        /// results, so it will not help a screenshot. Surfaced as
+        /// <c>anthropic/maxResultSizeChars</c> in the tool's <c>_meta</c>.
+        /// </remarks>
+        public int MaxResultSizeChars { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="McpToolAttribute"/> class.
         /// </summary>
         /// <param name="name">Tool name; see <see cref="Name"/> for the accepted grammar.</param>

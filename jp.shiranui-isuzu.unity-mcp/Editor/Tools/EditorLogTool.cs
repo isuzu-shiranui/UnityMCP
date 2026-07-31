@@ -57,7 +57,10 @@ namespace UnityMCP.Editor.Tools
             "in-memory console cannot be queried. Prefer this over console log tools when you suspect " +
             "the Editor is stuck, or when the console reports zero entries but you expect output.",
             Idempotency = McpIdempotency.Safe,
-            MainThread = false)]
+            MainThread = false,
+            // A log tail is asked for by size; cutting it to the client's default returns less than
+            // was requested while looking like the whole answer.
+            MaxResultSizeChars = 200000)]
         public static LogTailResult Tail(
             [McpArg("lines", "Maximum number of lines to return, newest last. Capped at 2000.")]
             int lines = 200,

@@ -1,0 +1,38 @@
+{
+  "name": "UnityMCP.Editor.Recorder",
+  "rootNamespace": "",
+  "references": [
+    "UnityMCP.Editor",
+    "Unity.Timeline",
+    "Unity.Timeline.Editor",
+    "Unity.Recorder.Editor",
+    "Newtonsoft.Json"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_RECORDER",
+    "UNITY_TIMELINE"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.recorder",
+      "expression": "2.0.0",
+      "define": "UNITY_RECORDER"
+    },
+    {
+      "name": "com.unity.timeline",
+      "expression": "1.0.0",
+      "define": "UNITY_TIMELINE"
+    }
+  ],
+  "noEngineReferences": false
+}
