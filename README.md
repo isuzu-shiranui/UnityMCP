@@ -1,5 +1,7 @@
 # Unity MCP 統合フレームワーク
 
+[![MCP Toplist](https://mcptoplist.com/badge/mcp.so%2FUnityMCP%2Fisuzu-shiranui.svg)](https://mcptoplist.com/server/mcp.so%2FUnityMCP%2Fisuzu-shiranui)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
