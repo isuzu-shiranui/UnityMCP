@@ -193,7 +193,11 @@ namespace UnityMCP.Editor.Tools
                 ["shadowResolution"] = QualitySettings.shadowResolution.ToString(),
                 ["shadowDistance"] = QualitySettings.shadowDistance,
                 ["activeBuildTarget"] = EditorUserBuildSettings.activeBuildTarget.ToString(),
+#if UNITY_2023_1_OR_NEWER
                 ["batchingStatic"] = PlayerSettings.GetStaticBatchingForPlatform(EditorUserBuildSettings.activeBuildTarget),
+#else
+                ["batchingStatic"] = JValue.CreateNull(),
+#endif
             };
         }
 
