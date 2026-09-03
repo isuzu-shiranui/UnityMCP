@@ -47,6 +47,11 @@ async function main() {
           "Requires a Unity Editor to be running with the jp.shiranui-isuzu.unity-mcp package",
           "installed; it is discovered automatically. Which tools exist depends on that project's",
           "packages, so Timeline and Recorder tools appear only where those packages are present.",
+          "",
+          "With several Editors open, name the project — never a port. `target` accepts a project",
+          "name (exact, then case-insensitive substring) or a clientId, and unity_list_clients",
+          "shows what is open. Asking the user which port to use is never the right move: call",
+          "unity_list_clients and pick by project name, or pass `target` on the call itself.",
         ].join("\n"),
       }
     );
