@@ -22,6 +22,29 @@ namespace UnityMCP.Editor.Settings
         private GUIContent enabledIcon;
         private GUIContent disabledIcon;
         private Color defaultBackgroundColor;
+        private bool defaultBackgroundColorCaptured;
+
+        // EditorStyles はドメインリロード直後の OnActivate では未初期化で NullReferenceException になり、
+        // SettingsWindow が選択復元を無限再帰してエディタが固まる。GUI リソースは OnGUI 内で遅延初期化する。
+        private GUIStyle HeaderStyle => this.headerStyle ??= new GUIStyle(EditorStyles.boldLabel)
+        {
+            fontSize = 14,
+            margin = new RectOffset(0, 0, 10, 5)
+        };
+
+        private GUIStyle SubHeaderStyle => this.subHeaderStyle ??= new GUIStyle(EditorStyles.boldLabel)
+        {
+            fontSize = 12,
+            margin = new RectOffset(0, 0, 5, 3)
+        };
+
+        private GUIStyle DescriptionStyle => this.descriptionStyle ??= new GUIStyle(EditorStyles.miniLabel)
+        {
+            wordWrap = true
+        };
+
+        private GUIContent EnabledIcon => this.enabledIcon ??= EditorGUIUtility.IconContent("TestPassed");
+        private GUIContent DisabledIcon => this.disabledIcon ??= EditorGUIUtility.IconContent("TestFailed");
 
         [SettingsProvider]
         public static SettingsProvider CreateMcpSettingsProvider()
@@ -47,40 +70,25 @@ namespace UnityMCP.Editor.Settings
             var settings = McpSettings.instance;
             settings.hideFlags = HideFlags.HideAndDontSave & ~HideFlags.NotEditable;
             UnityEditor.Editor.CreateCachedEditor(settings, null, ref this.editor);
-
-            this.headerStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                fontSize = 14,
-                margin = new RectOffset(0, 0, 10, 5)
-            };
-
-            this.subHeaderStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                fontSize = 12,
-                margin = new RectOffset(0, 0, 5, 3)
-            };
-
-            this.descriptionStyle = new GUIStyle(EditorStyles.miniLabel)
-            {
-                wordWrap = true
-            };
-
-            this.enabledIcon = EditorGUIUtility.IconContent("TestPassed");
-            this.disabledIcon = EditorGUIUtility.IconContent("TestFailed");
-            this.defaultBackgroundColor = GUI.backgroundColor;
         }
 
         public override void OnGUI(string searchContext)
         {
+            if (!this.defaultBackgroundColorCaptured)
+            {
+                this.defaultBackgroundColor = GUI.backgroundColor;
+                this.defaultBackgroundColorCaptured = true;
+            }
+
             EditorGUI.BeginChangeCheck();
 
-            GUILayout.Label("TypeScript MCP Settings", this.headerStyle);
+            GUILayout.Label("TypeScript MCP Settings", this.HeaderStyle);
             if (GUILayout.Button("Open Installer Window", GUILayout.Height(25)))
             {
                 EditorWindow.GetWindow<McpInstallerWindow>();
             }
 
-            GUILayout.Label("HTTP Server Configuration", this.headerStyle);
+            GUILayout.Label("HTTP Server Configuration", this.HeaderStyle);
             EditorGUILayout.Space(5);
 
             var settings = McpSettings.instance;
@@ -94,7 +102,7 @@ namespace UnityMCP.Editor.Settings
 
             EditorGUILayout.Space(5);
 
-            EditorGUILayout.LabelField("Discovery", this.subHeaderStyle);
+            EditorGUILayout.LabelField("Discovery", this.SubHeaderStyle);
             EditorGUILayout.SelectableLabel(
                 UnityMCP.Editor.Core.McpInstanceDescriptor.PathFor(Application.dataPath),
                 EditorStyles.textField,
@@ -182,7 +190,7 @@ namespace UnityMCP.Editor.Settings
             foreach (var assemblyGroup in handlersByAssembly)
             {
                 EditorGUILayout.Space(5);
-                EditorGUILayout.LabelField(assemblyGroup.Key, this.subHeaderStyle);
+                EditorGUILayout.LabelField(assemblyGroup.Key, this.SubHeaderStyle);
 
                 foreach (var handler in assemblyGroup.Value)
                 {
@@ -195,9 +203,9 @@ namespace UnityMCP.Editor.Settings
                         this.mcpServer.SetHandlerEnabled(handler.Key, newEnabled);
                     }
 
-                    GUILayout.Label(enabled ? this.enabledIcon : this.disabledIcon, GUILayout.Width(20));
+                    GUILayout.Label(enabled ? this.EnabledIcon : this.DisabledIcon, GUILayout.Width(20));
                     EditorGUILayout.LabelField(handler.Key, GUILayout.Width(120));
-                    EditorGUILayout.LabelField(handler.Value.Description, this.descriptionStyle);
+                    EditorGUILayout.LabelField(handler.Value.Description, this.DescriptionStyle);
                     EditorGUILayout.EndHorizontal();
                 }
             }
@@ -249,7 +257,7 @@ namespace UnityMCP.Editor.Settings
             foreach (var assemblyGroup in handlersByAssembly)
             {
                 EditorGUILayout.Space(5);
-                EditorGUILayout.LabelField(assemblyGroup.Key, this.subHeaderStyle);
+                EditorGUILayout.LabelField(assemblyGroup.Key, this.SubHeaderStyle);
 
                 foreach (var handler in assemblyGroup.Value)
                 {
@@ -262,7 +270,7 @@ namespace UnityMCP.Editor.Settings
                         this.mcpServer.SetResourceHandlerEnabled(handler.Key, newEnabled);
                     }
 
-                    GUILayout.Label(enabled ? this.enabledIcon : this.disabledIcon, GUILayout.Width(20));
+                    GUILayout.Label(enabled ? this.EnabledIcon : this.DisabledIcon, GUILayout.Width(20));
                     EditorGUILayout.LabelField(handler.Key, GUILayout.Width(120));
 
                     var resourceUri = handler.Value.Handler.ResourceUri;
@@ -271,7 +279,7 @@ namespace UnityMCP.Editor.Settings
                     EditorGUILayout.LabelField(resourceUri, GUILayout.Width(150));
                     GUI.contentColor = oldColor;
 
-                    EditorGUILayout.LabelField(handler.Value.Description, this.descriptionStyle);
+                    EditorGUILayout.LabelField(handler.Value.Description, this.DescriptionStyle);
                     EditorGUILayout.EndHorizontal();
                 }
             }
@@ -283,7 +291,7 @@ namespace UnityMCP.Editor.Settings
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
-            GUILayout.Label("Server Status", this.headerStyle);
+            GUILayout.Label("Server Status", this.HeaderStyle);
 
             if (this.mcpServer != null)
             {
