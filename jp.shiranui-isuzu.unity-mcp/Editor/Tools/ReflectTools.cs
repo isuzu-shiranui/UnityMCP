@@ -395,7 +395,7 @@ namespace UnityMCP.Editor.Tools
                 {
                     ["name"] = unityObject.name,
                     ["type"] = type.FullName,
-                    ["instanceId"] = EntityIdCompat.IdOf(unityObject),
+                    ["instanceId"] = EntityIdCompat.WireIdOf(unityObject),
                 };
             }
 

@@ -312,6 +312,22 @@ namespace UnityMCP.Editor.Core
 
         private static object CoerceNumber(JToken token, Type targetType)
         {
+            // An integral target never goes through a double. A Unity 6.5 EntityId is about 5.7e17,
+            // above the 2^53 a double holds exactly, and rounding one names a different object.
+            if (IsIntegral(targetType))
+            {
+                if (token.Type == JTokenType.Integer)
+                {
+                    return Convert.ChangeType(token.Value<long>(), targetType, CultureInfo.InvariantCulture);
+                }
+
+                if (token.Type == JTokenType.String &&
+                    long.TryParse(token.Value<string>(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var exact))
+                {
+                    return Convert.ChangeType(exact, targetType, CultureInfo.InvariantCulture);
+                }
+            }
+
             double value;
 
             switch (token.Type)

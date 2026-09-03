@@ -184,7 +184,7 @@ namespace UnityMCP.Editor.Handlers
             return new JObject
             {
                 ["gameObject"] = go.name,
-                ["instanceId"] = EntityIdCompat.IdOf(go),
+                ["instanceId"] = EntityIdCompat.WireIdOf(go),
                 ["components"] = page["items"],
                 ["truncated"] = page["truncated"],
                 ["next"] = page["next"]
@@ -374,7 +374,7 @@ namespace UnityMCP.Editor.Handlers
                     var objRef = prop.objectReferenceValue;
                     return new JObject
                     {
-                        ["instanceId"] = EntityIdCompat.ObjectReferenceId(prop),
+                        ["instanceId"] = EntityIdCompat.WireObjectReferenceId(prop),
                         ["name"] = objRef != null ? objRef.name : null,
                         ["type"] = objRef != null ? objRef.GetType().Name : null
                     };

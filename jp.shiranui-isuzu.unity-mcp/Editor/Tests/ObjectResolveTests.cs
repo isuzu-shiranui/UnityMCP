@@ -122,6 +122,22 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void TheWireFormOfAnIdResolvesBackThroughTheInvokerPath()
+        {
+            var child = ObjectResolve.Object("/ResolveRoot/Child", null);
+
+            // What a tool result carries (a string on 6.5, a number before) must come back through
+            // the same coercion a tool argument gets, without passing through a double.
+            var wire = EntityIdCompat.WireIdOf(child);
+            var roundTripped = wire.Type == Newtonsoft.Json.Linq.JTokenType.String
+                ? long.Parse((string)wire, System.Globalization.CultureInfo.InvariantCulture)
+                : (long)wire;
+
+            Assert.That(roundTripped, Is.EqualTo(EntityIdCompat.IdOf(child)));
+            Assert.That(ObjectResolve.Object(null, roundTripped), Is.SameAs(child));
+        }
+
+        [Test]
         public void AMissingSegmentReportsWhatIsThere()
         {
             var ex = Assert.Throws<McpToolException>(

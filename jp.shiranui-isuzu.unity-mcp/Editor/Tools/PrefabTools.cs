@@ -140,7 +140,7 @@ namespace UnityMCP.Editor.Tools
             {
                 ["name"] = instance.name,
                 ["path"] = ObjectResolve.PathOf(instance),
-                ["instanceId"] = EntityIdCompat.IdOf(instance),
+                ["instanceId"] = EntityIdCompat.WireIdOf(instance),
                 ["prefab"] = normalised,
             });
         }
