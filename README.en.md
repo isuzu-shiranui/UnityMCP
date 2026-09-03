@@ -1,7 +1,7 @@
 # Unity MCP Integration Framework
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.3.1-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -12,11 +12,11 @@ Opens the Unity Editor to AI agents over the Model Context Protocol, and to peop
 
 ## What's new in v3
 
-- **Tools are defined once, in the Editor.** Put `[McpTool]` on a static C# method and its JSON Schema is derived from the signature and published at `GET /tools`. There is no tool definition on the TypeScript side.
-- **The CLI does not need MCP.** `isuzu-unity-mcp` reads the descriptor file the Editor publishes and connects directly, so reaching Unity from a shell no longer requires an MCP client to be running.
-- **It answers while the Editor is busy.** Tools declaring `MainThread = false`, plus `/health`, `/jobs` and `/tools`, are served from a worker thread — which is exactly when you want to know what the Editor is doing.
-- **Slow work becomes a job.** A call that does not finish in a few seconds returns a job id rather than a timeout, so nothing keeps running behind a failure you might retry.
-- **Authenticated.** Every request needs a bearer token; binding to loopback was never access control.
+- **Tools are defined once, in the Editor.** Put `[McpTool]` on a static C# method. Its JSON Schema is derived from the signature and published at `GET /tools`. There is no tool definition on the TypeScript side.
+- **The CLI does not need MCP.** `isuzu-unity-mcp` reads the descriptor file the Editor publishes and connects directly. No MCP client needs to be running to reach Unity from a shell.
+- **It answers while the Editor is busy.** Tools declaring `MainThread = false`, plus `/health`, `/jobs` and `/tools`, are served from a worker thread. They keep answering while the main thread is blocked.
+- **Slow work becomes a job.** A call that does not finish in a few seconds returns a job id instead of a timeout. Poll the job id for the result instead of repeating the call.
+- **Authenticated.** Every request needs a bearer token. Binding to loopback is not access control.
 
 ## Requirements
 
@@ -45,8 +45,8 @@ npm link          # if you want the isuzu-unity-mcp command
 isuzu-unity-mcp setup   # register with your MCP client and install the Claude Code skill
 ```
 
-`setup` only updates MCP client configs that already exist, rather than creating one for a
-client you do not use, and leaves every other server and key in those files untouched.
+`setup` updates only MCP client configs that already exist. It does not create a config for a
+client you do not use. Other servers and keys in those files are left untouched.
 
 ```bash
 isuzu-unity-mcp doctor      # what is installed, where, and what is stale
@@ -76,7 +76,7 @@ isuzu-unity-mcp tools      # what this Editor publishes
 }
 ```
 
-The Editor does not have to be running first. Until one appears the server answers `tools/list` from its cached catalog, then sends `tools/list_changed`.
+The Editor does not have to be running first. Until one appears, the server answers `tools/list` from its cached catalog. When an Editor appears, the server sends `tools/list_changed`.
 
 ### CLI
 
@@ -92,8 +92,8 @@ isuzu-unity-mcp call execute_code --file snippet.cs
 isuzu-unity-mcp call play_mode_status --project MyGame
 ```
 
-**Inside a project, `--project` is unnecessary.** With several Editors open, a working
-directory that sits inside exactly one of them selects that one.
+**Inside a project, `--project` is unnecessary.** With several Editors open, the CLI selects
+the project whose directory contains the working directory.
 
 ```bash
 cd "H:/Unity Projects/MyGame/Assets/Scripts"
@@ -101,14 +101,14 @@ isuzu-unity-mcp call play_mode_status
 # [using MyGame — the project this directory belongs to]
 ```
 
-`isuzu-unity-mcp projects` marks the reachable one with `containsWorkingDirectory`. Run from
-outside every project and it names the candidates and stops, rather than guessing. The MCP
-server applies the same rule, so opening Claude Code in a Unity project removes the need for
-`target`.
+`isuzu-unity-mcp projects` marks that project with `containsWorkingDirectory`. When run from
+outside every project, the CLI lists the candidates and stops. It does not guess. The MCP
+server applies the same rule, so `target` is not needed when Claude Code is opened inside a
+Unity project.
 
-Errors go to stderr with a non-zero exit code, so it composes in scripts.
+Errors go to stderr with a non-zero exit code, so the CLI can be used in scripts.
 
-> **Why `--file`**: passing a C# snippet through both a shell and a JSON encoder loses the backslashes in its string literals. The result is a compile error inside generated source the caller never sees, which is close to undiagnosable. Reading from a file goes through neither.
+> **Why `--file`**: passing a C# snippet through both a shell and a JSON encoder loses the backslashes in its string literals. The result is a compile error inside generated source that the caller never sees. Reading from a file avoids both layers.
 
 ## Architecture
 
@@ -134,7 +134,7 @@ MCP client (Claude)                        terminal / scripts
 
 `ToolCatalog` collects `[McpTool]` static methods by reflection and derives each JSON Schema from the signature. `ToolInvoker` binds JSON arguments to typed parameters and applies the confirm/dry-run gate and Undo grouping the attribute declares.
 
-`McpMainThreadDispatcher` marshals work from worker threads onto the Editor main thread. It holds the queue lock only to dequeue and runs outside it, so one slow call cannot stall every other request, and a job that has not started can be cancelled with certainty.
+`McpMainThreadDispatcher` marshals work from worker threads onto the Editor main thread. It holds the queue lock only while dequeuing and runs the work outside the lock. One slow call therefore cannot stall other requests, and a job that has not started can be cancelled reliably.
 
 ### MCP server (TypeScript)
 
@@ -142,7 +142,7 @@ MCP client (Claude)                        terminal / scripts
 
 ## Built-in tools
 
-### Published by the Editor (57)
+### Published by the Editor (68)
 
 **Looking**
 
@@ -165,7 +165,7 @@ MCP client (Claude)                        terminal / scripts
 | `project_packages` | safe | UPM packages |
 | `capture_screenshot` | safe | Game or Scene view, or an Editor panel. `save_path` writes it to disk |
 
-**Authoring** — every mutation collapses into one undo step.
+**Authoring**. Every mutation is a single undo step.
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
@@ -209,7 +209,7 @@ MCP client (Claude)                        terminal / scripts
 | `material_read` | safe | A material's **current** values, keywords and render queue |
 | `material_set` | unsafe | Set a property, keyword or render queue |
 
-**Timeline (video / live)** — appear only when `com.unity.timeline` is present.
+**Timeline (video / live)**. These tools appear only when `com.unity.timeline` is present.
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
@@ -217,30 +217,29 @@ MCP client (Claude)                        terminal / scripts
 | `timeline_evaluate` | unsafe | Evaluate a director at a time or frame, without Play mode. Pair with `capture_screenshot` to check one frame |
 | `timeline_edit_clip` | unsafe | One clip's start, length, name, ease, blend and speed. **Reports the values as they landed**, listing anything the clip type discarded in `ignored` |
 | `timeline_shift_clips` | unsafe | **Ripple edit**: move everything at or after a time together. Moves nothing at all if the shift would cross zero |
-| `timeline_set_track` | unsafe | Mute, lock, rename, or bind a track. **Resolves the component the track's type wants** — an Animator for an animation track |
+| `timeline_set_track` | unsafe | Mute, lock, rename, or bind a track. **Resolves the component the track's type wants**, for example an Animator for an animation track |
 | `timeline_delete` | unsafe | Delete a track or a clip; a group takes its children. Undoable, so it does not ask for confirmation |
 | `timeline_create` | unsafe | Create a Timeline asset, optionally with a director. **The only entry point that makes track creation safe** |
 | `timeline_create_track` | unsafe | Add a track (activation, animation, audio, control, group, playable, signal), optionally inside a group and bound in the same call |
 | `timeline_create_clip` | unsafe | Add a clip. `control_source` **wires a Control clip's nesting in one call**; `animation_clip` sets the AnimationClip to play |
 
-The editing tools report the **effective** value read back after the write, not the requested one:
-Timeline's setters discard values a clip type does not support — the speed of an Activation clip,
-for instance — without raising anything, so echoing the request would leave the caller believing a
-change that never happened. The creation tools refuse before acting if the timeline is not yet an
-asset, because Timeline would then build the track in memory only, with no public API to persist it
-afterwards.
+The editing tools report the value read back after the write, not the requested one.
+Timeline's setters discard values a clip type does not support, such as the speed of an Activation
+clip, and raise no error. Echoing the request would make the caller believe a change that never
+happened. The creation tools refuse to act if the timeline is not yet an asset. Timeline would
+otherwise build the track in memory only, and there is no public API to persist it afterwards.
 
-**Recorder (rendering out)** — appear only when both `com.unity.recorder` and `com.unity.timeline` are present.
+**Recorder (rendering out)**. These tools appear only when both `com.unity.recorder` and `com.unity.timeline` are present.
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
 | `recorder_add_track` | unsafe | Add a Recorder track to a Timeline, so **playing the director records it**. mp4 / webm / mov and png / jpeg / exr, capturing the game view, a camera or a RenderTexture, at a chosen resolution |
 | `recorder_list` | safe | What a Timeline will record, and **where it will be written** |
 
-Recording runs as a track on the Timeline rather than through the Recorder API directly: the
-frame rate then comes from the Timeline itself, so the recording cannot drift from the animation,
-and the setup is less exposed to the Recorder API's version drift. Omit `output_path` to write to
-a `Recording` folder beside `Assets`, named after the Timeline.
+Recording runs as a track on the Timeline, not through the Recorder API directly. The frame rate
+comes from the Timeline itself, so the recording cannot drift from the animation. The setup also
+depends less on changes to the Recorder API between versions. Omit `output_path` to write to a
+`Recording` folder beside `Assets`, named after the Timeline.
 
 **Live state and GPU**
 
@@ -261,23 +260,23 @@ a `Recording` folder beside `Assets`, named after the Timeline.
 
 Editor panel capture (`inspector`, `hierarchy`, `project`, `console`, `window:<title>`) is Windows-only; `game` and `scene` work everywhere.
 
-`test_run` and `test_results` appear only when `com.unity.test-framework` is present, which it is by default. They live in their own assembly constrained to `UNITY_INCLUDE_TESTS`, so a project without the framework loses those two tools rather than failing to compile the package.
+`test_run` and `test_results` appear only when `com.unity.test-framework` is present. It is present by default. They live in their own assembly constrained to `UNITY_INCLUDE_TESTS`. A project without the framework loses those two tools, and the package still compiles.
 
 ### Things that will bite otherwise
 
 - **The `path` an editing tool takes is the one `scene_browse_hierarchy` returns.** It resolves
   inactive objects, and carries an index only where a sibling name repeats: `/Canvas/Button[1]/Text`.
 - **A scene edit made during Play Mode looks like it worked and is reverted when Play Mode stops.**
-  Those responses carry a `playModeWarning`. Asset edits made at the same moment do survive, so
-  they do not.
-- **Deletion is recoverable rather than gated.** Assets go to the OS trash and GameObjects go
-  through Undo, so neither asks for confirmation. Opening or replacing a scene over unsaved
-  changes *is* refused, because that is the one edit no undo stack can return.
+  Those responses carry a `playModeWarning`. Asset edits made during Play Mode survive, so they
+  carry no warning.
+- **Deletion is recoverable, so it asks for no confirmation.** Assets go to the OS trash and
+  GameObjects go through Undo. Opening or replacing a scene over unsaved changes is refused,
+  because Undo cannot restore unsaved changes.
 - **`execute_code` is not on the undo stack.** Use the authoring tools for authoring.
 
 ### Provided by the MCP server (3)
 
-`unity_list_clients`, `unity_set_active_client`, `unity_get_active_client` — choosing between Editors. No single Editor can answer that, which is why these stay here.
+`unity_list_clients`, `unity_set_active_client` and `unity_get_active_client` choose between Editors. No single Editor can answer that question, so these tools live in the server.
 
 ### Prompts
 
@@ -311,20 +310,20 @@ internal static class MyTools
 }
 ```
 
-It appears in `/tools` and is callable from both MCP clients and the CLI. The schema comes from the signature, so there is only one place to write it.
+The tool appears in `/tools` and can be called from both MCP clients and the CLI. The schema comes from the signature, so it is written in one place only.
 
 `[McpTool]` properties:
 
 | Property | Default | Meaning |
 |---|---|---|
 | `Idempotency` | `Unsafe` | Whether the call may be retried automatically after a connection failure. Read-only tools should say `Safe` |
-| `MainThread` | `true` | Whether the Editor main thread is required. `false` keeps the tool answerable while the Editor is busy — only for tools touching no Unity API |
+| `MainThread` | `true` | Whether the Editor main thread is required. `false` keeps the tool answerable while the Editor is busy. Use it only for tools that touch no Unity API |
 | `Destructive` | `false` | When true the call refuses without `confirm: true` and supports `dry_run` |
 | `UndoGroup` | `null` | When set, the whole call collapses into a single Undo step |
 
 Tool names must match `^[a-z][a-z0-9_]{0,63}$`; MCP tool names cannot contain dots.
 
-**The description is the model's only cue for reaching for a tool.** Say when to use it, not just what it does.
+**The description is the only cue the model has for choosing a tool.** Say when to use it, not just what it does.
 
 ## Configuration
 
@@ -366,48 +365,47 @@ isuzu-unity-mcp call test_results --include_passed true --limit 200
 ```
 
 **A test run holds the main thread for its whole duration, so no other tool answers during it.**
-`test_results` is declared `MainThread = false` and reports counts and failures anyway. `test_run`
-returns as soon as the run is queued; it does not wait for the outcome.
+`test_results` is declared `MainThread = false`, so it still reports counts and failures. `test_run`
+returns as soon as the run is queued. It does not wait for the outcome.
 
 Running the package's tests needs `"testables": ["jp.shiranui-isuzu.unity-mcp"]` in the
 project's `Packages/manifest.json`.
 
 ## Troubleshooting
 
-**`isuzu-unity-mcp projects` finds nothing** — check an Editor has a project open and its server started. Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\`, or `~/.local/share` / `~/Library/Application Support` on macOS and Linux.
+**`isuzu-unity-mcp projects` finds nothing.** Check that an Editor has a project open and that its server started. Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\`, or `~/.local/share` / `~/Library/Application Support` on macOS and Linux.
 
-**401 responses** — the token is in the descriptor file. The CLI and MCP server read it for you; curl needs `Authorization: Bearer <token>`. Going through `isuzu-unity-mcp`, or the MCP server's `/proxy`, avoids handling it.
+**401 responses.** The token is in the descriptor file. The CLI and MCP server read it for you. curl needs `Authorization: Bearer <token>`. Requests through `isuzu-unity-mcp` or the MCP server's `/proxy` do not need the token.
 
-**The console reports nothing but you expect output** — `console_read_logs` reflects what the Editor console currently holds. When you suspect it has dropped something, read the file directly with `editor_log_tail`, which works even while the Editor is busy.
+**The console reports nothing but you expect output.** `console_read_logs` returns what the Editor console currently holds. If you suspect an entry was dropped, read the log file directly with `editor_log_tail`. It works even while the Editor is busy.
 
-**A script edit does not take effect** — `AssetDatabase.Refresh()` does not reliably trigger a compile. Use `compile_request`, then check `succeeded` with `compile_status`. After a failed compile the Editor keeps running the previous assembly with `isCompiling` back to false, so silence does not mean success.
+**A script edit does not take effect.** `AssetDatabase.Refresh()` does not reliably trigger a compile. Use `compile_request`, then check `succeeded` with `compile_status`. After a failed compile, the Editor keeps running the previous assembly and sets `isCompiling` back to false. Silence does not mean success.
 
-**A call returned a job id** — work slower than `syncWaitMs` (3 s by default) becomes a job. Collect it with `isuzu-unity-mcp jobs <id>`. **Do not repeat the call**: the work is still running.
+**A call returned a job id.** Work slower than `syncWaitMs` (3 s by default) becomes a job. Collect the result with `isuzu-unity-mcp jobs <id>`. **Do not repeat the call.** The work is still running.
 
 ## Security
 
 - The server binds `127.0.0.1` only and **requires a bearer token on every request**.
-- No CORS headers are sent. v2 returned `Access-Control-Allow-Origin: *`, which let any web page the user had open POST to `/execute_code` and run arbitrary C# in their Editor.
+- No CORS headers are sent. A web page open in the user's browser therefore cannot POST to the server and run C# in the Editor.
 - **Treat the descriptor file as a credential.** Anything that can read it can run code in the Editor.
 - `execute_code` and `menu_execute` run with full Editor privileges. Do not feed them untrusted code.
 
 ### It cannot ship in a build
 
 This package runs an HTTP server that compiles and executes arbitrary C#. In the Editor that
-is the point; in a shipped game it would be a remote code execution hole. Two independent
-guarantees keep it out:
+is its purpose. In a shipped game it would be a remote code execution hole. Two independent
+guarantees keep it out of builds:
 
 1. The assembly definition is `"includePlatforms": ["Editor"]`, so it is never compiled into
    a player build.
 2. Every source file and binary lives under an `Editor/` folder, which Unity excludes from
    builds regardless of importer settings.
 
-**Nothing reaches a player, Development Build included** — there is no runtime assembly at
+**Nothing reaches a player, Development Build included.** There is no runtime assembly at
 all. If runtime functionality is ever added, gate it explicitly on `DEVELOPMENT_BUILD`.
 
-This is a checked property rather than a remembered convention: CI asserts both on every
-change, and both were verified to fail the build when violated — one by adding a script under
-`Runtime/`, the other by emptying `includePlatforms`.
+CI asserts both guarantees on every change. Each check fails the build when violated: the first
+when a script is added under `Runtime/`, the second when `includePlatforms` is emptied.
 
 ## What this puts on your machine
 
@@ -428,13 +426,13 @@ isuzu-unity-mcp uninstall         # lists what would go
 isuzu-unity-mcp uninstall --yes   # removes it
 ```
 
-`uninstall` takes only the `isuzu-unity-mcp` entry out of your MCP client configs and leaves every
-other server alone. It refuses while an Editor is running, since that Editor would republish
-its descriptor moments later. The Unity package itself is removed through the Package Manager.
+`uninstall` removes only the `isuzu-unity-mcp` entry from your MCP client configs. Other servers
+are left alone. It refuses to run while an Editor is running, because that Editor would republish
+its descriptor right after. The Unity package itself is removed through the Package Manager.
 
 ## Migrating from v2
 
-This release is deliberately breaking.
+This release contains breaking changes.
 
 | v2 | v3 |
 |---|---|

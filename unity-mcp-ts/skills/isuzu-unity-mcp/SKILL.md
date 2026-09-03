@@ -19,8 +19,8 @@ isuzu-unity-mcp tools      # what this Editor publishes, with argument names
 isuzu-unity-mcp health     # server state, queue depth, running jobs
 ```
 
-> Requires UnityMCP v3. On v2 there is no `isuzu-unity-mcp` binary and endpoints are unauthenticated
-> on `127.0.0.1:27182`; see the v2 section at the bottom.
+> Requires UnityMCP v3. v2 has no `isuzu-unity-mcp` binary, and its endpoints are unauthenticated
+> on `127.0.0.1:27182`. See the v2 section at the bottom.
 
 ## デバッグの鉄則: まずコンソールを読む (必須・最優先)
 
@@ -47,11 +47,11 @@ isuzu-unity-mcp call <tool> --project MyGame               # when several Editor
 isuzu-unity-mcp call <tool> --raw                          # whole envelope, not just the result
 ```
 
-Values are typed automatically: `--limit 20` sends a number, `--active_only true` a boolean.
-Errors print to stderr and set a non-zero exit code, so these compose in scripts.
+Values are typed automatically. `--limit 20` sends a number and `--active_only true` sends a boolean.
+Errors print to stderr and set a non-zero exit code, so the commands can be used in scripts.
 
-Run `isuzu-unity-mcp tools` for the authoritative list — it comes from the Editor, so it is never
-out of date with the version you are talking to.
+Run `isuzu-unity-mcp tools` for the authoritative list. It comes from the Editor, so it always
+matches the version you are talking to.
 
 ## Execute C# code
 
@@ -67,21 +67,21 @@ EOF
 isuzu-unity-mcp call execute_code --file /tmp/snippet.cs
 ```
 
-`--file` sends the snippet base64-encoded. Passing C# through a shell **and** a JSON encoder
-loses the backslashes in string literals, and the failure surfaces as a compile error naming
-generated source you never see ("Unrecognized escape sequence", "Newline in constant"). Using
-`--file` removes both layers.
+`--file` sends the snippet base64-encoded. Passing C# through a shell and a JSON encoder
+loses the backslashes in string literals. The failure then appears as a compile error in
+generated source you never see ("Unrecognized escape sequence", "Newline in constant").
+`--file` avoids both layers.
 
 Namespaces already imported: `System`, `System.Collections`, `System.Collections.Generic`,
-`System.Linq`, `System.Threading.Tasks`, `UnityEngine`, `UnityEditor`. Write statements only —
-no class or method wrapper. `return <expr>;` surfaces a value; `Debug.Log` output is captured
+`System.Linq`, `System.Threading.Tasks`, `UnityEngine`, `UnityEditor`. Write statements only,
+with no class or method wrapper. `return <expr>;` returns a value. `Debug.Log` output is captured
 separately.
 
-Return values are serialized structurally, so returning a list gives an array. An `await`ing
-snippet returns no value: the Editor will not block its main thread on an incomplete Task.
+Return values are serialized structurally, so returning a list gives an array. A snippet that
+uses `await` returns no value. The Editor does not block its main thread on an incomplete Task.
 
-Identical snippets are compiled once and reused. Distinct ones each load an assembly that
-cannot be unloaded, so a long session of one-off snippets grows the domain until a reload.
+Identical snippets are compiled once and reused. Each distinct snippet loads an assembly that
+cannot be unloaded. A long session of one-off snippets therefore grows the domain until the next reload.
 
 ## Common tools
 
@@ -114,8 +114,8 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 
 | Tool | Purpose |
 |---|---|
-| `shader_errors` | Compilation errors. **A broken shader renders magenta and never says so** — ask after every shader edit |
-| `shader_info` / `material_read` / `material_set` | What a frame is drawn from, as opposed to the shader's defaults |
+| `shader_errors` | Compilation errors. **A broken shader renders magenta and never says so.** Run this after every shader edit |
+| `shader_info` / `material_read` / `material_set` | The values a frame is actually drawn with, not the shader's defaults |
 | `render_pipeline_info` | The pipeline actually in force. **The quality level overrides graphics settings** |
 | `render_camera_info` | View, projection and GPU projection matrices, for checking a value against a CPU replica |
 | `render_compare --before a.png --after b.png` | Differences as numbers |
@@ -127,7 +127,7 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 - **The `path` these tools take is the one `scene_browse_hierarchy` returns.** It resolves
   inactive objects, and carries an index only when a sibling name repeats: `/Canvas/Button[1]/Text`.
 - **A scene edit during Play Mode succeeds and is reverted when Play Mode stops.** The response
-  carries `playModeWarning` when that applies. Asset edits made at the same moment do survive.
+  carries `playModeWarning` in that case. Asset edits made during Play Mode do survive.
 | `scene_browse_hierarchy --name Player --limit 20` | Hierarchy; also filters `component`, `tag`, `active_only`, `max_depth` |
 | `inspect_list --game_object_path Player --component_type Transform` | Discover property paths |
 | `inspect_read --game_object_path Player --component_type Transform --property_path m_LocalPosition` | Read one property |
@@ -137,7 +137,7 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `menu_execute --menu_item "File/Save"` | Invoke a menu item |
 | `project_packages` / `project_assemblies` | Project metadata |
 
-**Timeline and Recorder** — present only when `com.unity.timeline` / `com.unity.recorder` are installed.
+**Timeline and Recorder**. These tools are present only when `com.unity.timeline` / `com.unity.recorder` are installed.
 
 | Tool | Purpose |
 |---|---|
@@ -153,15 +153,15 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `timeline_create_track --type control --name Drive` | Add a track |
 | `timeline_create_clip --track Drive --control_source /ChildDirector` | Add a clip; nests a child timeline in one call |
 
-Two things about the editing tools worth knowing before trusting a result:
+Two things to know about the editing tools before trusting a result:
 
-- **They report the value that landed, not the one you asked for.** Timeline silently discards
-  writes a clip type does not support — an Activation clip accepts a speed multiplier and keeps
-  1.0 — so anything that did not take is listed in `ignored` with the reason. Read it.
+- **They report the value that was applied, not the one you asked for.** Timeline silently discards
+  writes a clip type does not support. For example, an Activation clip accepts a speed multiplier
+  and keeps 1.0. Anything that was not applied is listed in `ignored` with the reason. Read it.
 - **Create the timeline before adding tracks to it.** `timeline_create_track` refuses on a timeline
-  that is not yet an asset, because Timeline would build the track in memory only and drop it at the
-  next domain reload, with no public API to persist it afterwards. `timeline_create` is the entry
-  point that gets the order right.
+  that is not yet an asset. Timeline would otherwise build the track in memory only and drop it at
+  the next domain reload, and there is no public API to persist it afterwards. `timeline_create`
+  performs the steps in the right order.
 
 Recording is a track on the timeline, so **the frame rate comes from the timeline** and is not an
 argument here. Sources: `game_view`, `active_camera`, `main_camera`, `tagged_camera`
@@ -179,22 +179,23 @@ unity-mcp call play_mode_stop
 ```
 
 **Check the content, not the container.** Resolution, fps and frame count come from the mp4 header
-and say nothing about whether anything moved — a frozen render still reports the full frame count.
-Decode the frames and count distinct ones:
+and say nothing about whether anything moved. A frozen render still reports the full frame count.
+Decode the frames and count the distinct ones:
 
 ```bash
 ffmpeg -v error -i out.mp4 -vf scale=160:90 f_%03d.png   # distinct ≈ frames → moving
 ```
 
-Two failure modes worth knowing, because both look like "the tool did nothing":
+Two failure modes look like "the tool did nothing":
 
-- **Play Mode defers script compilation.** Unity postpones domain reload until Play Mode exits, so
-  an edited script keeps running its old build and `isCompiling` sticks true. `play_mode_stop` is
-  itself deferred to the next frame, which a backgrounded Editor never draws. Check
+- **Play Mode defers script compilation.** Unity postpones domain reload until Play Mode exits.
+  An edited script keeps running its old build and `isCompiling` stays true. `play_mode_stop` is
+  itself deferred to the next frame, and a backgrounded Editor never draws that frame. Check
   `play_mode_status` first.
-- **Timeline tracks must be created after the asset exists.** `CreateTrack` only persists a track
-  when the timeline is already an asset, so tracks built before `AssetDatabase.CreateAsset` live in
-  memory and disappear at the next domain reload — correct in the Editor, empty under Play.
+- **Timeline tracks must be created after the asset exists.** `CreateTrack` persists a track only
+  when the timeline is already an asset. Tracks built before `AssetDatabase.CreateAsset` live in
+  memory and disappear at the next domain reload. They look correct in the Editor and are empty
+  under Play.
 
 ## Common workflows
 
@@ -222,9 +223,9 @@ isuzu-unity-mcp call test_results            # poll; status goes running -> comp
 ```
 
 `test_run` does not wait for the outcome, because the run occupies the main thread for its
-whole duration. During that window `test_results` is the only tool that answers — poll it
-rather than retrying `test_run`. A `status` of `interrupted` means a domain reload happened
-mid-run and the outcome was lost; start the run again.
+whole duration. During that window `test_results` is the only tool that answers. Poll it
+instead of retrying `test_run`. A `status` of `interrupted` means a domain reload happened
+mid-run and the outcome was lost. Start the run again.
 
 ### Prove a rendering change did something
 
@@ -234,9 +235,9 @@ isuzu-unity-mcp call capture_screenshot --view game --save_path /tmp/before.png
 isuzu-unity-mcp call render_compare --before /tmp/before.png --after /tmp/after.png
 ```
 
-Compare rather than look. Screenshot colours are post-tonemap, so absolute values do not settle
-an argument; changed-pixel counts and where they are do. Passing `save_path` keeps both images
-out of the conversation entirely.
+Compare the images instead of looking at them. Screenshot colours are post-tonemap, so absolute
+values are not reliable. Changed-pixel counts and their locations are. Passing `save_path` keeps
+both images out of the conversation.
 
 ### Save a screenshot to a file
 
@@ -268,7 +269,7 @@ Work slower than about three seconds returns a job id instead of a result:
 isuzu-unity-mcp jobs execute_code-3
 ```
 
-**Do not repeat the call.** The work is still running; repeating it runs it twice.
+**Do not repeat the call.** The work is still running. Repeating the call runs it twice.
 
 ## Errors
 
@@ -282,8 +283,8 @@ isuzu-unity-mcp jobs execute_code-3
 
 ## Talking to a v2 Editor
 
-v2 has no CLI and no authentication. Endpoints live on `127.0.0.1:27182` (scanning to 27199),
-take different names, and `/read_logs` uses `count` rather than `limit`:
+v2 has no CLI and no authentication. Endpoints live on `127.0.0.1:27182` (scanning up to 27199)
+and have different names. `/read_logs` uses `count` instead of `limit`:
 
 ```bash
 curl -s http://127.0.0.1:27182/health
@@ -291,5 +292,5 @@ curl -s -X POST http://127.0.0.1:27182/read_logs \
   -H "Content-Type: application/json" -d '{"count":30,"type":"error"}'
 ```
 
-Note that v2 returns HTTP 504 after 10 seconds while **continuing to run the work**, so a retry
-on timeout executes it twice. v3 returns a job id instead.
+v2 returns HTTP 504 after 10 seconds and **keeps running the work**. A retry on timeout therefore
+executes it twice. v3 returns a job id instead.
