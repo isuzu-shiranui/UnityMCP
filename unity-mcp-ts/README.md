@@ -2,9 +2,9 @@
 
 The MCP server and CLI for [UnityMCP](https://github.com/isuzu-shiranui/UnityMCP).
 
-This package deliberately knows nothing about individual tools. The Editor publishes them at
-`GET /tools` with a JSON Schema generated from its C# signatures, and this server forwards
-that catalog. Adding a tool is a change in the Unity package alone.
+This package has no knowledge of individual tools. The Editor publishes them at `GET /tools`
+with a JSON Schema generated from its C# signatures. This server forwards that catalog. Adding
+a tool is a change in the Unity package alone.
 
 ## Architecture
 
@@ -46,11 +46,11 @@ npm link          # provides the isuzu-unity-mcp command
 isuzu-unity-mcp setup   # register with installed agents and install the skill
 ```
 
-`setup` writes to the MCP config of every supported agent it finds — Claude Code, Claude
-Desktop, Codex, Cursor, Gemini CLI — and installs the skill for those that have a skills
-directory. It updates only configs that already exist, rather than creating one for a tool
-that is not installed, and rewrites them key by key so other servers survive. Pass
-`--agent <name>` to pick one, `--no-skill` to skip skills.
+`setup` writes to the MCP config of every supported agent it finds: Claude Code, Claude
+Desktop, Codex, Cursor, and Gemini CLI. It installs the skill for those that have a skills
+directory. It updates only configs that already exist. It does not create a config for a tool
+that is not installed. It rewrites configs key by key, so other servers survive. Pass
+`--agent <name>` to pick one agent, or `--no-skill` to skip skills.
 
 ```bash
 isuzu-unity-mcp doctor          # what is installed, where, and what is stale
@@ -58,8 +58,8 @@ isuzu-unity-mcp uninstall       # lists what it would remove
 isuzu-unity-mcp uninstall --yes # removes it
 ```
 
-`uninstall` takes only the `isuzu-unity-mcp` entry out of each agent config, and refuses while an
-Editor is running, since that Editor would republish its descriptor moments later.
+`uninstall` removes only the `isuzu-unity-mcp` entry from each agent config. It refuses to run
+while an Editor is running, because that Editor would republish its descriptor right after.
 
 ## Usage
 
@@ -78,10 +78,10 @@ Editor is running, since that Editor would republish its descriptor moments late
 
 `isuzu-unity-mcp serve` starts the same server, so one binary covers both roles.
 
-The Editor need not be running at startup. Until one appears the server answers `tools/list`
-from its cached catalog under the state root, then sends `tools/list_changed` once it has a live
-catalog. Clients ask for the tool list the moment they connect, which is routinely before any
-Editor is open; answering from the last known catalog beats answering "no tools".
+The Editor does not need to be running at startup. Until one appears, the server answers
+`tools/list` from its cached catalog under the state root. Once it has a live catalog, it sends
+`tools/list_changed`. Clients ask for the tool list as soon as they connect, which is often before
+any Editor is open. The cached catalog lets the client see the tools in that case.
 
 ### As a CLI
 
@@ -99,12 +99,12 @@ isuzu-unity-mcp call <tool> --project MyGame   # when several Editors are open
 isuzu-unity-mcp call <tool> --raw              # print the whole envelope
 ```
 
-The CLI talks to the Editor directly rather than through this server, so it works with no MCP
-client running. Errors print to stderr and set a non-zero exit code.
+The CLI talks to the Editor directly, not through this server. It works with no MCP client
+running. Errors print to stderr and set a non-zero exit code.
 
 `--file` sends `execute_code` snippets base64-encoded. Passing C# through a shell and a JSON
-encoder loses the backslashes in its string literals, and the failure surfaces as a compile
-error in generated source the caller never sees.
+encoder loses the backslashes in its string literals. The failure then appears as a compile
+error in generated source that the caller never sees.
 
 ### As an HTTP proxy
 
@@ -117,7 +117,7 @@ curl -X POST http://127.0.0.1:27180/proxy/MyProject/tools/play_mode_status \
 ```
 
 The proxy supplies the bearer token, so requests through it need no credential handling. It
-only exists while an MCP client has this server running — for a standalone path, use the CLI.
+exists only while an MCP client has this server running. For a standalone path, use the CLI.
 
 ## Multi-instance behaviour
 
@@ -127,31 +127,30 @@ several can run at once.
 With more than one running, the target is resolved in this order:
 
 1. An explicit `target` (MCP) or `--project` (CLI). An exact project name or clientId wins
-   over a substring; an ambiguous substring is refused with the candidates named, because
-   silently picking one means a write can land in the wrong project and still succeed.
+   over a substring match. An ambiguous substring is refused and the candidates are listed.
+   Picking one silently could send a write to the wrong project.
 2. The active client, if `unity_set_active_client` was called.
 3. **The project containing the working directory.** A shell inside a project, or an MCP
-   client opened in one, has already said which project it means. Nested projects resolve to
-   the deepest containing root.
+   client opened in one, already identifies the project. Nested projects resolve to the
+   deepest containing root.
 4. Otherwise the call is refused and the candidates are listed.
 
 `isuzu-unity-mcp projects` marks the entry step 3 would choose with `containsWorkingDirectory`.
 
-Descriptors are checked for a live pid, so an Editor that crashed rather than quit cannot
-linger as a phantom instance. A withdrawn descriptor unregisters its instance immediately: a
-clean shutdown is a more definite signal than any health poll result.
+Descriptors are checked for a live pid, so an Editor that crashed instead of quitting does not
+linger as a phantom instance. A withdrawn descriptor unregisters its instance immediately,
+without waiting for a health poll.
 
 ## Reload resilience
 
 A domain reload takes the Editor's HTTP server down for a few seconds. The instance moves to
-`reloading` rather than being dropped, requests retry within `MCP_RELOAD_RETRY_MAX_MS`, and
-the Editor keeps its descriptor and token across the reload so the reconnect needs no new
-credential.
+`reloading` and is not dropped. Requests retry within `MCP_RELOAD_RETRY_MAX_MS`. The Editor
+keeps its descriptor and token across the reload, so the reconnect needs no new credential.
 
 ## Retry safety
 
-Each tool declares its own idempotency in the catalog, and only `safe` calls are retried after
-a post-handshake failure. Retrying an `unsafe` call could apply its side effect twice.
+Each tool declares its own idempotency in the catalog. Only `safe` calls are retried after a
+post-handshake failure. Retrying an `unsafe` call could apply its side effect twice.
 
 ## Environment variables
 
@@ -186,16 +185,17 @@ npm run lint      # eslint
 npm run build     # tsc
 ```
 
-CI runs all four on every pull request, and additionally checks that the two packages agree on
-their version and that the protocol version the Editor advertises matches its package.
+CI runs all four on every pull request. It also checks that the two packages agree on their
+version, and that the protocol version the Editor advertises matches its package.
 
 ## Migrating from v2
 
-The handler system is gone: `src/handlers/`, `HandlerAdapter`, `HandlerDiscovery`, the
-registries and the `Base*Handler` classes were all a second copy of definitions the Editor
-already owned, and the two drifted. If you had written a TypeScript handler, rewrite it as an
-`[McpTool]` method in C#; it will then be reachable from MCP clients and the CLI alike.
+The handler system is gone. `src/handlers/`, `HandlerAdapter`, `HandlerDiscovery`, the
+registries and the `Base*Handler` classes have been removed. They were a second copy of
+definitions the Editor already owned, and the two copies drifted apart. If you wrote a
+TypeScript handler, rewrite it as an `[McpTool]` method in C#. It is then reachable from MCP
+clients and the CLI alike.
 
-MCP resources are withdrawn. Their TypeScript implementations posted to an endpoint the Editor
-never registered, so they had never worked; `project_assemblies` and `project_packages` cover
-the same ground as tools.
+MCP resources are removed. Their TypeScript implementations posted to an endpoint the Editor
+never registered, so they never worked. The tools `project_assemblies` and `project_packages`
+cover the same ground.

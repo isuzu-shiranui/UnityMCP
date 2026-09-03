@@ -21,12 +21,6 @@ Pinned to 6000.0.x, not "whichever Editor is newest here": a gate whose meaning 
 happens to be installed on one machine is not a gate. The version actually used is recorded in
 the attestation.
 
-That pin currently also hides something worth knowing. On Unity 6000.5 the package **does not
-compile** — `Object.GetInstanceID()`, `EditorUtility.InstanceIDToObject` and
-`SerializedProperty.objectReferenceInstanceIDValue` became obsolete-as-error there, and the
-package has not been migrated to `EntityId`. Ten call sites across six files. The README claims
-2022.3 through Unity 6, so that claim is currently too broad.
-
 Options: `-Unity <path>` to pick an Editor, `-ProjectPath <dir>` to put the scratch project
 elsewhere, `-KeepProject` to keep it after a first run.
 

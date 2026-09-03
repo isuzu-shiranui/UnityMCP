@@ -1,7 +1,7 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-3.2.0-brightgreen)
+![Version](https://img.shields.io/badge/version-3.3.1-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-C%23_9.0-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -14,13 +14,14 @@ Unity Editor を Model Context Protocol (MCP) 経由で AI エージェントに
 
 - **ツール定義は Editor 側の1箇所だけ** — C# の static メソッドに `[McpTool]` を付けると、シグネチャから JSON Schema が生成され `GET /tools` で配信されます。TypeScript 側にツール定義はありません。
 - **CLI が MCP から独立** — `isuzu-unity-mcp` コマンドは Editor が公開する descriptor ファイルを読んで直接接続します。MCP クライアントを起動しておく必要はありません。
-- **メインスレッドが詰まっても応答する** — `MainThread = false` を宣言したツールと `/health` `/jobs` `/tools` はワーカースレッドで応答します。Editor が「Hold on」で固まっている最中こそ状態を知りたいので。
+- **メインスレッドが詰まっても応答する** — `MainThread = false` を宣言したツールと `/health` `/jobs` `/tools` はワーカースレッドで応答します。Editor が「Hold on」で固まっている最中でも状態を確認できます。
 - **遅い処理はジョブになる** — 数秒で終わらない呼び出しは job ID を返します。タイムアウトを返しつつ裏で実行を続ける、ということはありません。
-- **認証必須** — 全リクエストに bearer token が要ります。ローカルバインドはアクセス制御ではありません。
+- **認証必須** — 全リクエストに bearer token が必要です。ローカルアドレスへのバインドだけではアクセス制御になりません。
 
 ## 必要条件
 
-- Unity Editor 2022.3 以降（Unity 6.0 / 6.3 / 6.5 の EditMode で検証。6.5 の EntityId 移行にも対応）
+- Unity Editor 2022.3 以降（2022.3 / 2023.1 / 2023.2 / 6.0 / 6.1 / 6.3 / 6.5 の EditMode で検証しています）
+  - Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で返ります。64 ビットの EntityId は JavaScript の数値では正確に表せないためです。引数の `instance_id` は数値と文字列のどちらでも受け付けます。
 - Node.js 18 以降
 - `com.unity.nuget.newtonsoft-json` 3.2.1（依存として自動解決されます）
 
@@ -99,11 +100,11 @@ isuzu-unity-mcp call play_mode_status
 # [using MyGame — the project this directory belongs to]
 ```
 
-`isuzu-unity-mcp projects` の `containsWorkingDirectory` が、いまここから届く Editor を示します。どのプロジェクトの外でもない場所から曖昧なまま実行した場合は、推測せずに候補を挙げて止まります。同じ判定は MCP サーバ側でも働くので、Claude Code をプロジェクトで開いていれば `target` の指定は要りません。
+`isuzu-unity-mcp projects` の `containsWorkingDirectory` が、カレントディレクトリから選ばれる Editor を示します。どのプロジェクトにも属さない場所から実行して候補が複数あるときは、推測せずに候補を表示して停止します。同じ判定は MCP サーバ側でも行われるので、Claude Code をプロジェクト内で開いていれば `target` の指定は不要です。
 
-エラーは stderr に出て終了コードが非ゼロになるので、そのままスクリプトに組み込めます。
+エラーは stderr に出力され、終了コードが 0 以外になるので、そのままスクリプトに組み込めます。
 
-> **`--file` を使う理由**: C# のスニペットをシェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。結果は「呼び出し側に見えない生成ソース中のコンパイルエラー」になり、原因の特定が非常に困難です。ファイルから読めばそのどちらも経由しません。
+> **`--file` を使う理由**: C# のスニペットをシェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。その結果、呼び出し側からは見えない生成ソースでコンパイルエラーが起き、原因の特定が難しくなります。ファイルから読めばどちらも経由しません。
 
 ## アーキテクチャ
 
@@ -129,7 +130,7 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 `ToolCatalog` が `[McpTool]` の付いた static メソッドをリフレクションで収集し、シグネチャから JSON Schema を作ります。`ToolInvoker` が JSON 引数を型付きパラメータに束縛し、`confirm` / `dry_run` ゲートと Undo グルーピングを適用します。
 
-`McpMainThreadDispatcher` がワーカースレッドから Editor メインスレッドへ処理を渡します。キューからの取り出しだけロックし実行はロック外で行うので、遅い処理が他のリクエストの受付を止めません。開始前のジョブは確実に中止できます。
+`McpMainThreadDispatcher` がワーカースレッドから Editor メインスレッドへ処理を渡します。キューからの取り出しだけをロックし、実行はロックの外で行うので、遅い処理が他のリクエストの受付を止めません。開始前のジョブは確実に中止できます。
 
 ### MCP サーバ側 (TypeScript)
 
@@ -137,7 +138,7 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 
 ## 組み込みツール
 
-### Editor が公開するもの（57個）
+### Editor が公開するもの（68個）
 
 **診断（見る）**
 
@@ -199,7 +200,7 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `render_compare` | safe | 2枚のキャプチャの差を**数値で**返す（差分画素数・平均/最大デルタ・矩形・グリッド） |
 | `render_pipeline_info` | safe | 実効 RP、色空間、Graphics API、品質レベル。**Quality 側の RP 上書き**も併記 |
 | `render_camera_info` | safe | カメラと view / projection / **GPU projection** 行列 |
-| `shader_errors` | safe | シェーダーのコンパイルエラー（**黙って magenta になるので聞かないと分からない**） |
+| `shader_errors` | safe | シェーダーのコンパイルエラー。シェーダーはエラーを出さずに magenta 表示になるので、明示的に確認する必要があります |
 | `shader_info` | safe | パス数、プロパティ、キーワード空間、render queue |
 | `material_read` | safe | マテリアルの**現在値**・有効キーワード・render queue |
 | `material_set` | unsafe | プロパティ / キーワード / render queue を変更 |
@@ -231,8 +232,7 @@ MCP クライアント (Claude)                  ターミナル / スクリプ�
 | `recorder_add_track` | unsafe | Timeline に Recorder トラックを追加し、**director を再生するだけで録画**にする。mp4 / webm / mov と png / jpeg / exr、入力は game view / カメラ / RenderTexture、解像度指定可 |
 | `recorder_list` | safe | その Timeline が**何をどこへ書き出すか**（形式・出力先・有効/無効） |
 
-Recorder を直接叩かず Timeline のトラックとして持つのは、**フレームレートが Timeline 側から入る**ため
-（録画とタイムラインがズレない）で、かつ Recorder API のバージョン差の影響を受けにくいからです。
+Recorder を直接操作せず Timeline のトラックとして持つ理由は2つあります。フレームレートが Timeline 側から決まるので録画とタイムラインの時刻が一致すること、そして Recorder API のバージョン差の影響を受けにくいことです。
 `output_path` を省くと `Assets` と同階層の `Recording` フォルダに Timeline 名で書き出します。
 
 **内部状態・GPU**
@@ -249,25 +249,25 @@ Recorder を直接叩かず Timeline のトラックとして持つのは、**�
 | ツール | 冪等性 | 用途 |
 |---|---|---|
 | `build_settings` | safe | 実効ビルドターゲット、ビルドに入るシーン、モジュールの有無 |
-| `build_player` | unsafe | プレイヤービルド。コールドは job、増分はインラインで返る |
+| `build_player` | unsafe | プレイヤービルド。初回ビルドは job になり、増分ビルドはその場で結果を返します |
 | `build_switch_target` | unsafe | ビルドターゲット切替（再インポートを伴う） |
 
 Editor パネルのキャプチャ（`inspector` / `hierarchy` / `project` / `console` / `window:<title>`）は Windows 限定です。`game` と `scene` は全プラットフォームで動きます。
 
 `test_run` / `test_results` は `com.unity.test-framework` が入っているときだけ現れます（Unity の既定パッケージなので通常は入っています）。専用のアセンブリに分けて `UNITY_INCLUDE_TESTS` で制約しているため、無い環境ではこの2つが一覧に出ないだけで、パッケージ全体は変わらず動きます。
 
-Unity Hub の操作（Editor やモジュールのインストール）は**あえて持ちません**。Hub 自身に CLI があるので、未インストールのビルドターゲットを指定したときに実行すべきコマンドを返します。
+Unity Hub の操作（Editor やモジュールのインストール）は提供しません。Hub 自身に CLI があるので、未インストールのビルドターゲットを指定したときは実行すべき Hub のコマンドを返します。
 
-### 知っておくと事故らないこと
+### 注意点
 
 - **編集系ツールが受け取る `path` は `scene_browse_hierarchy` が返すものです。** 非アクティブなオブジェクトも解決でき、兄弟に同名がいるときだけ `/Canvas/Button[1]/Text` と添字が付きます。
 - **Play Mode 中のシーン編集は、成功したように見えて終了時に破棄されます。** その状況では応答に `playModeWarning` が付きます。アセットの変更は残るので、そちらには付きません。
-- **削除は確認を求めず、戻せるようにしてあります。** アセットは OS のゴミ箱へ、GameObject は Undo 経由です。ただし**未保存シーンへの上書きは拒否します**（これだけは Undo でも戻せないため）。
+- **削除は確認を求めません。その代わり、必ず元に戻せます。** アセットは OS のゴミ箱へ移動し、GameObject は Undo で戻せます。ただし**未保存シーンへの上書きは拒否します**。これだけは Undo でも戻せないためです。
 - **`execute_code` は Undo に乗りません。** オーサリングは専用ツールを使ってください。
 
 ### MCP サーバが提供するもの（3個）
 
-`unity_list_clients` / `unity_set_active_client` / `unity_get_active_client` — 複数 Editor の選択。どの Editor 単体にも答えられない問いなので、ここに残っています。
+`unity_list_clients` / `unity_set_active_client` / `unity_get_active_client` は、複数の Editor から対象を選ぶツールです。1つの Editor だけでは答えられない問いなので、MCP サーバ側に置いています。
 
 ### プロンプト
 
@@ -362,41 +362,41 @@ Unity 側のテストを走らせるには、プロジェクトの `Packages/man
 
 ## トラブルシューティング
 
-**`isuzu-unity-mcp projects` が何も返さない** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
+**`isuzu-unity-mcp projects` が何も返さないとき** — Editor がプロジェクトを開いていて、サーバが起動しているか確認してください。descriptor は `%LOCALAPPDATA%\UnityMCP\instances\`（macOS / Linux では `~/.local/share` または `~/Library/Application Support` 配下）に作られます。
 
-**401 が返る** — トークンは descriptor ファイルにあります。CLI と MCP サーバは自動で読みますが、curl で直接叩く場合は `Authorization: Bearer <token>` が要ります。`isuzu-unity-mcp` 経由にするか、MCP サーバの `/proxy` を使えばトークンを意識せずに済みます。
+**401 が返るとき** — トークンは descriptor ファイルにあります。CLI と MCP サーバは自動で読みますが、curl で直接呼ぶ場合は `Authorization: Bearer <token>` ヘッダーが必要です。`isuzu-unity-mcp` 経由にするか、MCP サーバの `/proxy` を使えばトークンを意識せずに済みます。
 
-**ログが無いはずがないのに空** — `console_read_logs` は Editor コンソールの現在の内容を返します。取りこぼしが疑われるときは `editor_log_tail` でログファイルを直接読んでください。こちらは Editor がビジーでも動きます。
+**ログがあるはずなのに空のとき** — `console_read_logs` は Editor コンソールの現在の内容を返します。取りこぼしが疑われるときは `editor_log_tail` でログファイルを直接読んでください。こちらは Editor がビジーでも動きます。
 
-**スクリプトを編集したのに反映されない** — `AssetDatabase.Refresh()` は必ずしも再コンパイルを起こしません。`compile_request` を使い、`compile_status` で `succeeded` を確認してください。コンパイルに失敗すると Editor は直前のアセンブリのまま `isCompiling` を false に戻すので、「静か」＝「成功」ではありません。
+**スクリプトを編集したのに反映されないとき** — `AssetDatabase.Refresh()` は必ずしも再コンパイルを起こしません。`compile_request` を使い、`compile_status` で `succeeded` を確認してください。コンパイルに失敗すると Editor は直前のアセンブリのまま `isCompiling` を false に戻すので、エラーが表示されないことは成功を意味しません。
 
-**呼び出しが job ID を返した** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`isuzu-unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
+**呼び出しが job ID を返したとき** — `syncWaitMs`（既定3秒）を超えた処理はジョブになります。`isuzu-unity-mcp jobs <id>` で結果を取ってください。**同じ呼び出しをやり直さないでください。** 処理はまだ動いています。
 
 ## セキュリティ
 
 - サーバは `127.0.0.1` のみにバインドし、**全リクエストに bearer token を要求します**。
-- CORS ヘッダは送りません。v2 は `Access-Control-Allow-Origin: *` を返しており、ユーザーが開いている任意の Web ページが `/execute_code` に POST して Editor 内で任意の C# を実行できました。
-- **descriptor ファイルは資格情報として扱ってください。** 読める者は Editor 内でコードを実行できます。
+- CORS ヘッダは送りません。ブラウザで開いた Web ページから Editor の HTTP サーバを呼び出すことはできません。
+- **descriptor ファイルは資格情報として扱ってください。** このファイルを読めれば Editor 内でコードを実行できます。
 - `execute_code` と `menu_execute` は Editor の全権限で動きます。信頼できないコードを流さないでください。
 
 ### ビルドには入りません
 
-このパッケージが任意の C# をコンパイル・実行する HTTP サーバである以上、ビルドに混入すれば遠隔コード実行の穴になります。そうならないことは**2重に保証**されています。
+このパッケージは任意の C# をコンパイル・実行する HTTP サーバなので、ビルドに混入すればリモートコード実行の脆弱性になります。混入しないことは**2重に保証**されています。
 
 1. アセンブリ定義が `"includePlatforms": ["Editor"]` — プレイヤービルドにコンパイルされません
 2. すべてのソースと DLL が `Editor/` 配下 — Unity は importer 設定に関わらずビルドから除外します
 
 **Development Build も含めて、プレイヤーには一切入りません。** ランタイム側のアセンブリ自体が存在しないためです。将来ランタイム機能を足す場合は `DEVELOPMENT_BUILD` で明示的にゲートしてください。
 
-これは規約に頼った約束ではなく、CI が両方を毎回検査します。`Runtime/` にスクリプトを1つ置く、あるいは asmdef の `includePlatforms` を空にする、いずれもビルドが落ちることを確認済みです。
+この2点は CI が毎回検査します。`Runtime/` にスクリプトを1つ置く、あるいは asmdef の `includePlatforms` を空にすると、CI が失敗します。
 
 ## マシン上に置くもの
 
-状態はすべて1つのルート配下にまとまっているので、消すときは1箇所で済みます。
+状態はすべて1つのディレクトリ配下にまとまっているので、削除は1箇所で済みます。
 
 | パス | 中身 |
 |---|---|
-| `%LOCALAPPDATA%\UnityMCP\instances\` | 起動中 Editor の descriptor（ポートとトークン）。終了時に自分で削除し、起動時に pid 死亡分を掃除 |
+| `%LOCALAPPDATA%\UnityMCP\instances\` | 起動中 Editor の descriptor（ポートとトークン）。Editor 終了時に削除され、起動時にプロセスが終了済みのものを削除します |
 | `%LOCALAPPDATA%\UnityMCP\cache\` | ツールカタログのキャッシュ |
 | `~/.claude/skills/isuzu-unity-mcp/` | Claude Code / Codex スキル（`setup` で導入） |
 | MCP クライアント設定の `isuzu-unity-mcp` エントリ | `setup` で追加 |
@@ -408,7 +408,7 @@ isuzu-unity-mcp uninstall         # 消す対象を一覧表示するだけ
 isuzu-unity-mcp uninstall --yes   # 実行
 ```
 
-`uninstall` は MCP クライアント設定から `isuzu-unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor をすぐ再作成してしまうので、その場合は実行を拒否して先に閉じるよう促します。Unity パッケージ本体の削除は Package Manager から行ってください。
+`uninstall` は MCP クライアント設定から `isuzu-unity-mcp` エントリだけを取り除き、他のサーバや設定には触れません。Editor が起動中だと descriptor がすぐ再作成されるので、その場合は実行を拒否し、先に Editor を閉じるよう案内します。Unity パッケージ本体の削除は Package Manager から行ってください。
 
 ## v2 からの移行
 
@@ -426,7 +426,7 @@ isuzu-unity-mcp uninstall --yes   # 実行
 | 認証なし | bearer token 必須 |
 | TypeScript でハンドラを書く | C# に `[McpTool]` を書く |
 
-curl ベースの手順書は `isuzu-unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付与します。
+curl を使った手順書は `isuzu-unity-mcp call` に置き換えるか、MCP サーバの `/proxy/<project>/...` 経由にしてください。後者はトークンを自動で付けます。
 
 ## ライセンス
 

@@ -1,245 +1,79 @@
 # Unity MCP
 
-A Unity Editor package that exposes an HTTP API for AI-driven automation via the Model Context Protocol (MCP). Claude and other MCP clients can execute C# code, inspect the scene hierarchy, control Play Mode, capture screenshots, read console logs, and more — all without leaving the editor.
+A Unity Editor package that exposes the Editor to AI agents over the Model Context Protocol (MCP), and to people and scripts over a command line. Agents can read the console, browse and edit the scene, run tests, drive Timeline and Recorder, capture screenshots, and run C# snippets.
 
-## Architecture
-
-```
- ┌──────────────────────────┐       stdio        ┌────────────────────────────┐
- │   MCP client (Claude)    │ ─────────────────▶ │   TS MCP server            │
- └──────────────────────────┘                    │   (unity-mcp-ts/dist)      │
-                                                 │                            │
- ┌──────────────────────────┐       HTTP         │  UnityConnection           │
- │  CLI (curl / Skill)      │ ─────────────────▶ │  ProjectRegistry (UDP)     │
- └──────────────────────────┘    :27180 (proxy)  │  ProjectApi :27180         │
-                                                 └────────────┬───────────────┘
-                                                      HTTP /command, /inspect etc.
-                                                              ▼
- ┌──────────────────────────┐       UDP          ┌────────────────────────────┐
- │ Unity Editor (A)         │ ────── :27183 ───▶ │  (broadcast received by TS)│
- │  McpHttpServer :27182    │                    └────────────────────────────┘
- │  Handlers + Resources    │
- └──────────────────────────┘
- ┌──────────────────────────┐
- │ Unity Editor (B)         │  (same UDP :27183 broadcast)
- │  McpHttpServer :27183    │
- └──────────────────────────┘
-```
-
-**Two connection paths:**
-
-- **Direct** — `curl http://127.0.0.1:27182/...` (no TS server needed, single-editor quickpath)
-- **Proxy** — `curl http://127.0.0.1:27180/proxy/<name>/...` (multi-project routing, automatic reload retry)
+The full documentation, including the tool list, lives in the repository README:
+https://github.com/isuzu-shiranui/UnityMCP
 
 ## Requirements
 
-- Unity 2022.3 or later
-- [Newtonsoft Json for Unity](https://docs.unity3d.com/Packages/com.unity.nuget.newtonsoft-json@3.2/manual/index.html) (com.unity.nuget.newtonsoft-json 3.2.1) — added automatically
+- Unity 2022.3 or later. The EditMode suite is verified on 2022.3, 2023.1, 2023.2, 6.0, 6.1, 6.3 and 6.5.
+- `com.unity.nuget.newtonsoft-json` 3.2.1. It is resolved automatically as a dependency.
+- Node.js 18 or later, for the MCP server and the CLI.
 
 ## Installation
 
-### Via Unity Package Manager (UPM)
+In the Package Manager choose **Add package from git URL** and enter:
 
-1. Open **Window > Package Manager**
-2. Click **+** → **Add package from git URL**
-3. Enter: `https://github.com/shiranui-isuzu/unity-mcp.git?path=jp.shiranui-isuzu.unity-mcp`
-
-### Manual
-
-Download or clone the repository and add the `jp.shiranui-isuzu.unity-mcp` folder to your project's `Packages/` directory.
-
-## Quick Start
-
-### With MCP client (Claude Desktop / Claude Code)
-
-1. Install and start the TS MCP server (see `unity-mcp-ts/README.md`)
-2. Add to your MCP client config:
-   ```json
-   {
-     "mcpServers": {
-       "unity": {
-         "command": "node",
-         "args": ["/path/to/unity-mcp-ts/build/index.js"]
-       }
-     }
-   }
-   ```
-3. Open Unity — the MCP server starts automatically (if `autoStartOnLaunch = true`)
-4. In Claude, use tools like `unity_execute_code`, `unity_browse_hierarchy`, etc.
-
-### With CLI (curl)
-
-```bash
-# Check Unity is running
-curl -s http://127.0.0.1:27182/health
-
-# Run C# code
-curl -s -X POST http://127.0.0.1:27182/execute_code \
-  -H "Content-Type: application/json" \
-  -d '{"code":"return Camera.main.name;"}'
-# {"status":"success","result":{"output":"","returnValue":"Main Camera"}}
+```
+https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp
 ```
 
-See the [CLI Skill](https://github.com/shiranui-isuzu/unity-mcp) for a full reference.
+Then install the MCP server and CLI from npm:
 
-## Endpoints
+```bash
+npm install -g @shiranui_isuzu/unity-mcp
+isuzu-unity-mcp setup     # registers the server with the MCP clients found on this machine
+isuzu-unity-mcp doctor    # shows what is installed and where
+```
 
-| Endpoint | Method | Idempotency | Description |
-|---|---|---|---|
-| `/health` | GET | Safe | Server status, handlers, resources |
-| `/execute_code` | POST | Unsafe | Run C# (dynamic compilation) |
-| `/browse_hierarchy` | POST | Safe | Query scene hierarchy |
-| `/inspect` | POST | Safe/Unsafe | Read/write component properties |
-| `/capture_screenshot` | POST | Safe | Game, Scene, or Editor panel screenshot (Windows-only for panels) |
-| `/read_logs` | POST | Safe | Console logs with filtering |
-| `/play_mode` | POST | Safe/Unsafe | Play/stop/pause/step control |
-| `/command` | POST | Per-command | Menu, console, asset commands |
-| `/resource` | GET | Safe | Project packages / assemblies |
+## How it works
 
-All responses use the unified envelope: `{"status":"success"|"error","result?:{},"error?:{},"truncated?:bool,"next?:{}}`.
+When the Editor opens a project, the package starts an HTTP server on `127.0.0.1` (port 27182, moving up to 27199 if busy) and writes a descriptor file with the port and a bearer token. The MCP server and the CLI read that file to find and authenticate to the Editor. Nothing needs to be started by hand.
 
-List-returning endpoints (`/read_logs`, `/browse_hierarchy`, `/inspect` list, `/resource`) accept `limit`, `offset`, and `fields` parameters for context-efficient pagination.
+Tools are defined once, in C#. A static method with `[McpTool]` becomes a tool. Its JSON Schema is generated from the method signature and published at `GET /tools`. The MCP server forwards that catalog, so adding a tool never touches TypeScript.
 
-### `/capture_screenshot` — view options (v2.1)
+```csharp
+[McpTool("asset_find_by_type", "Find project assets of a given type.", Idempotency = McpIdempotency.Safe)]
+public static string[] FindByType(
+    [McpArg("type", "Unity type name, e.g. Material.")] string type,
+    [McpArg("limit", "Maximum paths to return.")] int limit = 50)
+{
+    return AssetDatabase.FindAssets($"t:{type}").Take(limit).Select(AssetDatabase.GUIDToAssetPath).ToArray();
+}
+```
 
-The `view` parameter accepts:
+Tools that declare `MainThread = false`, together with `/health`, `/jobs` and `/tools`, answer from a worker thread. They keep working while the Editor main thread is blocked. A call that takes longer than `syncWaitMs` (3 seconds by default) returns a job id instead of a timeout. Poll the job for the result instead of repeating the call.
 
-| Value | Description |
-|---|---|
-| `"game"` | Camera render (cross-platform) |
-| `"scene"` | Scene view camera render (cross-platform) |
-| `"inspector"` | Inspector EditorWindow (Windows only) |
-| `"hierarchy"` | Hierarchy EditorWindow (Windows only) |
-| `"project"` | Project Browser EditorWindow (Windows only) |
-| `"console"` | Console EditorWindow (Windows only) |
-| `"game_view_window"` | Game view panel (Windows only) |
-| `"scene_view_window"` | Scene view panel (Windows only) |
-| `"window:<title>"` | Any EditorWindow matched by title substring, case-insensitive (Windows only) |
-
-Editor panel capture (`inspector`, `hierarchy`, `project`, `console`, `game_view_window`, `scene_view_window`, `window:<title>`) uses Windows P/Invoke (desktop DC + BitBlt + DPI correction). Non-Windows returns `unsupported_platform` (501). The `"game"` and `"scene"` camera-based paths remain cross-platform.
-
-Response includes `windowTitle` alongside `image`, `view`, `width`, `height` when an EditorWindow is captured.
+Timeline tools appear only when `com.unity.timeline` is installed. Recorder tools appear only when both `com.unity.recorder` and `com.unity.timeline` are installed. `test_run` and `test_results` appear only when `com.unity.test-framework` is installed.
 
 ## Settings
 
-Open **Edit > Preferences > Unity MCP** (or **Project Settings > Unity MCP**).
+**Edit > Preferences > Unity MCP**
 
-| Setting | Default | Description |
+| Setting | Default | Meaning |
 |---|---|---|
-| `httpPort` | `27182` | Base HTTP port. Scans 27182–27199 for first available. |
-| `autoStartOnLaunch` | `true` | Start server automatically when Unity opens |
-| `detailedLogs` | `true` | Log each request with timestamp and latency |
-| `useUdpBroadcast` | `true` | Broadcast UDP announce packets for TS server discovery |
-| `udpBroadcastPort` | `27183` | UDP broadcast destination port |
-| `broadcastIntervalSeconds` | `30` | Interval between UDP announce packets |
-| `portPersistenceEnabled` | `true` | Persist the bound port across domain reloads via SessionState |
-| `reloadRetryMaxMs` | `15000` | Advisory value for TS/CLI clients: max retry duration during reload |
-
-> **Removed in v2.0:** `autoRestartOnPlayModeChange` — PlayMode transitions no longer restart the server. Domain reload continuity is handled via `AssemblyReloadEvents` only.
-
-### Handler enable/disable
-
-Individual handlers (e.g. `execute_code`) can be enabled or disabled in the settings UI. When disabled, the endpoint returns `{"status":"error","error":{"code":"handler_not_found",...}}`.
-
-## Multi-Editor Setup
-
-You can run multiple Unity Editor instances simultaneously. Each instance binds the next available port (27182, 27183, …).
-
-```bash
-# Discover all running instances (TS server must be running)
-curl -s http://127.0.0.1:27180/projects
-# [
-#   {"name":"ProjectA","port":27182,"state":"healthy","clientId":"ProjectA-27182"},
-#   {"name":"ProjectB","port":27183,"state":"healthy","clientId":"ProjectB-27183"}
-# ]
-
-# Send commands to each instance by name via proxy
-curl -s -X POST http://127.0.0.1:27180/proxy/ProjectA/play_mode \
-  -H "Content-Type: application/json" \
-  -d '{"action":"status"}'
-
-curl -s -X POST http://127.0.0.1:27180/proxy/ProjectB/read_logs \
-  -H "Content-Type: application/json" \
-  -d '{"limit":5}'
-```
-
-In MCP tool calls, use the `target` parameter to specify which instance to address:
-```
-unity_execute_code(code="...", target="ProjectA")
-unity_browse_hierarchy(target="ProjectB")
-```
-
-## Domain Reload Continuity
-
-When you edit scripts (or enter Play Mode with domain reload enabled), the C# domain reloads. In v2.0:
-
-- **The server port is preserved** across reloads via `SessionState`. The same port is re-bound after reload completes.
-- **The TS server retries automatically** during the reload window (ECONNREFUSED → exponential backoff for up to `reloadRetryMaxMs` ms).
-- **PlayMode transitions do not restart the server.** Only actual domain reloads cause a brief offline period.
-
-For direct CLI access during reload:
-```bash
-curl --retry 5 --retry-connrefused --retry-delay 2 -s http://127.0.0.1:27182/health
-```
-
-## v2.1 Notes
-
-### Code execution — now built-in end-to-end
-
-C# code execution is available out-of-the-box via two paths — no samples needed:
-
-- **HTTP**: `POST /execute_code` (has been built-in since v2.0)
-- **MCP tool**: `unity_execute_code` (new in v2.1 — callable from Claude Desktop / Claude Code without any additional setup)
-- **MCP prompt**: `code_execute` (new in v2.1 — provides C# code templates in MCP clients)
-
-The `UnityMCPHandlerSamples` (C#) and `UnityMCPHandlerSamplesJS` (JS) sample packages have been removed in v2.1 as they are fully superseded by these built-in alternatives. If you previously imported either sample, remove it — no code migration is required.
-
-### Editor panel screenshots — Windows only in v2.1
-
-`/capture_screenshot` now supports Inspector, Hierarchy, Project, Console, and any other EditorWindow via the new `view` values. See the [view options table](#capture_screenshot--view-options-v21) above. Non-Windows returns `unsupported_platform` (501). Camera-based `view=game` / `view=scene` remain cross-platform.
-
----
-
-## Migration Guide: v1.x → v2.0
-
-### Breaking changes
-
-1. **Unified response envelope**: All endpoints now return `{"status":..., "result":...}`. Previously some endpoints returned flat JSON (e.g. `{"output":"...","returnValue":"..."}`). Update any code that reads top-level keys:
-   - `/execute_code`: `.output` → `.result.output`, `.returnValue` → `.result.returnValue`
-   - `/capture_screenshot`: `.image` → `.result.image`
-   - `/play_mode`: `.isPlaying` → `.result.isPlaying`
-   - `/read_logs`: `.logs` → `.result.logs`
-   - All other endpoints: wrap your field access with `.result.`
-
-2. **`autoRestartOnPlayModeChange` removed**: Remove this key from any stored settings or config files.
-
-3. **Auto-active instance selection removed**: Previously the first discovered Unity instance was automatically set as active. Now:
-   - Single instance: still used automatically (convenience case)
-   - Multiple instances + no `target` + no explicit active: returns `target_required` error
-   - Fix: call `unity_setActiveClient` in your session, or pass `target` parameter in each tool call
-
-4. **ProjectApi port range**: Now uses 27180–27189 fallback range instead of fixed 27180.
-
-### curl example updates
-
-Before (v1.x):
-```bash
-curl -s -X POST http://127.0.0.1:27182/execute_code \
-  -d '{"code":"return 1;"}' | jq '.returnValue'
-```
-
-After (v2.0):
-```bash
-curl -s -X POST http://127.0.0.1:27182/execute_code \
-  -H "Content-Type: application/json" \
-  -d '{"code":"return 1;"}' | jq '.result.returnValue'
-```
+| `httpPort` | 27182 | First port to try. Moves up to 27199 if busy |
+| `autoStartOnLaunch` | true | Start the server when the Editor opens |
+| `syncWaitMs` | 3000 | Calls slower than this return a job id |
+| `detailedLogs` | true | Log each request |
 
 ## Security
 
-- The HTTP server binds to `127.0.0.1` only. It is not accessible from the network.
-- `/execute_code` can be disabled in settings if you do not want arbitrary C# execution.
-- No authentication token is required (loopback-only design assumption).
+- The server binds to `127.0.0.1` only and requires a bearer token on every request.
+- No CORS headers are sent. A web page open in a browser cannot call the server.
+- Treat the descriptor file as a credential. Anyone who can read it can run code inside the Editor.
+- `execute_code` and `menu_execute` run with the Editor's full permissions. Do not feed them untrusted code.
+
+Nothing in this package reaches a player build, Development Build included. All sources are under `Editor/` and every assembly definition is restricted to the Editor platform. CI checks both on every change.
+
+## Tests
+
+The EditMode suite lives inside the package. To run it, add the package to `testables` in the project's `Packages/manifest.json`:
+
+```json
+"testables": ["jp.shiranui-isuzu.unity-mcp"]
+```
 
 ## License
 
