@@ -445,7 +445,7 @@ namespace UnityMCP.Editor.Tools
             {
                 ["name"] = go.name,
                 ["path"] = ObjectResolve.PathOf(go),
-                ["instanceId"] = EntityIdCompat.IdOf(go),
+                ["instanceId"] = EntityIdCompat.WireIdOf(go),
                 ["active"] = go.activeSelf,
             };
 

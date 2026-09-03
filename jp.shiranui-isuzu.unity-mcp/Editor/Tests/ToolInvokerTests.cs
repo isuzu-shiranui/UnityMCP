@@ -51,6 +51,12 @@ namespace UnityMCP.Editor.Tests
                 return new Point { X = x, Y = y };
             }
 
+            [McpTool("t_wide", "Returns the 64-bit value it was given.", Idempotency = McpIdempotency.Safe)]
+            public static long Wide([McpArg("id", "A 64-bit id")] long id)
+            {
+                return id;
+            }
+
             [McpTool("t_flag", "Returns the flag it was given.", Idempotency = McpIdempotency.Safe)]
             public static bool Flag([McpArg("enabled", "Whether enabled")] bool enabled)
             {
@@ -130,6 +136,19 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(result["x"].Value<int>(), Is.EqualTo(3));
             Assert.That(result["y"].Value<int>(), Is.EqualTo(4));
+        }
+
+        [Test]
+        public void A64BitIntegerKeepsEveryBit()
+        {
+            // A Unity 6.5 EntityId is around 5.7e17, above the 2^53 a double holds exactly. Coercing
+            // through a double rounds the low bits off, and the id then names a different object.
+            const long id = (1L << 53) + 1;
+
+            Assert.That(Invoke("t_wide", new JObject { ["id"] = id })["result"].Value<long>(), Is.EqualTo(id),
+                        "a JSON integer lost precision");
+            Assert.That(Invoke("t_wide", new JObject { ["id"] = id.ToString() })["result"].Value<long>(), Is.EqualTo(id),
+                        "a numeric string lost precision");
         }
 
         [Test]

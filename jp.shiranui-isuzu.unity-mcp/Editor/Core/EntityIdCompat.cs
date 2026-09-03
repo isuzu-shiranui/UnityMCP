@@ -1,3 +1,5 @@
+using Newtonsoft.Json.Linq;
+
 using UnityEditor;
 
 using UnityObject = UnityEngine.Object;
@@ -15,18 +17,19 @@ namespace UnityMCP.Editor.Core
     /// (the reverse). The same three operations — object to id, id to object, and a serialized
     /// reference's id — therefore have two spellings depending on the Editor. Splitting on
     /// <c>UNITY_6000_5_OR_NEWER</c> here means the ten call sites do not each carry a <c>#if</c>,
-    /// and the wire contract stays put: the value is still called <c>instanceId</c> and is still a
-    /// JSON number.
+    /// and the wire contract stays put: the value is still called <c>instanceId</c>.
     /// <para>
-    /// The wire type is <c>long</c>, not <c>int</c>. A 64-bit EntityId does not fit in an int, and
-    /// truncating it would hand back an id that resolves to the wrong object or to nothing. Real
-    /// ids are small — a scene object's is a negative number in the thousands — so this stays well
-    /// inside the range a JSON number represents exactly.
+    /// In process the id is a <c>long</c>. On the wire it is a JSON number before 6.5 and a JSON
+    /// string from 6.5 on. A 6.5 EntityId packed into a ulong is around 5.7e17, far above the
+    /// 2^53 a JSON number survives on the way through JavaScript: the MCP server and every MCP
+    /// client parse numbers as doubles, so a numeric id would come back with its low bits rounded
+    /// off and name a different object, or none. <see cref="Wire"/> makes that choice once, and
+    /// <c>ToolInvoker</c> accepts either spelling as an argument without going through a double.
     /// </para>
     /// </remarks>
     internal static class EntityIdCompat
     {
-        /// <summary>The wire identifier for an object.</summary>
+        /// <summary>The identifier of an object, as a value.</summary>
         public static long IdOf(UnityObject obj)
         {
 #if UNITY_6000_5_OR_NEWER
@@ -36,7 +39,7 @@ namespace UnityMCP.Editor.Core
 #endif
         }
 
-        /// <summary>The object a wire identifier names, or null.</summary>
+        /// <summary>The object an identifier names, or null.</summary>
         public static UnityObject Find(long id)
         {
 #if UNITY_6000_5_OR_NEWER
@@ -55,5 +58,24 @@ namespace UnityMCP.Editor.Core
             return property.objectReferenceInstanceIDValue;
 #endif
         }
+
+        /// <summary>
+        /// An identifier in the form it is written into a tool result: a JSON string on Unity 6.5
+        /// and later, where it does not fit a JSON number exactly, and a JSON number before that.
+        /// </summary>
+        public static JToken Wire(long id)
+        {
+#if UNITY_6000_5_OR_NEWER
+            return new JValue(id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+#else
+            return new JValue(id);
+#endif
+        }
+
+        /// <summary><see cref="Wire"/> of <see cref="IdOf"/>.</summary>
+        public static JToken WireIdOf(UnityObject obj) => Wire(IdOf(obj));
+
+        /// <summary><see cref="Wire"/> of <see cref="ObjectReferenceId"/>.</summary>
+        public static JToken WireObjectReferenceId(SerializedProperty property) => Wire(ObjectReferenceId(property));
     }
 }

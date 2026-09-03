@@ -88,7 +88,7 @@ namespace UnityMCP.Editor.Timeline
 
             // Guards against a Control track that loops back to a timeline already being reported,
             // which would otherwise recurse until the stack gave out.
-            var visited = new HashSet<int>();
+            var visited = new HashSet<long>();
 
             return DescribeDirector(director, includeClips, track, Math.Max(nestDepth, 0), visited);
         }
@@ -173,7 +173,7 @@ namespace UnityMCP.Editor.Timeline
         }
 
         private static JObject DescribeDirector(
-            PlayableDirector director, bool includeClips, string trackFilter, int nestDepth, HashSet<int> visited)
+            PlayableDirector director, bool includeClips, string trackFilter, int nestDepth, HashSet<long> visited)
         {
             var timeline = director.playableAsset as TimelineAsset;
 
@@ -195,7 +195,7 @@ namespace UnityMCP.Editor.Timeline
                 return result;
             }
 
-            if (!visited.Add(timeline.GetInstanceID()))
+            if (!visited.Add(EntityIdCompat.IdOf(timeline)))
             {
                 result["note"] = "Already reported above; a Control track loops back to it.";
                 return result;
@@ -245,7 +245,7 @@ namespace UnityMCP.Editor.Timeline
         }
 
         private static JObject DescribeClip(
-            TimelineClip clip, PlayableDirector director, int nestDepth, HashSet<int> visited)
+            TimelineClip clip, PlayableDirector director, int nestDepth, HashSet<long> visited)
         {
             var entry = new JObject
             {

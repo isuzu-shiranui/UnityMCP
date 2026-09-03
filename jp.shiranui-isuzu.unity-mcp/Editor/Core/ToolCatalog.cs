@@ -392,10 +392,16 @@ namespace UnityMCP.Editor.Core
                 };
             }
 
+            if (underlying == typeof(long) || underlying == typeof(ulong))
+            {
+                // A 64-bit value does not survive a JSON number through JavaScript, so a string is
+                // an accepted spelling; Unity 6.5 instance ids arrive that way (see EntityIdCompat).
+                return new JObject { ["type"] = new JArray("integer", "string") };
+            }
+
             if (underlying == typeof(byte) || underlying == typeof(sbyte) ||
                 underlying == typeof(short) || underlying == typeof(ushort) ||
-                underlying == typeof(int) || underlying == typeof(uint) ||
-                underlying == typeof(long) || underlying == typeof(ulong))
+                underlying == typeof(int) || underlying == typeof(uint))
             {
                 return new JObject { ["type"] = "integer" };
             }
