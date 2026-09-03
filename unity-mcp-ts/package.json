@@ -1,6 +1,6 @@
 {
   "name": "@shiranui_isuzu/unity-mcp",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "main": "build/index.js",
   "type": "module",
   "bin": {
@@ -28,8 +28,8 @@
   "license": "MIT",
   "description": "MCP server and CLI for driving the Unity Editor. Pairs with the jp.shiranui-isuzu.unity-mcp Unity package.",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.11.0",
-    "zod": "^3.24.2"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
