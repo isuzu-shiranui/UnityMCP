@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.3.1] - 2026-09-03
+
+### Fixed
+- **Unity 2022.3 compiles again.** `PlayerSettings.GetStaticBatchingForPlatform` exists only from
+  2023.1, so `render_pipeline_info` reports `batchingStatic` as null on 2022.3 instead of failing
+  the whole package to compile. Reported in #20, fixed in #21 by @takara2314.
+- **Unity 6.5 instance ids reach the model intact.** A 6.5 EntityId is about 5.7e17, above the
+  2^53 a JSON number survives on its way through JavaScript. Ids were rounded twice: once by the
+  MCP server parsing the Editor's reply, once by the Editor coercing the argument through a
+  double. The rounded id then named nothing, and every id-addressed call on 6.5 failed with
+  `not_found`. On 6.5 and later `instanceId` is now a JSON string, and 64-bit arguments accept a
+  string or an integer without going through a double. Earlier Unity versions are unchanged.
+- The Settings window no longer freezes the Editor when it is open during a domain reload.
+  Styles are created on first draw instead of in `OnActivate`, where `EditorStyles` can still be
+  null.
+- `timeline_inspect` keeps its visited set as 64-bit ids, so a Control track that loops back to
+  its own timeline is still detected on 6.5.
+
+### Verified
+EditMode suite (232 tests) on 2022.3.9f1, 2022.3.22f1, 2023.1.13f1, 2023.2.20f1, 6000.0.35f1,
+6000.1.17f1, 6000.3.19f1, 6000.5.10f1.
+
 ## [3.3.0] - 2026-07-31
 
 ### Added

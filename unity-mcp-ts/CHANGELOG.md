@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.3.1] - 2026-09-03
+
+Released in step with the Unity package.
+
+### Changed
+- `@modelcontextprotocol/sdk` 1.11 to 1.30, the last 1.x line, which picks up the dependency
+  fix for GHSA-frvp-7c67-39w9. The protocol handshake is unchanged. Clients that speak the
+  2026-07-28 stateless revision still connect to stdio servers through the previous handshake
+  by default, so nothing changes for them.
+- The server instructions tell a client with several Editors open to name the project, never a
+  port. `target` takes a project name or a clientId, and `unity_list_clients` shows what is open.
+
+### Fixed
+- Unity 6.5 instance ids no longer lose precision on the way through this server. The Editor
+  sends them as JSON strings on 6.5 and later (see the Unity package changelog), and this
+  server forwards tool results without reparsing numbers, so the ids reach the model intact.
+
 ## [3.2.0] - 2026-07-28
 
 Released in step with the Unity package, which went from 23 tools to 57. No
