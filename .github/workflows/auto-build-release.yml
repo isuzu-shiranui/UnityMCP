@@ -1,14 +1,19 @@
 name: Release
 
-# Tags, releases and publishes to npm when the version in the Unity package's package.json
-# changes on main.
+# Tags, uploads the downloadable binaries and publishes the tool package when the version in the
+# Unity package's package.json changes on main.
 #
-# The tag and the npm publish are gated independently. An earlier version gated everything
-# on "does the tag exist", which meant a publish that failed after the tag had been created
-# could never be retried: the re-run saw the tag, decided there was nothing to do, and exited
-# green with the package still missing from the registry. That is exactly what happened to
-# v3.0.0. Each half now asks its own question, so a partial release is resumable with
-# workflow_dispatch.
+# The three halves are gated independently, on three separate questions: does the tag exist, does
+# the release carry its assets, is the version on NuGet. Gating all of them on the tag makes a
+# release that fails after tagging unrepeatable, because the re-run sees the tag, decides there is
+# nothing to do and exits green with the artifacts still missing. Each gate asks about the thing
+# it protects, so a partial release is resumable with workflow_dispatch.
+#
+# The binaries are NativeAOT, and native code can only be produced on its own operating system,
+# so the work is split across jobs: `plan` answers the three questions and runs the checks once,
+# `binaries` builds one RID per runner, and `release` collects them and publishes. The gates are
+# computed in `plan` and read by the other two through job outputs, so a re-run still asks the
+# same three questions.
 on:
   push:
     branches:
@@ -17,13 +22,17 @@ on:
 
 permissions:
   contents: write
-  # Required for OIDC. npm trusted publishing exchanges this for a short-lived credential,
-  # so no long-lived token is stored in the repository, and provenance is attested from it.
-  id-token: write
 
 jobs:
-  release:
+  plan:
     runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      tag_exists: ${{ steps.check-tag.outputs.exists }}
+      need_assets: ${{ steps.work.outputs.need_assets }}
+      need_nuget: ${{ steps.work.outputs.need_nuget }}
 
     steps:
       - name: Checkout repository
@@ -31,102 +40,187 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Trusted publishing needs npm 11.5.1 or later, which means Node 22 or later. Node 20
-      # ships npm 10 and fails with an authentication error that says nothing about the
-      # version being the cause.
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-          cache: 'npm'
-          cache-dependency-path: unity-mcp-ts/package-lock.json
+          dotnet-version: 10.0.x
 
-      # Node 22 bundles npm 10, which has no OIDC support at all. It does not say so: it falls
-      # straight through to the token in the .npmrc that setup-node writes, which is a
-      # placeholder when no token is supplied, and the registry answers 404. Upgrading is the
-      # difference between trusted publishing working and failing with an error about the
-      # package not existing.
-      - name: Upgrade npm for trusted publishing
+      - name: Version
+        id: version
         run: |
-          npm install -g npm@latest
-          echo "node $(node --version), npm $(npm --version)"
+          VERSION=$(jq -r .version jp.shiranui-isuzu.unity-mcp/package.json)
+          CLI=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
 
-      - name: Get version
-        id: package-version
-        run: |
-          VERSION=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
-          TS_VERSION=$(node -p "require('./unity-mcp-ts/package.json').version")
-
-          # The Editor and the server speak one protocol. Releasing them at different
-          # versions is the failure this whole release exists to design out, so it stops here.
-          if [ "$VERSION" != "$TS_VERSION" ]; then
-            echo "Unity package is $VERSION but the npm package is $TS_VERSION; they must match."
+          if [ -z "$CLI" ]; then
+            echo "no <Version> in the csproj; there is nothing to compare the package against"
             exit 1
           fi
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          # The Editor and the CLI speak one protocol. Releasing them at different versions is
+          # the failure this whole release exists to design out, so it stops here.
+          if [ "$VERSION" != "$CLI" ]; then
+            echo "Unity package is $VERSION but the CLI is $CLI; they must match."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Releasing $VERSION"
 
-      - name: Check tag
+      - name: Tag exists?
         id: check-tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          TAG="v${{ steps.package-version.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG already exists."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "$TAG does not exist yet."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Already on npm?
-        id: npm-check
-        working-directory: unity-mcp-ts
+      # Four binaries, their checksums, the two installers, the Claude Desktop bundle and the
+      # Unity package zip the VPM listing points at. An upload that fails leaves a release behind
+      # with the tag pointing at it, so the tag on its own cannot be read as "the artifacts are
+      # there".
+      #
+      # The names are checked one by one rather than counted, because anything attached to the
+      # release by hand raises a count: with a screenshot on the release, a run that lost one
+      # binary would read as complete, skip the binaries job and exit green a platform short.
+      - name: Release assets complete?
+        id: check-assets
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          NAME=$(node -p "require('./package.json').name")
-          VERSION=${{ steps.package-version.outputs.version }}
-          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "$NAME@$VERSION is already published."
-            echo "published=true" >> $GITHUB_OUTPUT
+          PRESENT=$(gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null || true)
+
+          MISSING=""
+          for name in isuzu-unity-cli-win-x64.exe \
+                      isuzu-unity-cli-osx-arm64 \
+                      isuzu-unity-cli-osx-x64 \
+                      isuzu-unity-cli-linux-x64 \
+                      SHA256SUMS \
+                      isuzu-unity-cli.mcpb \
+                      install.ps1 \
+                      install.sh \
+                      "jp.shiranui-isuzu.unity-mcp-$VERSION.zip"; do
+            if ! printf '%s\n' "$PRESENT" | grep -qxF "$name"; then
+              MISSING="$MISSING $name"
+            fi
+          done
+
+          if [ -z "$MISSING" ]; then
+            echo "$TAG carries all 9 expected assets"
+            echo "complete=true" >> "$GITHUB_OUTPUT"
           else
-            echo "$NAME@$VERSION is not on the registry."
-            echo "published=false" >> $GITHUB_OUTPUT
+            echo "$TAG is missing:$MISSING"
+            echo "complete=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # One flag for "is there anything left to do", so the steps below do not each repeat
-      # the same pair of conditions.
+      - name: Already on NuGet?
+        id: check-nuget
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # The package id is IsuzuUnityCli; the flat container addresses it in lowercase.
+          if curl -sf https://api.nuget.org/v3-flatcontainer/isuzuunitycli/index.json \
+             | jq -e --arg v "$VERSION" '.versions | index($v)' >/dev/null; then
+            echo "IsuzuUnityCli $VERSION is already published."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "IsuzuUnityCli $VERSION is not on the registry."
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The three answers folded into the two questions the later jobs ask. A missing tag counts
+      # as missing assets, because the release that would carry them does not exist yet.
       - name: Anything to do?
         id: work
+        env:
+          TAG_EXISTS: ${{ steps.check-tag.outputs.exists }}
+          ASSETS_COMPLETE: ${{ steps.check-assets.outputs.complete }}
+          NUGET_PUBLISHED: ${{ steps.check-nuget.outputs.published }}
         run: |
-          if [ "${{ steps.check-tag.outputs.exists }}" = "true" ] \
-             && [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
-            echo "Tagged and published already; nothing to do."
-            echo "needed=false" >> $GITHUB_OUTPUT
+          if [ "$TAG_EXISTS" = "true" ] && [ "$ASSETS_COMPLETE" = "true" ]; then
+            echo "need_assets=false" >> "$GITHUB_OUTPUT"
           else
-            echo "needed=true" >> $GITHUB_OUTPUT
+            echo "need_assets=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install
-        if: steps.work.outputs.needed == 'true'
-        working-directory: unity-mcp-ts
-        run: npm ci
+          if [ "$NUGET_PUBLISHED" = "true" ]; then
+            echo "need_nuget=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "need_nuget=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$TAG_EXISTS" = "true" ] && [ "$ASSETS_COMPLETE" = "true" ] && [ "$NUGET_PUBLISHED" = "true" ]; then
+            echo "Tagged, uploaded and published already; nothing to do."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `Create tag` in the release job runs before `Create release`, so a run that dies between
+      # the two leaves the tag behind with nothing attached to it. The next run skips tag creation
+      # and builds from whatever main holds by then, which would hang binaries and a NuGet package
+      # built from one tree off a tag naming another.
+      #
+      # Only asked when there is publishing left to do: after a complete release the tag naming an
+      # earlier commit than main's head is the normal state, and every later push must stay green.
+      - name: The existing tag names this commit
+        if: steps.check-tag.outputs.exists == 'true' && steps.work.outputs.needed == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          # ^{commit} resolves an annotated tag through its own object to the commit it names.
+          TARGET=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}")
+
+          echo "$TAG names $TARGET"
+          echo "building  $SHA"
+
+          if [ "$TARGET" != "$SHA" ]; then
+            echo ""
+            echo "$TAG already exists and names a different commit than the one being built, so the"
+            echo "artifacts this run produces would not be the source the tag points at."
+            echo ""
+            echo "Either delete the tag, if a failed run left it behind and nothing was published"
+            echo "under it:"
+            echo "  git push --delete origin $TAG && git tag -d $TAG"
+            echo "or bump the version in jp.shiranui-isuzu.unity-mcp/package.json and"
+            echo "isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj, if it was."
+            exit 1
+          fi
 
       # A release that fails its own tests is worse than a late one. CI covers pull requests;
       # this covers the path that actually publishes.
-      - name: Verify
+      - name: Restore
         if: steps.work.outputs.needed == 'true'
-        working-directory: unity-mcp-ts
-        run: |
-          npx tsc --noEmit
-          npm run lint
-          npm test
-          npm run build
+        working-directory: isuzu-unity-cli
+        run: dotnet restore
 
-      # Nothing automated compiles a line of C#: the Verify step above is TypeScript, and no
-      # runner here has a Unity licence. So the Editor tests run on a workstation, and this
-      # checks that they ran against the sources being released rather than against something
-      # earlier. A docs-only change releases without re-running them, which is the point — the
-      # attestation names the sources, not the commit.
+      - name: Format
+        if: steps.work.outputs.needed == 'true'
+        working-directory: isuzu-unity-cli
+        run: dotnet format --verify-no-changes --no-restore
+
+      - name: Build
+        if: steps.work.outputs.needed == 'true'
+        working-directory: isuzu-unity-cli
+        run: dotnet build -c Release --no-restore -warnaserror
+
+      - name: Test
+        if: steps.work.outputs.needed == 'true'
+        working-directory: isuzu-unity-cli
+        run: dotnet test -c Release --no-build
+
+      # No runner has a Unity licence, so nothing here compiles the Editor assemblies. They are
+      # tested on a workstation instead, and this checks that the recorded run covers the sources
+      # being released rather than something earlier. A documentation change releases without
+      # re-running them, which is the point: the attestation names the sources, not the commit.
       - name: Editor tests cover these sources
         if: steps.work.outputs.needed == 'true'
         run: |
@@ -137,12 +231,14 @@ jobs:
             exit 1
           fi
 
-          EXPECTED=$(node scripts/source-hash.js .)
-          RECORDED=$(node -p "require('./$ATTESTATION').sourceHash")
-          FAILED=$(node -p "require('./$ATTESTATION').failed")
-          PASSED=$(node -p "require('./$ATTESTATION').passed")
+          EXPECTED=$(dotnet run scripts/source-hash.cs)
+          RECORDED=$(jq -r .sourceHash "$ATTESTATION")
+          TOTAL=$(jq -r .total "$ATTESTATION")
+          FAILED=$(jq -r .failed "$ATTESTATION")
+          PASSED=$(jq -r .passed "$ATTESTATION")
+          SKIPPED=$(jq -r .skipped "$ATTESTATION")
 
-          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed)"
+          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL)"
           echo "sources:  $EXPECTED"
 
           if [ "$EXPECTED" != "$RECORDED" ]; then
@@ -157,56 +253,340 @@ jobs:
             exit 1
           fi
 
+          # NUnit counts inconclusive and not-run cases in total without listing them under
+          # failed, so a run where a test never executed would otherwise read as a clean pass.
+          for n in "$TOTAL" "$PASSED" "$FAILED" "$SKIPPED"; do
+            case "$n" in
+              ''|*[!0-9]*)
+                echo "the attestation's counts are not all integers (total=$TOTAL passed=$PASSED failed=$FAILED skipped=$SKIPPED)"
+                exit 1
+                ;;
+            esac
+          done
+          if [ $((PASSED + FAILED + SKIPPED)) -ne "$TOTAL" ]; then
+            echo "passed + failed + skipped ($PASSED + $FAILED + $SKIPPED) does not equal total ($TOTAL); some cases never ran"
+            exit 1
+          fi
+
+  # One runner per operating system, because the ILCompiler emits an object file that the
+  # platform's own linker has to finish. macOS is the one that cross-compiles between its own
+  # architectures, so both osx RIDs share a runner. The matrix is the same one CI runs.
+  binaries:
+    name: Binary (${{ matrix.rid }})
+    needs: plan
+    if: needs.plan.outputs.need_assets == 'true'
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-latest
+            rid: osx-x64
+
+    defaults:
+      run:
+        working-directory: isuzu-unity-cli
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The ILCompiler links through clang and needs zlib's headers; neither is on the image.
+      - name: Native toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      # Renamed to the asset name here, so that the artifact carries exactly what the release
+      # step uploads and the `release` job never has to know which RID produced an .exe.
+      - name: Build the downloadable binary
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          EXT: ${{ matrix.rid == 'win-x64' && '.exe' || '' }}
+        run: |
+          OUT="../dist/out"
+          mkdir -p "$OUT"
+
+          dotnet publish src/IsuzuUnityCli/IsuzuUnityCli.csproj \
+            -c Release -r "$RID" -o "../dist/$RID"
+
+          mv "../dist/$RID/isuzu-unity-cli$EXT" "$OUT/isuzu-unity-cli-$RID$EXT"
+          ls -la "$OUT"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: dist/out/isuzu-unity-cli-*
+          if-no-files-found: error
+
+  # `always()` is what lets this job run when `binaries` was skipped because the assets were
+  # already there; the two result checks stop it from publishing a release around a binary that
+  # failed to build.
+  release:
+    needs: [plan, binaries]
+    if: >-
+      always() &&
+      needs.plan.result == 'success' &&
+      needs.binaries.result != 'failure' &&
+      needs.binaries.result != 'cancelled'
+    runs-on: ubuntu-latest
+
+    # id-token lets this job prove to nuget.org which workflow it is, which is what trusted
+    # publishing trades for a temporary key. A job-level block replaces the workflow-level one,
+    # so contents is repeated here for the tag and the release. actions is for the Pages
+    # dispatch at the end, which is the only event GITHUB_TOKEN can raise that starts a run.
+    permissions:
+      actions: write
+      contents: write
+      id-token: write
+
+    env:
+      TAG_EXISTS: ${{ needs.plan.outputs.tag_exists }}
+      NEED_ASSETS: ${{ needs.plan.outputs.need_assets }}
+      NEED_NUGET: ${{ needs.plan.outputs.need_nuget }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        if: needs.plan.outputs.need_nuget == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Collected under $GITHUB_WORKSPACE/dist rather than under isuzu-unity-cli, because the
+      # release step resolves its file list from the workspace root and the installers sit there.
+      - name: Collect the downloadable binaries
+        if: needs.plan.outputs.need_assets == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/out
+          merge-multiple: true
+
+      - name: All binaries arrived
+        if: needs.plan.outputs.need_assets == 'true'
+        working-directory: dist/out
+        run: |
+          # An artifact that never arrived would otherwise be noticed only by the upload below,
+          # after the tag has been pushed.
+          COUNT=$(find . -maxdepth 1 -name 'isuzu-unity-cli-*' | wc -l)
+          if [ "$COUNT" != "4" ]; then
+            echo "expected 4 binaries, found $COUNT"
+            ls -la
+            exit 1
+          fi
+
+      - name: Set up Node
+        if: needs.plan.outputs.need_assets == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The Claude Desktop bundle wraps all four binaries, so it can only be assembled here, where
+      # they are together for the first time. It is built before the checksums so that
+      # SHA256SUMS covers it too.
+      #
+      # Called through bash because the script is checked in without an execute bit and the
+      # repository is maintained on Windows, where core.fileMode is false and git records the mode
+      # it was added with. Running it directly is a Permission denied on a Linux runner.
+      - name: Build the Claude Desktop bundle
+        if: needs.plan.outputs.need_assets == 'true'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: bash scripts/build-mcpb.sh "$VERSION" dist/out dist/out
+
+      # The zip VCC and ALCOM download. Its contents sit at the root of the archive, which is
+      # where a VPM client unpacks from: it expands the zip straight into Packages/<id>, so a
+      # wrapping directory would leave package.json one level too deep and Unity would not see
+      # the package at all.
+      - name: Build the Unity package zip
+        if: needs.plan.outputs.need_assets == 'true'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          ZIP="$GITHUB_WORKSPACE/dist/out/jp.shiranui-isuzu.unity-mcp-$VERSION.zip"
+          cd jp.shiranui-isuzu.unity-mcp
+          zip -r -X "$ZIP" .
+          unzip -l "$ZIP"
+
+      - name: Checksums
+        if: needs.plan.outputs.need_assets == 'true'
+        working-directory: dist/out
+        run: |
+          # Bare names, so `sha256sum -c SHA256SUMS` works in the directory a user downloads into.
+          sha256sum isuzu-unity-cli-* isuzu-unity-cli.mcpb jp.shiranui-isuzu.unity-mcp-*.zip > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Build the tool package
+        if: needs.plan.outputs.need_nuget == 'true'
+        working-directory: isuzu-unity-cli
+        run: |
+          dotnet pack src/IsuzuUnityCli/IsuzuUnityCli.csproj \
+            -c Release -o "$GITHUB_WORKSPACE/dist/nupkg"
+
+      # Trusted publishing has no long-lived key to leak, but it does need a policy on nuget.org
+      # naming this owner, repository and workflow file. Without one the exchange fails with a
+      # message about the token rather than about the missing policy, so say it here instead.
+      - name: Trusted publishing is configured?
+        if: needs.plan.outputs.need_nuget == 'true'
+        env:
+          NUGET_USER: ${{ secrets.NUGET_USER }}
+        run: |
+          if [ -n "$NUGET_USER" ]; then
+            exit 0
+          fi
+
+          echo "NUGET_USER is not set. It holds the nuget.org profile name that owns the trusted"
+          echo "publishing policy for this repository (the profile name, not an email address)."
+          echo
+          echo "Add it under Settings > Secrets and variables > Actions, and create the policy at"
+          echo "https://www.nuget.org/account/trustedpublishing with:"
+          echo "  repository owner: ${GITHUB_REPOSITORY%%/*}"
+          echo "  repository:       ${GITHUB_REPOSITORY#*/}"
+          echo "  workflow file:    auto-build-release.yml"
+          echo "  scope:            one that allows publishing a package that does not exist yet"
+          exit 1
+
       - name: Create tag
-        if: steps.check-tag.outputs.exists != 'true'
+        if: needs.plan.outputs.tag_exists != 'true'
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git tag "v${{ steps.package-version.outputs.version }}"
-          git push origin "v${{ steps.package-version.outputs.version }}"
+          git tag "$TAG"
+          git push origin "$TAG"
 
       - name: Create release
-        if: steps.check-tag.outputs.exists != 'true'
-        uses: softprops/action-gh-release@v1
+        if: needs.plan.outputs.need_assets == 'true'
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.package-version.outputs.version }}
-          name: Release v${{ steps.package-version.outputs.version }}
+          tag_name: ${{ needs.plan.outputs.tag }}
+          name: Release ${{ needs.plan.outputs.tag }}
+          # A resumed run against a release that already exists rewrites its notes; the action has
+          # no option to keep them, and append_body would print them a second time instead.
           generate_release_notes: true
           draft: false
           prerelease: false
+          files: |
+            dist/out/isuzu-unity-cli-win-x64.exe
+            dist/out/isuzu-unity-cli-osx-arm64
+            dist/out/isuzu-unity-cli-osx-x64
+            dist/out/isuzu-unity-cli-linux-x64
+            dist/out/isuzu-unity-cli.mcpb
+            dist/out/jp.shiranui-isuzu.unity-mcp-*.zip
+            dist/out/SHA256SUMS
+            install.ps1
+            install.sh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # No NODE_AUTH_TOKEN. The package is configured on npmjs.com to trust this repository
-      # and this workflow file, and the npm CLI exchanges the OIDC token above for a
-      # short-lived credential. A stored automation token would also have to be one that
-      # bypasses two-factor auth, which npm is in the process of restricting for publishing.
-      #
-      # Requires a trusted publisher entry at
-      # https://www.npmjs.com/package/@shiranui_isuzu/unity-mcp/access naming this workflow.
-      # Without it npm asks for a one-time password and this step fails.
-      - name: Publish to npm
-        if: steps.npm-check.outputs.published != 'true'
-        working-directory: unity-mcp-ts
-        run: npm publish --provenance --access public
+      # The VPM listing is not built here. pages.yml derives it from the releases API when it
+      # deploys, so the release only has to attach the zip, and nothing in this job writes to a
+      # branch. The deployment has to be asked for, though: workflow_dispatch and
+      # repository_dispatch are the only events GITHUB_TOKEN can raise that start a workflow run,
+      # so the release created above reaches neither pages.yml's release trigger nor its push
+      # trigger on its own.
+      - name: Deploy the site
+        if: needs.plan.outputs.need_assets == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      # The temporary key lasts an hour, so it is minted here rather than in the plan job.
+      - name: NuGet login
+        id: nuget-login
+        if: needs.plan.outputs.need_nuget == 'true'
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      # The key goes through the environment rather than into the command line, so that its
+      # contents are never parsed by the shell.
+      - name: Publish to NuGet
+        if: needs.plan.outputs.need_nuget == 'true'
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push dist/nupkg/*.nupkg \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
 
       - name: Summary
-        if: steps.work.outputs.needed == 'true'
+        if: needs.plan.outputs.need_assets == 'true' || needs.plan.outputs.need_nuget == 'true'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          VERSION=${{ steps.package-version.outputs.version }}
-          NAME=$(node -p "require('./unity-mcp-ts/package.json').name")
           {
             echo "## v$VERSION"
             echo ""
-            echo "- Unity package: \`https://github.com/${{ github.repository }}.git?path=jp.shiranui-isuzu.unity-mcp#v$VERSION\`"
-            if [ "${{ steps.check-tag.outputs.exists }}" = "true" ]; then
+            echo "Unity package, through the Package Manager:"
+            echo ""
+            echo '```'
+            echo "https://github.com/$REPOSITORY.git?path=jp.shiranui-isuzu.unity-mcp#v$VERSION"
+            echo '```'
+            echo ""
+            echo "Unity package, through VCC or ALCOM, which needs no Git client:"
+            echo ""
+            echo '```'
+            echo "https://unity-mcp.shiranui-isuzu.dev/vpm.json"
+            echo '```'
+            echo ""
+            echo "Command line tool, Windows:"
+            echo ""
+            echo '```powershell'
+            echo "irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 | iex"
+            echo '```'
+            echo ""
+            echo "Command line tool, macOS and Linux:"
+            echo ""
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh"
+            echo '```'
+            echo ""
+            echo "Command line tool, from NuGet:"
+            echo ""
+            echo '```sh'
+            echo "dotnet tool install -g IsuzuUnityCli"
+            echo '```'
+            echo ""
+            echo "Claude Desktop: download isuzu-unity-cli.mcpb from the assets and open it."
+            echo ""
+
+            if [ "$TAG_EXISTS" = "true" ]; then
               echo "- Tag: already existed, left alone"
             else
               echo "- Tag: created"
             fi
-            if [ "${{ steps.npm-check.outputs.published }}" = "true" ]; then
-              echo "- npm: already published, skipped"
+
+            if [ "$NEED_ASSETS" = "true" ]; then
+              echo "- Release assets: uploaded"
+              echo "- VPM listing: the Pages deployment asked for here derives it from this release"
             else
-              echo "- npm: \`npm install $NAME@$VERSION\`"
+              echo "- Release assets: already complete, skipped"
             fi
-          } >> $GITHUB_STEP_SUMMARY
+
+            if [ "$NEED_NUGET" = "true" ]; then
+              echo "- NuGet: pushed"
+            else
+              echo "- NuGet: already published, skipped"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

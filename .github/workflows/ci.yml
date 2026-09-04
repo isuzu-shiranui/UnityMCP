@@ -1,8 +1,7 @@
 name: CI
 
-# The release workflow only runs on main and only builds, so nothing checked pull
-# requests at all. That is how the TypeScript server ended up shipping resource handlers
-# that posted to an endpoint the Editor never registered: no job would have noticed.
+# The release workflow runs only on main and only builds, so without this nothing would check a
+# pull request at all.
 on:
   push:
     branches:
@@ -12,83 +11,198 @@ on:
   workflow_dispatch:
 
 jobs:
-  typescript:
-    name: TypeScript
+  dotnet:
+    name: CLI
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: isuzu-unity-cli
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-dotnet@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: unity-mcp-ts/package-lock.json
+          dotnet-version: 10.0.x
 
-      - name: Install
-        working-directory: unity-mcp-ts
-        run: npm ci
+      - name: Restore
+        run: dotnet restore
 
-      - name: Type-check
-        working-directory: unity-mcp-ts
-        run: npx tsc --noEmit
+      - name: Format
+        run: dotnet format --verify-no-changes --no-restore
 
-      - name: Lint
-        working-directory: unity-mcp-ts
-        run: npm run lint
+      - name: Build
+        run: dotnet build -c Release --no-restore -warnaserror
 
       - name: Test
-        working-directory: unity-mcp-ts
-        run: npm test
+        run: dotnet test -c Release --no-build
 
-      # Catches the case where src compiles but the published entry points do not exist.
-      - name: Build
-        working-directory: unity-mcp-ts
-        run: npm run build
-
-      - name: Check bin entry points exist
-        working-directory: unity-mcp-ts
+      # `dotnet tool install -g IsuzuUnityCli` is a documented install path, and packing fails on
+      # conditions of its own that building never reaches.
+      - name: Tool package builds
         run: |
-          node -e "
-            const bin = require('./package.json').bin;
-            const fs = require('fs');
-            for (const [name, path] of Object.entries(bin)) {
-              if (!fs.existsSync(path)) {
-                console.error(\`bin.\${name} points at \${path}, which the build did not produce\`);
-                process.exit(1);
-              }
-              console.log(\`\${name} -> \${path} ok\`);
-            }
-          "
+          dotnet pack src/IsuzuUnityCli/IsuzuUnityCli.csproj -c Release -o /tmp/nupkg
+          COUNT=$(find /tmp/nupkg -maxdepth 1 -name '*.nupkg' | wc -l)
+          if [ "$COUNT" != "1" ]; then
+            echo "expected exactly one .nupkg, found $COUNT"
+            find /tmp/nupkg -maxdepth 1 -type f
+            exit 1
+          fi
 
-      - name: CLI runs without a Unity Editor
-        working-directory: unity-mcp-ts
+      # Packing proves the package builds, not that the tool inside it starts. This is the only
+      # variant a user can get that is not NativeAOT, so nothing else in CI covers the ordinary IL
+      # build. --tool-path installs into a temporary directory instead of the runner's profile,
+      # where a leftover install would shadow later steps.
+      - name: Tool package installs and runs
         run: |
-          # No Editor is running here, so this asserts the CLI fails on purpose rather than
-          # crashing, and that its help works standalone.
-          node build/cli.js --help > /dev/null
-          if node build/cli.js projects; then
+          VERSION=$(grep -oP '<Version>\K[^<]+' src/IsuzuUnityCli/IsuzuUnityCli.csproj)
+          TOOLS=$(mktemp -d)
+
+          dotnet tool install IsuzuUnityCli \
+            --version "$VERSION" \
+            --add-source /tmp/nupkg \
+            --tool-path "$TOOLS"
+
+          "$TOOLS/isuzu-unity-cli" --help > /dev/null
+
+  # What users download is a NativeAOT binary, and native code can only be produced on its own
+  # operating system: the ILCompiler emits an object file that the platform's own linker has to
+  # finish, so there is no Linux runner that can hand back a Windows or macOS executable. The
+  # release therefore builds each binary on a matching runner, and this job runs the same
+  # matrix so that a toolchain failure on any one OS shows on the pull request rather than in
+  # the release job after the version bump has landed on main. macOS is the one exception that
+  # cross-compiles between its own architectures, which is why both osx RIDs share a runner.
+  native:
+    name: Native binary (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+          - os: macos-latest
+            rid: osx-x64
+
+    defaults:
+      run:
+        working-directory: isuzu-unity-cli
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The ILCompiler links through clang and needs zlib's headers; neither is on the image.
+      - name: Native toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish
+        run: dotnet publish src/IsuzuUnityCli/IsuzuUnityCli.csproj -c Release -r ${{ matrix.rid }} -o ../smoke
+
+      # AOT compilation removes code the compiler cannot see being reached, so a binary that
+      # links can still fail on its first reflective call. The published artifact is run rather
+      # than only produced.
+      - name: Published binary runs
+        shell: bash
+        env:
+          BIN: ../smoke/isuzu-unity-cli${{ matrix.rid == 'win-x64' && '.exe' || '' }}
+        run: |
+          if [ ! -s "$BIN" ]; then
+            echo "$BIN was not produced"
+            ls -la ../smoke
+            exit 1
+          fi
+          ls -la "$BIN"
+
+          "$BIN" --help > /dev/null
+
+          # No Editor is running here, so this asserts the CLI reports that rather than crashing
+          # or, worse, exiting green with nothing on the other end.
+          if "$BIN" projects; then
             echo "expected a non-zero exit when no Editor is running"
             exit 1
           fi
 
   editor-versions:
-    name: Package manifest
+    name: Package checks
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      # The two packages ship together; a mismatch means the version a client sees in
-      # /health does not identify the code it is talking to.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The Editor package and the CLI ship together; a mismatch means the version a client sees
+      # in /health does not identify the code it is talking to.
       - name: Versions match
         run: |
-          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
-          TS=$(node -p "require('./unity-mcp-ts/package.json').version")
+          UNITY=$(jq -r .version jp.shiranui-isuzu.unity-mcp/package.json)
+          CLI=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
           echo "unity package: $UNITY"
-          echo "ts package:    $TS"
-          if [ "$UNITY" != "$TS" ]; then
+          echo "cli:           $CLI"
+          if [ -z "$CLI" ]; then
+            echo "no <Version> in the csproj; this check has stopped checking anything"
+            exit 1
+          fi
+          if [ "$UNITY" != "$CLI" ]; then
             echo "package versions disagree"
+            exit 1
+          fi
+
+      # The Claude Desktop bundle is assembled only at release time, so a manifest that fails the
+      # schema would otherwise surface after the version bump has landed on main. The binaries
+      # are not needed: validate checks the manifest, not the files it names.
+      - name: Extension manifest validates
+        run: |
+          CLI=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
+          MANIFEST=isuzu-unity-cli/mcpb/manifest.json
+          TMP=$(mktemp -d)
+          sed "s/\"version\": \"0.0.0\"/\"version\": \"$CLI\"/" "$MANIFEST" > "$TMP/manifest.json"
+          if ! grep -q "\"version\": \"$CLI\"" "$TMP/manifest.json"; then
+            echo "$MANIFEST has no 0.0.0 version placeholder; scripts/build-mcpb.sh would ship the wrong version"
+            exit 1
+          fi
+          npx --yes @anthropic-ai/mcpb@2.1.2 validate "$TMP/manifest.json"
+
+      # Validating the manifest leaves the script that stages and packs the bundle unrun until the
+      # release job, which is the one step there that no pull request has exercised. Placeholder
+      # files stand in for the binaries: the script copies them, sets their mode bits and hands the
+      # staging directory to mcpb, and none of that reads what is inside them.
+      #
+      # Called through bash for the same reason as in the release workflow: the script is checked
+      # in without an execute bit, so running it directly is a Permission denied here.
+      - name: Bundle builds
+        run: |
+          CLI=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
+          TMP=$(mktemp -d)
+
+          for bin in isuzu-unity-cli-win-x64.exe \
+                     isuzu-unity-cli-osx-arm64 \
+                     isuzu-unity-cli-osx-x64 \
+                     isuzu-unity-cli-linux-x64; do
+            echo "placeholder for $bin" > "$TMP/$bin"
+          done
+
+          bash scripts/build-mcpb.sh "$CLI" "$TMP" "$TMP/out"
+
+          BUNDLE="$TMP/out/isuzu-unity-cli.mcpb"
+          if [ ! -s "$BUNDLE" ]; then
+            echo "$BUNDLE was not produced"
+            ls -la "$TMP/out"
             exit 1
           fi
 
@@ -97,7 +211,7 @@ jobs:
       # package, which is rare enough that a stale value there would never be noticed.
       - name: Fallback version matches the package
         run: |
-          UNITY=$(node -p "require('./jp.shiranui-isuzu.unity-mcp/package.json').version")
+          UNITY=$(jq -r .version jp.shiranui-isuzu.unity-mcp/package.json)
           SERVER=$(grep -oP 'FallbackVersion = "\K[^"]+' \
             jp.shiranui-isuzu.unity-mcp/Editor/Core/McpHttpServer.cs)
           echo "package:  $UNITY"
@@ -111,10 +225,12 @@ jobs:
             exit 1
           fi
 
-      # A README that lists 23 tools while the package publishes 57 is how v2's docs ended up
+      # A tool list that names 23 tools while the package publishes 57 is how v2's docs ended up
       # describing seven tools that did not exist. The catalogue is generated from the
       # attributes, so the only thing that can drift is the prose — checked here rather than
-      # remembered.
+      # remembered. The tool tables live in docs/tools.md and docs/en/tools.md; the tool count
+      # is written as a literal in those pages, in both READMEs and on both guide pages under
+      # site/, and every such literal has to equal the number of published tools.
       - name: Every tool is documented
         run: |
           node -e "
@@ -138,18 +254,138 @@ jobs:
             }
 
             let failed = false;
-            for (const readme of ['README.md', 'README.en.md']) {
-              const text = fs.readFileSync(readme, 'utf8');
+            for (const doc of ['docs/tools.md', 'docs/en/tools.md']) {
+              const text = fs.readFileSync(doc, 'utf8');
               const missing = [...names].filter(n => !text.includes('\`' + n + '\`')).sort();
               if (missing.length) {
-                console.error(readme + ' does not mention: ' + missing.join(', '));
+                console.error(doc + ' does not mention: ' + missing.join(', '));
+                failed = true;
+              }
+            }
+
+            // Timeline, Recorder and the test runner live in assemblies constrained on their
+            // packages, so a project without those packages publishes fewer tools. The prose
+            // quotes both numbers, and both are derived here rather than remembered.
+            const gated = new Set();
+            for (const f of walk(root)) {
+              if (f.includes(path.sep + 'Tests' + path.sep)) continue;
+              const gatedArea = ['Timeline', 'Recorder', 'TestRunner']
+                .some(a => f.includes(path.sep + a + path.sep));
+              if (!gatedArea) continue;
+              const src = fs.readFileSync(f, 'utf8');
+              for (const m of src.matchAll(/McpTool\(\s*\"([a-z0-9_]+)\"/g)) gated.add(m[1]);
+            }
+            const bare = names.size - gated.size;
+
+            if (gated.size === 0) {
+              console.error('no gated tools were found; this check has stopped checking anything');
+              failed = true;
+            }
+
+            // Matches '74 tools' and '74 個のツール'. A page with no count at all fails too:
+            // a check that finds nothing to compare is not checking anything.
+            const counted = /(\d+)\s*(?:tools\b|個のツール)/g;
+            for (const doc of ['docs/tools.md', 'docs/en/tools.md', 'README.md', 'README.en.md',
+                                'site/index.html', 'site/en/index.html']) {
+              const text = fs.readFileSync(doc, 'utf8');
+              const literals = [...text.matchAll(counted)].map(m => Number(m[1]));
+              if (literals.length === 0) {
+                console.error(doc + ' states no tool count');
+                failed = true;
+                continue;
+              }
+              const wrong = literals.filter(n => n !== names.size && n !== bare);
+              if (wrong.length) {
+                console.error(doc + ' says ' + wrong.join('/') + ' tools; the package publishes ' +
+                  names.size + ', or ' + bare + ' without the optional packages');
+                failed = true;
+              }
+
+              if (!literals.includes(names.size)) {
+                console.error(doc + ' never states the full count of ' + names.size);
                 failed = true;
               }
             }
 
             if (failed) process.exit(1);
-            console.log(names.size + ' tools, all documented in both READMEs');
+            console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented and counted in docs/tools.md, docs/en/tools.md and both READMEs');
           "
+
+      # The endpoint is the whole contract between the CLI and the Editor. A client configured
+      # by hand against the wrong path gets a connection that opens and then answers nothing.
+      - name: Endpoint documented
+        run: |
+          STATUS=0
+          for readme in README.md README.en.md; do
+            if ! grep -q '/mcp' "$readme"; then
+              echo "$readme does not name the /mcp endpoint"
+              STATUS=1
+            fi
+          done
+          exit $STATUS
+
+      # v3 shipped a binary called isuzu-unity-mcp. The migration pages and the changelogs keep
+      # that name on purpose, because the migration table is about the rename, and the skill
+      # installer keeps it to delete the v3 skill folder; anything that tells a user what to type
+      # must not.
+      - name: No stale CLI name
+        run: |
+          set +e
+          HITS=$(git grep -n 'isuzu-unity-mcp' -- \
+            README.md \
+            README.en.md \
+            isuzu-unity-cli \
+            jp.shiranui-isuzu.unity-mcp/Editor \
+            jp.shiranui-isuzu.unity-mcp/README.md \
+            jp.shiranui-isuzu.unity-mcp/package.json \
+            install.ps1 \
+            install.sh \
+            docs \
+            ':(exclude)docs/migration-v3.md' \
+            ':(exclude)docs/en/migration-v3.md' \
+            ':(exclude)isuzu-unity-cli/src/IsuzuUnityCli/Housekeeping/SkillInstaller.cs' \
+            ':(exclude)isuzu-unity-cli/tests/IsuzuUnityCli.Tests/SkillInstallerTests.cs')
+          STATUS=$?
+          set -e
+
+          case "$STATUS" in
+            0)
+              echo "$HITS"
+              echo ""
+              echo "the v3 command name is still here; these lines name a binary that is no longer published"
+              exit 1
+              ;;
+            1)
+              echo "no stale command name"
+              ;;
+            *)
+              # git grep exits 128 when a pathspec matches nothing, and that failure would
+              # otherwise read as "found nothing", which is the same green tick.
+              echo "git grep failed with $STATUS; one of the paths above is missing from the index"
+              exit 1
+              ;;
+          esac
+
+      # The skill is how an agent learns what the CLI can do. It is embedded in the assembly so
+      # that a single downloaded binary carries it; a file present in the repository but not
+      # referenced by the csproj ships nothing.
+      - name: Skill is embedded
+        run: |
+          SKILL=isuzu-unity-cli/skills/isuzu-unity-cli/SKILL.md
+          CSPROJ=isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj
+          STATUS=0
+
+          if [ ! -f "$SKILL" ]; then
+            echo "$SKILL does not exist"
+            STATUS=1
+          fi
+
+          if ! grep -Eq '<EmbeddedResource[^>]*(SKILL\.md|skills[/\\])' "$CSPROJ"; then
+            echo "$CSPROJ has no EmbeddedResource covering the skill, so the binary ships without it"
+            STATUS=1
+          fi
+
+          exit $STATUS
 
       # Redistributing a binary without attributing it is a licensing problem, and the list
       # is exactly the kind of thing that goes stale silently when a dependency is swapped.
@@ -235,3 +471,56 @@ jobs:
             }
             console.log(shipped.length + ' assemblies, all referenced');
           "
+
+      # No runner here has a Unity licence, so nothing automated compiles the Editor assemblies.
+      # They are tested on a workstation instead, and this checks the recorded run covers the
+      # sources in this commit. Running it on pull requests as well as at release time is what
+      # makes a stale attestation a review comment rather than a failed publish.
+      #
+      # A documentation change passes without a fresh run, which is the point: the attestation
+      # names the sources, not the commit.
+      - name: Editor tests cover these sources
+        run: |
+          ATTESTATION=scripts/editmode-attestation.json
+
+          if [ ! -f "$ATTESTATION" ]; then
+            echo "$ATTESTATION is missing. Run: pwsh scripts/run-editmode-tests.ps1"
+            exit 1
+          fi
+
+          EXPECTED=$(dotnet run scripts/source-hash.cs)
+          RECORDED=$(jq -r .sourceHash "$ATTESTATION")
+          TOTAL=$(jq -r .total "$ATTESTATION")
+          FAILED=$(jq -r .failed "$ATTESTATION")
+          PASSED=$(jq -r .passed "$ATTESTATION")
+          SKIPPED=$(jq -r .skipped "$ATTESTATION")
+
+          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL)"
+          echo "sources:  $EXPECTED"
+
+          if [ "$EXPECTED" != "$RECORDED" ]; then
+            echo ""
+            echo "The Editor sources have changed since the tests were last run."
+            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the attestation it writes."
+            exit 1
+          fi
+
+          if [ "$FAILED" != "0" ] || [ "$PASSED" = "0" ]; then
+            echo "The recorded run is not a clean pass."
+            exit 1
+          fi
+
+          # NUnit counts inconclusive and not-run cases in total without listing them under
+          # failed, so a run where a test never executed would otherwise read as a clean pass.
+          for n in "$TOTAL" "$PASSED" "$FAILED" "$SKIPPED"; do
+            case "$n" in
+              ''|*[!0-9]*)
+                echo "the attestation's counts are not all integers (total=$TOTAL passed=$PASSED failed=$FAILED skipped=$SKIPPED)"
+                exit 1
+                ;;
+            esac
+          done
+          if [ $((PASSED + FAILED + SKIPPED)) -ne "$TOTAL" ]; then
+            echo "passed + failed + skipped ($PASSED + $FAILED + $SKIPPED) does not equal total ($TOTAL); some cases never ran"
+            exit 1
+          fi

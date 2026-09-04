@@ -14,23 +14,8 @@ namespace UnityMCP.Editor.Resources
     /// Resource handler for Unity Package Manager information.
     /// Supports limit, offset, and fields for pagination and field filtering.
     /// </summary>
-    internal sealed class PackagesResourceHandler : IMcpResourceHandler
+    internal sealed class PackagesResourceHandler
     {
-        /// <summary>
-        /// Gets the name of the resource this handler is responsible for.
-        /// </summary>
-        public string ResourceName => "packages";
-
-        /// <summary>
-        /// Gets a description of the resource handler.
-        /// </summary>
-        public string Description => "Provides information about Unity packages installed and available";
-
-        /// <summary>
-        /// Gets the URI for this resource.
-        /// </summary>
-        public string ResourceUri => "unity://packages";
-
         /// <summary>
         /// Fetches package information with the provided parameters.
         /// </summary>

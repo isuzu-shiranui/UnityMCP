@@ -1,7 +1,6 @@
 using UnityEditor;
 using UnityEngine;
 
-using UnityMCP.Editor.Resources;
 using UnityMCP.Editor.Settings;
 
 namespace UnityMCP.Editor.Core
@@ -85,7 +84,8 @@ namespace UnityMCP.Editor.Core
                 return;
             }
 
-            Debug.Log("[McpEditorInitializer] Initializing Unity MCP system...");
+            if (McpSettings.instance.detailedLogs)
+                Debug.Log("[McpEditorInitializer] Initializing Unity MCP system...");
 
             var settings = McpSettings.instance;
 
@@ -97,48 +97,29 @@ namespace UnityMCP.Editor.Core
             }
 
             // Read persisted state from SessionState (populated by OnBeforeAssemblyReload).
-            // On first Editor launch, SessionState is empty: wasRunning=false, savedPort=settings.httpPort.
+            // On first Editor launch, SessionState is empty: wasRunning=false and no saved port,
+            // so the project's stable port is used.
             var wasRunning = SessionState.GetBool(SessionKeyWasRunning, false);
-            var savedPort = SessionState.GetInt(SessionKeyBoundPort, settings.httpPort);
+            var savedPort = SessionState.GetInt(SessionKeyBoundPort, 0);
 
             var server = new McpHttpServer();
             McpServiceManager.Instance.RegisterService(server);
-
-            // Register handlers before Start so /health.handlers[] is fully populated
-            var commandDiscovery = new McpHandlerDiscovery<IMcpCommandHandler>(handler => server.RegisterHandler(handler));
-            var commandCount = commandDiscovery.DiscoverAndRegister();
-
-            if (settings.detailedLogs)
-                Debug.Log($"[McpEditorInitializer] Discovered {commandCount} command handlers");
-
-            var resourceDiscovery = new McpHandlerDiscovery<IMcpResourceHandler>(handler => server.RegisterResourceHandler(handler));
-            var resourceCount = resourceDiscovery.DiscoverAndRegister();
-
-            if (settings.detailedLogs)
-                Debug.Log($"[McpEditorInitializer] Discovered {resourceCount} resource handlers");
 
             // Start the server if it was running before reload or if auto-start is configured
             if (wasRunning || settings.autoStartOnLaunch)
             {
                 try
                 {
-                    server.Start(preferredPort: savedPort);
+                    server.Start(preferredPort: savedPort > 0 ? savedPort : (int?)null);
                 }
-                catch
+                catch (System.Exception e)
                 {
-                    // Preferred port failed — fall back to settings.httpPort scan
-                    try
-                    {
-                        server.Start(preferredPort: null);
-                    }
-                    catch (System.Exception fallbackEx)
-                    {
-                        Debug.LogError($"[McpEditorInitializer] Failed to start server: {fallbackEx.Message}");
-                    }
+                    Debug.LogError($"[McpEditorInitializer] Failed to start server: {e.Message}");
                 }
             }
 
-            Debug.Log("[McpEditorInitializer] Unity MCP system initialized");
+            if (McpSettings.instance.detailedLogs)
+                Debug.Log("[McpEditorInitializer] Unity MCP system initialized");
         }
 
         private static void OnBeforeAssemblyReload()
@@ -152,6 +133,10 @@ namespace UnityMCP.Editor.Core
             // Persist state so afterAssemblyReload can restore it (design §2.1)
             SessionState.SetInt(SessionKeyBoundPort, server.BoundPort);
             SessionState.SetBool(SessionKeyWasRunning, server.IsRunning);
+
+            // A reload discards the sequencer's static state, so anything still advancing would
+            // never settle and its request would block for the whole sync window.
+            FrameSequencer.CancelAll("Domain reload.");
 
             // The descriptor stays: the server returns on the same port in a moment, and
             // withdrawing it would make clients drop the instance and any active selection.

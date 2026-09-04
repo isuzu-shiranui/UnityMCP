@@ -1,0 +1,466 @@
+/* Unity MCP はじめかた
+   単一ファイルの手書き CSS です。外部への要求は一つもありません。 */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --surface: #f4f6f9;
+  --surface-2: #eaeef4;
+  --text: #14171c;
+  --muted: #565d68;
+  --border: #d5dae1;
+  --accent: #1f56c4;
+  --accent-soft: #e8eefc;
+  --accent-2: #0f7a5a;
+  --accent-2-soft: #e2f4ee;
+  --code-bg: #f0f3f7;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.08);
+
+  --step-max: 46rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c;
+    --surface: #1c2027;
+    --surface-2: #232833;
+    --text: #e7eaef;
+    --muted: #a2aab6;
+    --border: #333a45;
+    --accent: #8fb0ff;
+    --accent-soft: #1e2637;
+    --accent-2: #6fd3ae;
+    --accent-2-soft: #162b25;
+    --code-bg: #1a1e25;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Noto Sans JP", Meiryo, sans-serif;
+  font-size: 17px;
+  line-height: 1.9;
+  letter-spacing: 0.01em;
+}
+
+.wrap {
+  max-width: var(--step-max);
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+/* ---------- ヘッダー ---------- */
+
+.topbar {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 1.25rem;
+}
+
+.lang-link {
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.9rem;
+  background: var(--surface);
+}
+
+.lang-link:hover,
+.lang-link:focus-visible {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+header.hero {
+  padding: 2.5rem 0 1rem;
+}
+
+h1 {
+  font-size: 2.1rem;
+  line-height: 1.4;
+  margin: 0 0 0.75rem;
+  letter-spacing: 0.01em;
+}
+
+.tagline {
+  font-size: 1.1rem;
+  margin: 0 0 1.25rem;
+}
+
+.headline {
+  font-size: 1.1rem;
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+}
+
+/* ---------- 必要なもの ---------- */
+
+.prereq {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin: 2rem 0;
+}
+
+.prereq h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.prereq ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.prereq li + li {
+  margin-top: 0.4rem;
+}
+
+/* ---------- 分岐カード ---------- */
+
+.chooser {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin: 2.5rem 0 3.5rem;
+}
+
+@media (min-width: 40rem) {
+  .chooser {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.75rem 1.5rem;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.card:hover,
+.card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.card .card-kicker {
+  display: inline-block;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+}
+
+.card h2 {
+  font-size: 1.3rem;
+  margin: 0 0 0.6rem;
+  line-height: 1.5;
+}
+
+.card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.98rem;
+}
+
+.card .card-go {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.98rem;
+}
+
+.card-b .card-go {
+  color: var(--accent-2);
+}
+
+.card-b:hover,
+.card-b:focus-visible {
+  border-color: var(--accent-2);
+}
+
+/* ---------- 手順 ---------- */
+
+.route {
+  padding-top: 2rem;
+  margin-bottom: 4rem;
+  border-top: 1px solid var(--border);
+}
+
+.route > h2 {
+  font-size: 1.7rem;
+  line-height: 1.5;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.route > .route-note {
+  color: var(--muted);
+  margin: 0 0 2.5rem;
+}
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+}
+
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding: 0 0 3rem 3.25rem;
+}
+
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.15rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 2.25rem;
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .steps > li::before {
+    color: #10131a;
+  }
+}
+
+.route-b .steps > li::before {
+  background: var(--accent-2);
+}
+
+.steps h3 {
+  font-size: 1.2rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.6;
+}
+
+.steps p {
+  margin: 0 0 1rem;
+}
+
+.aside {
+  color: var(--muted);
+  font-size: 0.95rem;
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  margin: 1rem 0 0;
+}
+
+/* ---------- コード ---------- */
+
+/* 折り返して全体を見せます。横スクロールにすると、読者が最初に必要とする git URL の
+   後半が画面の外に出たままになり、途中までしか選択されないためです。 */
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+  line-height: 1.7;
+}
+
+pre code {
+  font-size: 0.92rem;
+  background: none;
+  padding: 0;
+  border: 0;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+    "Liberation Mono", Menlo, monospace;
+  font-size: 0.92em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+  word-break: break-all;
+}
+
+.code-label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+
+/* ---------- 画像とプレースホルダー ---------- */
+
+.shot {
+  margin: 1.5rem 0 0;
+}
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.shot figcaption {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-top: 0.75rem;
+  line-height: 1.8;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 11rem;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 1.5rem;
+}
+
+.placeholder-label {
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- できること ---------- */
+
+.can-do {
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+  margin-bottom: 4rem;
+}
+
+.can-do h2 {
+  font-size: 1.5rem;
+  margin: 1.5rem 0 1rem;
+}
+
+.can-do ul {
+  padding-left: 1.2rem;
+  margin: 0 0 1.5rem;
+}
+
+.can-do li + li {
+  margin-top: 0.5rem;
+}
+
+/* ---------- 困ったとき ---------- */
+
+.trouble {
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+  margin-bottom: 4rem;
+}
+
+.trouble h2 {
+  font-size: 1.5rem;
+  margin: 1.5rem 0 1.5rem;
+}
+
+.trouble-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 52rem) {
+  .trouble-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.trouble-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.35rem;
+}
+
+.trouble-item h3 {
+  font-size: 1.02rem;
+  margin: 0 0 0.5rem;
+  line-height: 1.6;
+}
+
+.trouble-item p {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.85;
+}
+
+.trouble-item a {
+  font-size: 0.9rem;
+}
+
+/* ---------- リンクとフッター ---------- */
+
+a {
+  color: var(--accent);
+}
+
+a:hover,
+a:focus-visible {
+  text-decoration: none;
+}
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem 0 4rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+footer ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+footer p {
+  margin: 0;
+}

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -373,7 +373,7 @@ namespace UnityMCP.Editor.Timeline
                     $"{clip.asset?.GetType().Name ?? "clip with no asset"}.");
             }
 
-            return ObjectResolve.Object(sourcePath, null, "control_source");
+            return ObjectResolve.Object(sourcePath, null, "control_source", null);
         }
 
         /// <summary>Points a Control clip at the object whose director it drives.</summary>

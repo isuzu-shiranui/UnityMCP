@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 
 using Newtonsoft.Json.Linq;
@@ -24,11 +24,11 @@ namespace UnityMCP.Editor.Tools
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Create Prefab")]
         public static JObject Create(
-            [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
+            [McpArg("object_path", "Hierarchy path of the scene object to save, from scene_browse_hierarchy.")]
             string objectPath = null,
-            [McpArg("instance_id", "Instance id, instead of a path.")]
+            [McpArg("instance_id", "Instance id of that scene object, instead of object_path.")]
             long? instanceId = null,
-            [McpArg("path", "Where to save it, e.g. Assets/Prefabs/Enemy.prefab.")]
+            [McpArg("path", "Project path of the prefab asset to write, e.g. Assets/Prefabs/Enemy.prefab.")]
             string path = null,
             [McpArg("connect", "Leave the scene object linked to the new prefab.")]
             bool connect = true,
@@ -70,7 +70,10 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "prefab_instantiate",
-            "Place a prefab into the open scene.",
+            "Place a prefab into the open scene as a linked instance, so later edits to the prefab " +
+            "asset reach it. Use this rather than gameobject_create whenever the object already " +
+            "exists as a prefab, and rather than gameobject_duplicate when a copy has to stay " +
+            "linked. The new object becomes the Editor's selection.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Instantiate Prefab")]
         public static JObject Instantiate(
@@ -106,7 +109,7 @@ namespace UnityMCP.Editor.Tools
 
             if (!string.IsNullOrWhiteSpace(parentPath) || parentInstanceId.HasValue)
             {
-                parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path").transform;
+                parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id").transform;
             }
 
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
@@ -147,9 +150,13 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "prefab_apply",
-            "Push a prefab instance's overrides back into the prefab asset. This changes every other " +
-            "instance too, so check prefab_status first if that matters.",
-            Idempotency = McpIdempotency.Unsafe)]
+            "Push a prefab instance's overrides back into the prefab asset. Every other instance of " +
+            "that prefab takes the change as well, in every scene, and applying is not on the undo " +
+            "stack, so there is no way back from it. Read the instance with inspect_list or " +
+            "inspect_read first when you need to know what is about to be pushed. The reply reports " +
+            "how many overrides were applied.",
+            Idempotency = McpIdempotency.Unsafe,
+            Destructive = true)]
         public static JObject Apply(
             [McpArg("object_path", "Hierarchy path of the instance, from scene_browse_hierarchy.")]
             string objectPath = null,
@@ -168,8 +175,7 @@ namespace UnityMCP.Editor.Tools
 
             var assetPath = PrefabUtility.GetPrefabAssetPathOfNearestInstanceRoot(root);
 
-            // Applying is not on the undo stack and rewrites an asset every instance shares.
-            // Reporting the count is the only warning a caller gets.
+            // Counted before the apply, which clears them.
             var overrides = PrefabUtility.GetObjectOverrides(root).Count
                             + PrefabUtility.GetAddedComponents(root).Count
                             + PrefabUtility.GetAddedGameObjects(root).Count;

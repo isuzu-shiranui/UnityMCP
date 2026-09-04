@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Getting started with Unity MCP</title>
+<meta name="description" content="How to install Unity MCP and connect the Unity Editor to Claude. If you only want to work on an avatar, you never type a command.">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <a class="lang-link" href="../" hreflang="ja" lang="ja">日本語</a>
+  </div>
+
+  <header class="hero">
+    <h1>Getting started with Unity MCP</h1>
+    <p class="tagline">This package connects the Unity Editor to Claude. You describe what you want. Claude can then look through your scene, add objects and read the errors in the Console.</p>
+    <p class="headline">If you only want to work on an avatar, you never type a command. You do not need to open a terminal.</p>
+  </header>
+
+  <section class="prereq" aria-labelledby="prereq-title">
+    <h2 id="prereq-title">What you need</h2>
+    <ul>
+      <li>Unity Editor 2022.3 or newer</li>
+      <li>Git, from <a href="https://git-scm.com/downloads">git-scm.com</a>. Unity uses it in step 1 to fetch the package. Without it the Package Manager stops with "No 'git' executable was found". The installer's defaults are fine. If you use VCC or ALCOM, the next section installs the package without Git</li>
+      <li>Claude Desktop, for the route with no commands. It ships for Windows and macOS. On Linux, take route B</li>
+      <li>The project open in the Unity Editor the whole time you use it</li>
+    </ul>
+  </section>
+
+  <section class="prereq" aria-labelledby="vpm-title">
+    <h2 id="vpm-title">If you use VCC or ALCOM</h2>
+    <p>If you manage your project with the VRChat Creator Companion (VCC) or with ALCOM, install the package from its VPM repository instead. <strong>That route needs no Git.</strong> VCC and ALCOM download a package as a zip, so neither of them runs Git the way Unity's Package Manager does.</p>
+    <p>The link below opens VCC or ALCOM and asks you to confirm that you want to add the repository. VCC 2.1.0 or newer is required.</p>
+    <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Add the Unity MCP repository</a></p>
+    <p>If nothing happens when you press it, add the URL by hand. In VCC that is the Add Repository button on the Packages tab of the Settings page. In ALCOM it is the Add Repository button on the Repositories page under Resources.</p>
+    <span class="code-label">The repository URL</span>
+    <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
+    <p>Once the repository is added, Unity MCP appears in your project's package list, and you install it from there.</p>
+    <p class="aside">If you installed the package this way, skip the first step of route A and of route B below and start from the second.</p>
+  </section>
+
+  <nav class="chooser" aria-label="Choose a route">
+    <a class="card card-a" href="#avatar">
+      <span class="card-kicker">A</span>
+      <h2>I only want to work on an avatar</h2>
+      <p>Unity and Claude Desktop are all you need. You never type a command.</p>
+      <span class="card-go">Show me this route</span>
+    </a>
+    <a class="card card-b" href="#dev">
+      <span class="card-kicker">B</span>
+      <h2>I also write code</h2>
+      <p>Install the command line tool and use it from Claude Code.</p>
+      <span class="card-go">Show me this route</span>
+    </a>
+  </nav>
+
+  <section class="route route-a" id="avatar" aria-labelledby="avatar-title">
+    <h2 id="avatar-title">A. I only want to work on an avatar</h2>
+    <p class="route-note">There are five steps in all. <strong>There is not a single command in this route.</strong></p>
+
+    <ol class="steps">
+
+      <li>
+        <h3>Install the package in Unity</h3>
+        <p>In the Unity Editor open Window &gt; Package Manager. Press the + button at the top left and choose Add package from git URL. Paste the URL below and press Add.</p>
+        <span class="code-label">The URL to paste</span>
+        <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+        <figure class="shot">
+          <img src="../img/package-manager.png" alt="Screenshot of Unity's Package Manager with the Unity MCP package added to the list.">
+          <figcaption>Once the install finishes, Unity MCP appears in the Package Manager list.</figcaption>
+        </figure>
+        <p class="aside">If you installed the package through VCC or ALCOM above, you have already done this. Go on to the next step.</p>
+      </li>
+
+      <li>
+        <h3>Check that it is running</h3>
+        <p>Open the Editor's Preferences window and choose Unity MCP in the list on the left. On Windows, Preferences is under the Edit menu. When the first row under Setup reads "✓ Listening on port", the Unity side is ready.</p>
+        <figure class="shot">
+          <img src="../img/preferences.png" alt="Screenshot of the Unity MCP page in Preferences, with the first Setup row reading Listening on port 27400 next to a check mark.">
+          <figcaption>A check mark on the first Setup row means the Editor is accepting connections. The CLI on the second row is not needed for route A.</figcaption>
+        </figure>
+        <p class="aside">The server starts by itself when the Editor opens a project. There is nothing to start by hand.</p>
+      </li>
+
+      <li>
+        <h3>Download the extension</h3>
+        <p>Open the <a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases page on GitHub</a> and download the file named <code>isuzu-unity-cli.mcpb</code>.</p>
+        <!-- TODO: replace after the first release -->
+        <figure class="shot">
+          <div class="placeholder" role="img" aria-label="The Assets list on the Releases page showing isuzu-unity-cli.mcpb. A real screenshot goes here after the first release.">
+            <span class="placeholder-label">Screenshot coming after the first release</span>
+          </div>
+          <figcaption>The list called Assets on the Releases page contains <code>isuzu-unity-cli.mcpb</code>. Clicking that name starts the download.</figcaption>
+        </figure>
+      </li>
+
+      <li>
+        <h3>Double-click it to install it into Claude Desktop</h3>
+        <p>Double-click the file you downloaded. Claude Desktop shows an install screen for the extension. You can leave the Unity project name field empty when only one Unity project is open.</p>
+        <!-- TODO: replace after the first release -->
+        <figure class="shot">
+          <div class="placeholder" role="img" aria-label="The dialog Claude Desktop shows when installing an extension, including the Unity project name field. A real screenshot goes here after the first release.">
+            <span class="placeholder-label">Screenshot coming after the first release</span>
+          </div>
+          <figcaption>Claude Desktop asks you to confirm the install and shows a Unity project name field. You can go ahead with it empty.</figcaption>
+        </figure>
+        <p class="aside">The bundle is self-signed. Claude Desktop writes a warning to its log about an unsigned extension when it installs. The extension works regardless. Dragging the file onto the window does the same thing, and so does choosing it under Settings &gt; Extensions &gt; Advanced settings &gt; Install Extension. If double-clicking opens a window that closes again straight away, that is a known issue with the Microsoft Store build of Claude Desktop. Rename the file to <code>.zip</code> and extract it. Then pick the folder with Install Unpacked Extension on the same screen.</p>
+      </li>
+
+      <li>
+        <h3>Start talking to it</h3>
+        <p>Keep the project open in the Unity Editor and write what you want in Claude Desktop. Nothing works while the Unity Editor is closed.</p>
+        <!-- TODO: replace after the first release -->
+        <figure class="shot">
+          <div class="placeholder" role="img" aria-label="A conversation in Claude Desktop asking about a Unity scene and receiving an answer. A real screenshot goes here after the first release.">
+            <span class="placeholder-label">Screenshot coming after the first release</span>
+          </div>
+          <figcaption>Ask about your Unity scene and Claude calls the Editor's tools to answer.</figcaption>
+        </figure>
+      </li>
+
+    </ol>
+  </section>
+
+  <section class="route route-b" id="dev" aria-labelledby="dev-title">
+    <h2 id="dev-title">B. I also write code</h2>
+    <p class="route-note">Install the command line tool <code>isuzu-unity-cli</code> and use it from Claude Code. The published binaries are native, so they need no Node.js and no .NET runtime.</p>
+
+    <ol class="steps">
+
+      <li>
+        <h3>Install the package in Unity</h3>
+        <p>This is the same as the first step of route A. Open Window &gt; Package Manager and paste this URL into Add package from git URL.</p>
+        <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+        <p class="aside">If you installed the package through VCC or ALCOM above, you have already done this.</p>
+      </li>
+
+      <li>
+        <h3>Install the command line tool</h3>
+        <p>Run one line in a terminal.</p>
+        <span class="code-label">Windows (PowerShell)</span>
+        <pre><code>irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 | iex</code></pre>
+        <span class="code-label">macOS / Linux</span>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh</code></pre>
+        <p class="aside">With the .NET SDK installed, <code>dotnet tool install -g IsuzuUnityCli</code> works too. You can also download a binary directly from <a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases</a>. The Install CLI button in Preferences &gt; Unity MCP opens a terminal and runs this install script for you.</p>
+      </li>
+
+      <li>
+        <h3>Install the agent skill</h3>
+        <p>This installs the skill for Claude Code and Codex.</p>
+        <pre><code>isuzu-unity-cli setup</code></pre>
+      </li>
+
+      <li>
+        <h3>Register the endpoint with Claude Code</h3>
+        <p><strong>One line registers both the URL and the token.</strong> You never handle the token yourself.</p>
+        <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
+        <p class="aside"><code>--agent</code> accepts <code>claude-code</code>, <code>claude-desktop</code>, <code>codex</code>, <code>cursor</code>, <code>gemini</code> and <code>vscode</code>. The Unity Editor has to be running when you run that command. Every command is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/cli.md">CLI reference</a>. The per-client configuration is in <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">Connecting MCP clients</a>.</p>
+      </li>
+
+    </ol>
+  </section>
+
+  <section class="can-do" aria-labelledby="can-do-title">
+    <h2 id="can-do-title">What you can do once it is connected</h2>
+    <ul>
+      <li>Walk the scene hierarchy and find the GameObject you mean.</li>
+      <li>Create GameObjects, add components, and change position, rotation and scale.</li>
+      <li>Read and write the serialized properties you see in the Inspector.</li>
+      <li>Read the errors and warnings in the Console, or read <code>Editor.log</code> directly.</li>
+      <li>Take screenshots of the Game view and the Scene view.</li>
+      <li>Read the current values on a material and change them.</li>
+      <li>Start and stop Play Mode.</li>
+    </ul>
+    <p>The Editor publishes at most 88 tools. The Timeline and Recorder tools appear only in projects that have those packages installed. A project with neither publishes 75 tools. The full list is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/tools.md">tool reference</a>.</p>
+  </section>
+
+  <section class="trouble" aria-labelledby="trouble-title">
+    <h2 id="trouble-title">When something goes wrong</h2>
+    <div class="trouble-list">
+
+      <div class="trouble-item">
+        <h3>The Unity Editor is not open</h3>
+        <p>Every tool acts on a running Unity Editor, so nothing answers while the Editor is closed. Open the project again and check that Status reads Listening in Preferences &gt; Unity MCP.</p>
+      </div>
+
+      <div class="trouble-item">
+        <h3>Several projects are open at once</h3>
+        <p>With more than one Unity Editor running, there is no way to tell which project you mean. Type the name shown in the Unity Editor title bar into the project name field, which is in the extension's settings in Claude Desktop. The Product Name from Player Settings works too. If both names still match several Editors, closing the others is the sure way.</p>
+        <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">Read the per-client setup</a>
+      </div>
+
+      <div class="trouble-item">
+        <h3>The tools do not show up</h3>
+        <p>When adding or removing a package changes which tools exist, no notification is sent to the client. Reconnect Claude Desktop or Claude Code.</p>
+        <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/troubleshooting.md">Read the troubleshooting page</a>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <ul>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP">Repository</a></li>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/README.en.md">README</a></li>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/troubleshooting.md">Troubleshooting</a></li>
+      <li><a href="../" hreflang="ja" lang="ja">日本語</a></li>
+    </ul>
+    <p>Distributed under the MIT license.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

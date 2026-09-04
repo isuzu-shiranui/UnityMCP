@@ -1,0 +1,102 @@
+name: Pages
+
+# Publishes site/ to GitHub Pages at unity-mcp.shiranui-isuzu.dev. The domain lives in
+# site/CNAME, which upload-pages-artifact carries into the artifact as is; removing that file
+# would drop the custom domain on the next deployment.
+#
+# One file the site serves is not in the repository: vpm.json, the VPM repository listing, is
+# built into the artifact below. Looking for it in site/ will not find it.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+  # A published release is also a reason to deploy: the page tells the reader to download an
+  # asset from the latest release, so it should refresh as soon as one exists.
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages allows one deployment at a time. Queue rather than cancel so a finished deployment is
+# never replaced by a half-run one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # vpm.json is built into the artifact rather than kept in the repository. It is derived
+      # from the releases API, so it always describes what actually shipped, every release that
+      # carries the package zip stays installable without anything having to remember it, and
+      # publishing a release never has to write to a protected branch.
+      - name: Build the VPM listing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/build-vpm.sh site/vpm.json
+
+      # The page walks a beginner to two downloads: an asset on the Releases page, and the VPM
+      # listing behind its one-click VCC and ALCOM link. Publishing before either exists sends
+      # the reader somewhere empty, and they cannot tell a missing file from a mistake of their
+      # own. workflow_dispatch overrides this, both for editing the page itself and for the
+      # deployment the release workflow asks for once the release exists.
+      - name: The downloads the page names exist?
+        id: assets
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          READY=true
+
+          if ! gh release view --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' 2>/dev/null | grep -qxF 'isuzu-unity-cli.mcpb'; then
+            echo "No release carries isuzu-unity-cli.mcpb yet, so the page would send readers"
+            echo "to an empty Releases list."
+            READY=false
+          fi
+
+          # Reading what the step above derived, which is the answer the releases API just gave:
+          # no release carries the package zip, so there is no version to install. VCC and ALCOM
+          # would add the repository and show nothing in it, which reads as a broken link rather
+          # than as a release that has not happened yet.
+          if ! jq -e '[.packages[].versions | length] | add > 0' site/vpm.json >/dev/null 2>&1; then
+            echo "No release carries the package zip, so the listing names no version and the"
+            echo "VCC and ALCOM link would add an empty repository."
+            READY=false
+          fi
+
+          if [ "$READY" = "false" ]; then
+            echo "Skipping the deployment; re-run this workflow by hand once the release exists,"
+            echo "or let the next release ask for it."
+          fi
+
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/configure-pages@v5
+        if: steps.assets.outputs.ready != 'false'
+
+      - name: Upload site
+        if: steps.assets.outputs.ready != 'false'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy
+        id: deployment
+        if: steps.assets.outputs.ready != 'false'
+        uses: actions/deploy-pages@v4

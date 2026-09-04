@@ -110,6 +110,26 @@ namespace UnityMCP.Editor.Tests
             return ToolInvoker.Invoke(descriptor, args);
         }
 
+        /// <summary>
+        /// A tool whose body is a delegate rather than a discovered method.
+        /// </summary>
+        private static McpToolDescriptor Direct(string name, Func<JObject, JObject> body, bool destructive = false)
+        {
+            return new McpToolDescriptor(
+                name,
+                "A tool with no backing method.",
+                new JObject { ["type"] = "object", ["properties"] = new JObject() },
+                McpIdempotency.Unsafe,
+                true,
+                destructive,
+                null,
+                null,
+                false,
+                0,
+                "Assets/Defined/" + name + ".json",
+                body);
+        }
+
         [Test]
         public void BindsRequiredAndDefaultedArguments()
         {
@@ -275,6 +295,80 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(ex.Code, Is.EqualTo("invalid_params"),
                 "A preview whose arguments do not bind is not a useful preview.");
+        }
+
+        [Test]
+        public void DirectToolReturnsItsObject()
+        {
+            var descriptor = Direct("t_direct", args => new JObject { ["seen"] = args["text"] });
+
+            var result = ToolInvoker.Invoke(descriptor, new JObject { ["text"] = "hello" });
+
+            Assert.That(result["seen"].Value<string>(), Is.EqualTo("hello"),
+                "A direct tool's object is the result, unwrapped, exactly as a method tool's is.");
+        }
+
+        [Test]
+        public void DirectToolNullBecomesOk()
+        {
+            var descriptor = Direct("t_direct_null", _ => null);
+
+            var result = ToolInvoker.Invoke(descriptor, new JObject());
+
+            Assert.That(result["ok"].Value<bool>(), Is.True);
+        }
+
+        [Test]
+        public void DirectToolExceptionIsToolFailed()
+        {
+            var descriptor = Direct("t_direct_throws", _ => throw new InvalidOperationException("boom"));
+
+            var failure = Assert.Throws<McpToolException>(() => ToolInvoker.Invoke(descriptor, new JObject()));
+
+            Assert.That(failure.Code, Is.EqualTo("tool_failed"));
+            Assert.That(failure.HttpStatus, Is.EqualTo(500));
+            Assert.That(failure.Message, Does.Contain("t_direct_throws").And.Contain("boom"));
+
+            var refusing = Direct("t_direct_refuses", _ => throw new McpToolException("invalid_params", "no path", 400));
+
+            var refusal = Assert.Throws<McpToolException>(() => ToolInvoker.Invoke(refusing, new JObject()));
+
+            Assert.That(refusal.Code, Is.EqualTo("invalid_params"),
+                "A tool's own refusal already carries the code the caller acts on.");
+        }
+
+        [Test]
+        public void DirectDestructiveToolNeedsConfirmAndSupportsDryRun()
+        {
+            var calls = 0;
+            var descriptor = Direct(
+                "t_direct_delete",
+                args =>
+                {
+                    calls++;
+                    return new JObject { ["path"] = args["path"] };
+                },
+                destructive: true);
+
+            var refusal = Assert.Throws<McpToolException>(
+                () => ToolInvoker.Invoke(descriptor, new JObject { ["path"] = "Assets/x" }));
+
+            Assert.That(refusal.Code, Is.EqualTo("confirmation_required"));
+            Assert.That(calls, Is.Zero, "The tool body must not run without confirmation.");
+
+            var preview = ToolInvoker.Invoke(descriptor, new JObject { ["path"] = "Assets/x", ["dry_run"] = true });
+
+            Assert.That(preview["dry_run"].Value<bool>(), Is.True);
+            Assert.That(preview["tool"].Value<string>(), Is.EqualTo("t_direct_delete"));
+            Assert.That(preview["would_execute"].Value<bool>(), Is.True);
+            Assert.That(preview["arguments"]["path"].Value<string>(), Is.EqualTo("Assets/x"));
+            Assert.That(preview["arguments"]["dry_run"], Is.Null, "The invoker's own flags are not arguments.");
+            Assert.That(calls, Is.Zero, "A dry run must not execute the tool body.");
+
+            var executed = ToolInvoker.Invoke(descriptor, new JObject { ["path"] = "Assets/x", ["confirm"] = true });
+
+            Assert.That(executed["path"].Value<string>(), Is.EqualTo("Assets/x"));
+            Assert.That(calls, Is.EqualTo(1));
         }
     }
 }

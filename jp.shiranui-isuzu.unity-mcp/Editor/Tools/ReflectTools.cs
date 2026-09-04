@@ -1,10 +1,12 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
 using Newtonsoft.Json.Linq;
+
+using UnityEditor;
 
 using UnityEngine;
 
@@ -23,8 +25,10 @@ namespace UnityMCP.Editor.Tools
     /// which is slow, is not on the undo stack, and puts a compile error between the question and
     /// the answer. This asks directly.
     /// <para>
-    /// Reads only. Fields and parameterless property getters, never methods, so a question cannot
-    /// change what it is asking about.
+    /// Fields and parameterless property getters, never methods. That is not the same as being
+    /// free of side effects: a getter runs arbitrary code, and <c>Renderer.material</c> and
+    /// <c>MeshFilter.mesh</c> are documented mutators that swap in a fresh instance when read.
+    /// There is no allowlist, so a path can change the scene it is asking about.
     /// </para>
     /// </remarks>
     internal static class ReflectTools
@@ -39,11 +43,16 @@ namespace UnityMCP.Editor.Tools
             "reflect_read",
             "Read live state by type and member path, including private ones: " +
             "'MyPipeline.ShadowManager/ByCamera[0]/levels[2]/worldToShadow'. Segments are separated " +
-            "by '/', indexers by [n] or [\"key\"]. Use this instead of execute_code when the question " +
-            "is what a value currently is.",
+            "by '/', indexers by [n] or [\"key\"]. The first segment may also be an instance root: " +
+            "'@scene:/Canvas/Button[1]' (a hierarchy path, then optionally a component type name), " +
+            "'@id:<instanceId>', '@selection', '@sceneview:camera' or '@type:Ns.Type'. " +
+            "Use this instead of execute_code when the question is what a value currently is. " +
+            "Reading a member runs its getter, and a few Unity getters change the scene as a side " +
+            "effect: Renderer.material and MeshFilter.mesh each replace the shared asset with a " +
+            "fresh instance. Read sharedMaterial and sharedMesh instead when you only want to look.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Read(
-            [McpArg("path", "Type name, then members: 'Namespace.Type/field/other[3]'.")]
+            [McpArg("path", "Type name or instance root, then members: 'Namespace.Type/field/other[3]', '@selection/transform/position'.")]
             string path = null,
             [McpArg("depth", "How deep to serialise nested objects.")]
             int depth = 2,
@@ -122,15 +131,14 @@ namespace UnityMCP.Editor.Tools
         internal static object ResolvePath(string path, out Type rootType, out string walked)
         {
             var segments = SplitPath(path);
-            rootType = ResolveType(segments[0]);
-            object current = null;
-            walked = segments[0].Raw;
+            var current = ResolveRoot(segments, out rootType, out var consumed, out walked);
+            var staticRoot = current == null;
 
-            for (var i = 1; i < segments.Count; i++)
+            for (var i = consumed; i < segments.Count; i++)
             {
                 var step = segments[i];
 
-                current = i == 1
+                current = i == consumed && staticRoot
                     ? ReadMember(rootType, null, step, walked)
                     : ReadMember(current?.GetType(), current, step, walked);
 
@@ -143,6 +151,198 @@ namespace UnityMCP.Editor.Tools
             }
 
             return current;
+        }
+
+        /// <summary>
+        /// Resolves the first segment of a path: a type name (statics are then read from it) or an
+        /// instance root written with an <c>@</c> prefix, whose members are then read from the
+        /// instance.
+        /// </summary>
+        /// <remarks>
+        /// <c>@scene:</c> takes as many segments as still name a child object, so the hierarchy
+        /// path needs no terminator, then a component type name if the next segment is one. The
+        /// same component step applies to every root that yields a GameObject.
+        /// </remarks>
+        /// <param name="consumed">How many leading segments the root used.</param>
+        /// <returns>The instance to read from, or null when the root is a type.</returns>
+        internal static object ResolveRoot(
+            List<Segment> segments, out Type rootType, out int consumed, out string walked)
+        {
+            var first = segments[0];
+            consumed = 1;
+            walked = first.Raw;
+
+            if (!first.Raw.StartsWith("@", StringComparison.Ordinal))
+            {
+                rootType = ResolveType(first);
+                return null;
+            }
+
+            var colon = first.Raw.IndexOf(':');
+            var root = colon < 0 ? first.Raw : first.Raw.Substring(0, colon);
+            var rest = colon < 0 ? string.Empty : first.Raw.Substring(colon + 1);
+            object instance;
+
+            switch (root)
+            {
+                case "@type":
+                    if (rest.Length == 0)
+                    {
+                        throw new McpToolException("invalid_params", "'@type:' needs a type name after the colon.");
+                    }
+
+                    rootType = ResolveType(new Segment { Raw = rest, Name = rest });
+                    return null;
+
+                case "@scene":
+                    instance = ResolveSceneObject(segments, rest, ref consumed, ref walked);
+                    break;
+
+                case "@id":
+                    if (!long.TryParse(rest, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var id))
+                    {
+                        throw new McpToolException("invalid_params", $"'@id:{rest}' is not an instance id.");
+                    }
+
+                    instance = EntityIdCompat.Find(id);
+
+                    if (instance == null)
+                    {
+                        throw new McpToolException(
+                            "not_found",
+                            $"No object has instance id {id}. Instance ids do not survive a domain reload or a " +
+                            "scene change; re-read the hierarchy to get current ones.");
+                    }
+
+                    break;
+
+                case "@selection":
+                    instance = Selection.activeObject;
+
+                    if (instance == null)
+                    {
+                        throw new McpToolException("not_found", "Nothing is selected.");
+                    }
+
+                    break;
+
+                case "@sceneview":
+                    var sceneView = SceneView.lastActiveSceneView;
+
+                    if (sceneView == null)
+                    {
+                        throw new McpToolException("not_found", "No Scene View has been active in this session.");
+                    }
+
+                    if (rest == "camera")
+                    {
+                        instance = sceneView.camera;
+
+                        if (instance == null)
+                        {
+                            throw new McpToolException("not_found", "The Scene View has no camera yet.");
+                        }
+                    }
+                    else if (rest.Length == 0)
+                    {
+                        instance = sceneView;
+                    }
+                    else
+                    {
+                        throw new McpToolException(
+                            "invalid_params", $"'@sceneview:{rest}' is not known; use '@sceneview' or '@sceneview:camera'.");
+                    }
+
+                    break;
+
+                default:
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"'{first.Raw}' is not a root. Roots are a type name, '@type:Ns.Type', " +
+                        "'@scene:/Path/To/Object', '@id:<instanceId>', '@selection' and '@sceneview:camera'.");
+            }
+
+            if (instance is GameObject gameObject && consumed < segments.Count &&
+                TryComponent(gameObject, segments[consumed].Name, out var component))
+            {
+                walked += "/" + segments[consumed].Raw;
+                consumed++;
+                instance = component;
+            }
+
+            rootType = instance.GetType();
+            return instance;
+        }
+
+        private static object ResolveSceneObject(List<Segment> segments, string rest, ref int consumed, ref string walked)
+        {
+            var scenePath = rest.Trim('/');
+            GameObject found = null;
+
+            if (scenePath.Length > 0)
+            {
+                found = ObjectResolve.Object("/" + scenePath, null, "path", null);
+            }
+
+            while (consumed < segments.Count)
+            {
+                var candidate = scenePath.Length == 0 ? segments[consumed].Raw : scenePath + "/" + segments[consumed].Raw;
+                GameObject child;
+
+                try
+                {
+                    child = ObjectResolve.Object("/" + candidate, null, "path", null);
+                }
+                catch (McpToolException)
+                {
+                    break;
+                }
+
+                found = child;
+                scenePath = candidate;
+                walked += "/" + segments[consumed].Raw;
+                consumed++;
+            }
+
+            if (found == null)
+            {
+                throw new McpToolException(
+                    "not_found",
+                    $"'@scene:{rest}' names no object. Write the hierarchy path after the colon or as the " +
+                    "following segments: '@scene:/Canvas/Button[1]/transform'.");
+            }
+
+            return found;
+        }
+
+        private static bool TryComponent(GameObject gameObject, string typeName, out Component component)
+        {
+            component = null;
+
+            if (string.IsNullOrEmpty(typeName))
+            {
+                return false;
+            }
+
+            foreach (var candidate in gameObject.GetComponents<Component>())
+            {
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                for (var t = candidate.GetType(); t != null; t = t.BaseType)
+                {
+                    if (t.Name == typeName || t.FullName == typeName)
+                    {
+                        component = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         // ── path parsing ──

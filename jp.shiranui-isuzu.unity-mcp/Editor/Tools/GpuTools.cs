@@ -28,18 +28,25 @@ namespace UnityMCP.Editor.Tools
             "Read a GPU buffer or texture back and report its statistics: range, mean, how many " +
             "elements are zero, and a histogram. Point it at a buffer with the same path syntax as " +
             "reflect_read. Use this to answer whether a compute pass actually wrote anything, which " +
-            "is the question a screenshot cannot settle.",
+            "is the question a screenshot cannot settle. A texture is read as a single 32-bit " +
+            "channel, so every number describes red alone and a target written only in green or " +
+            "blue reads as all zero. The readback blocks the main thread until the transfer " +
+            "finishes.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Readback(
             [McpArg("path", "Path to a GraphicsBuffer, ComputeBuffer or Texture, as reflect_read takes.")]
             string path = null,
             [McpArg("global_texture", "Read a globally bound shader texture by name instead.")]
             string globalTexture = null,
-            [McpArg("format", "How to read each element: uint, int or float.")]
+            [McpArg("format", "How to read each element: uint, int or float. For a texture this " +
+                              "also picks the single channel format it is resolved to, reported " +
+                              "back as readAs.")]
             string format = "float",
-            [McpArg("offset", "First element to include.")]
+            [McpArg("offset", "First element to include in the statistics.")]
             int offset = 0,
-            [McpArg("count", "How many elements to examine; 0 reads everything.")]
+            [McpArg("count", "How many elements the statistics cover; 0 covers everything from " +
+                             "offset. The whole buffer or texture is transferred either way, so a " +
+                             "small count does not make a large readback cheaper.")]
             int count = 0,
             [McpArg("samples", "How many raw values to return alongside the statistics.")]
             int samples = 8,

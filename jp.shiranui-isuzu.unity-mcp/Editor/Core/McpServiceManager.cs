@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+using UnityMCP.Editor.Settings;
+
 namespace UnityMCP.Editor.Core
 {
     /// <summary>
@@ -17,6 +19,8 @@ namespace UnityMCP.Editor.Core
         /// Gets the singleton instance of the service manager.
         /// </summary>
         public static McpServiceManager Instance => instance.Value;
+
+        private static bool DetailedLogs => McpSettings.instance.detailedLogs;
 
         private McpServiceManager() { }
 
@@ -43,7 +47,10 @@ namespace UnityMCP.Editor.Core
                 }
 
                 this.services[serviceType] = implementation;
-                Debug.Log($"[McpServiceManager] Registered service: {serviceType.Name}");
+                if (DetailedLogs)
+                {
+                    Debug.Log($"[McpServiceManager] Registered service: {serviceType.Name}");
+                }
             }
         }
 
@@ -100,7 +107,7 @@ namespace UnityMCP.Editor.Core
             lock (this.lockObject)
             {
                 var removed = this.services.Remove(serviceType);
-                if (removed)
+                if (removed && DetailedLogs)
                 {
                     Debug.Log($"[McpServiceManager] Removed service: {serviceType.Name}");
                 }
@@ -116,7 +123,10 @@ namespace UnityMCP.Editor.Core
             lock (this.lockObject)
             {
                 this.services.Clear();
-                Debug.Log("[McpServiceManager] Cleared all services");
+                if (DetailedLogs)
+                {
+                    Debug.Log("[McpServiceManager] Cleared all services");
+                }
             }
         }
     }

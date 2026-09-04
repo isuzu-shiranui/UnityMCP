@@ -20,7 +20,7 @@ namespace UnityMCP.Editor.Handlers
             {
                 var mode = parameters["mode"]?.ToString() ?? "read";
                 var instanceId = parameters["instanceId"]?.Value<long?>();
-                var gameObjectPath = parameters["gameObjectPath"]?.ToString();
+                var objectPath = parameters["objectPath"]?.ToString();
                 var componentType = parameters["componentType"]?.ToString();
                 var componentIndex = parameters["componentIndex"]?.Value<int>() ?? 0;
                 var propertyPath = parameters["propertyPath"]?.ToString();
@@ -34,15 +34,15 @@ namespace UnityMCP.Editor.Handlers
                     go = obj as GameObject;
                 }
 
-                if (go == null && !string.IsNullOrEmpty(gameObjectPath))
+                if (go == null && !string.IsNullOrEmpty(objectPath))
                 {
-                    go = GameObject.Find(gameObjectPath);
+                    go = GameObject.Find(objectPath);
                 }
 
                 if (go == null)
                 {
-                    if (!instanceId.HasValue && string.IsNullOrEmpty(gameObjectPath))
-                        return new JObject { ["error"] = "Either instanceId or gameObjectPath is required" };
+                    if (!instanceId.HasValue && string.IsNullOrEmpty(objectPath))
+                        return new JObject { ["error"] = "Either instance_id or object_path is required" };
                     return new JObject { ["error"] = "GameObject not found" };
                 }
 
@@ -87,6 +87,21 @@ namespace UnityMCP.Editor.Handlers
             }
         }
 
+        private static int MissingScriptCount(Component[] components)
+        {
+            var missing = 0;
+
+            foreach (var comp in components)
+            {
+                if (comp == null)
+                {
+                    missing++;
+                }
+            }
+
+            return missing;
+        }
+
         private static JObject ListComponents(
             GameObject go,
             int offset,
@@ -109,7 +124,15 @@ namespace UnityMCP.Editor.Handlers
                 var comp = components[i];
                 if (comp == null)
                 {
-                    allComponents.Add(new JObject { ["type"] = "null", ["index"] = 0 });
+                    // Unity cannot resolve the script behind this component: the class was
+                    // renamed, or the package that declared it is gone. Its serialized values are
+                    // still on the object and are lost the moment someone removes it.
+                    allComponents.Add(new JObject
+                    {
+                        ["type"] = SceneHierarchy.MissingScript,
+                        ["index"] = 0,
+                        ["missingScript"] = true,
+                    });
                     continue;
                 }
 
@@ -186,6 +209,7 @@ namespace UnityMCP.Editor.Handlers
                 ["gameObject"] = go.name,
                 ["instanceId"] = EntityIdCompat.WireIdOf(go),
                 ["components"] = page["items"],
+                ["missingScripts"] = MissingScriptCount(components),
                 ["truncated"] = page["truncated"],
                 ["next"] = page["next"]
             };
@@ -255,7 +279,7 @@ namespace UnityMCP.Editor.Handlers
         {
             if (string.IsNullOrEmpty(propertyPath))
             {
-                return new JObject { ["error"] = "propertyPath is required for write mode" };
+                return new JObject { ["error"] = "property_path is required for write mode" };
             }
 
             if (value == null)

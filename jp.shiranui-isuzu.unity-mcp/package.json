@@ -1,10 +1,14 @@
 {
   "name": "jp.shiranui-isuzu.unity-mcp",
   "displayName": "Unity MCP",
-  "version": "3.3.1",
+  "version": "4.0.0",
   "author": "Shiranui_Isuzu",
   "unity": "2022.3",
   "description": "A package that provides integration with the Model Context Protocol (MCP) for Unity.",
+  "license": "MIT",
+  "documentationUrl": "https://github.com/isuzu-shiranui/UnityMCP",
+  "changelogUrl": "https://github.com/isuzu-shiranui/UnityMCP/blob/main/jp.shiranui-isuzu.unity-mcp/CHANGELOG.md",
+  "licensesUrl": "https://github.com/isuzu-shiranui/UnityMCP/blob/main/LICENSE",
   "keywords": [
     "unity",
     "mcp",

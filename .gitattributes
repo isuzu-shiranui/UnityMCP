@@ -1,5 +1,5 @@
 # Text is stored with LF and checked out as the platform prefers. The source hash in
-# scripts/source-hash.js strips line endings before hashing for the same reason: without it the
+# scripts/source-hash.cs strips line endings before hashing for the same reason: without it the
 # attestation written on Windows would never match what a Linux runner computes.
 * text=auto eol=lf
 

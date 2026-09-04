@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 
 using Newtonsoft.Json.Linq;
@@ -27,7 +27,8 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "gameobject_create",
             "Create a GameObject, optionally as a primitive and optionally parented to an existing " +
-            "object. Returns the path to address it by later.",
+            "object. Returns the path to address it by later. The new object becomes the Editor's " +
+            "selection.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Create GameObject")]
         public static JObject Create(
@@ -73,7 +74,7 @@ namespace UnityMCP.Editor.Tools
 
             if (!string.IsNullOrWhiteSpace(parentPath) || parentInstanceId.HasValue)
             {
-                var parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path");
+                var parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id");
                 Undo.SetTransformParent(go.transform, parent.transform, "MCP Create GameObject");
             }
 
@@ -128,7 +129,9 @@ namespace UnityMCP.Editor.Tools
             long? parentInstanceId = null,
             [McpArg("sibling_index", "Position among the new parent's children; omit to append.")]
             int? siblingIndex = null,
-            [McpArg("keep_world_position", "Keep the object where it is in world space.")]
+            [McpArg("keep_world_position", "Keep the object where it is in world space. When false " +
+                                          "the object is moved to the new parent's origin: local " +
+                                          "position is zeroed and local rotation is cleared.")]
             bool keepWorldPosition = true)
         {
             var go = ObjectResolve.Object(objectPath, instanceId);
@@ -137,7 +140,7 @@ namespace UnityMCP.Editor.Tools
 
             if (!string.IsNullOrWhiteSpace(parentPath) || parentInstanceId.HasValue)
             {
-                var parentGo = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path");
+                var parentGo = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id");
 
                 if (parentGo.transform.IsChildOf(go.transform))
                 {
@@ -169,7 +172,11 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "gameobject_duplicate",
-            "Duplicate a GameObject, keeping its parent and any prefab link.",
+            "Duplicate a GameObject under the same parent. The copy is a plain GameObject: even " +
+            "when the original is a prefab instance the copy is not linked to the prefab, so later " +
+            "edits to the prefab asset will not reach it and prefab_apply will refuse it. Use " +
+            "prefab_instantiate when the copy has to stay linked. The copy becomes the Editor's " +
+            "selection.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Duplicate GameObject")]
         public static JObject Duplicate(
@@ -274,7 +281,8 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "gameobject_remove_component",
-            "Remove a component by type name.",
+            "Remove a component by type name. Base types match, so 'Renderer' finds a " +
+            "MeshRenderer; pass index when the object carries several of the same type.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Remove Component")]
         public static JObject RemoveComponent(
@@ -282,7 +290,8 @@ namespace UnityMCP.Editor.Tools
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
             long? instanceId = null,
-            [McpArg("component_type", "Type name of the component to remove.")]
+            [McpArg("component_type", "Type name of the component to remove. Short or fully " +
+                                      "qualified, and a base type matches a derived component.")]
             string componentType = null,
             [McpArg("index", "Which one, when the object carries several of the same type.")]
             int index = 0)
@@ -428,12 +437,11 @@ namespace UnityMCP.Editor.Tools
         /// Describes the object a call acted on.
         /// </summary>
         /// <remarks>
-        /// Only what the operation was about. This used to return the name, path, instance id,
-        /// both active flags, the parent, all three transform vectors, every component name and
-        /// the child count, on every call — including gameobject_set_active, where the only
-        /// thing a caller wants to know is that it worked. That is a few hundred characters per
-        /// call of mostly unasked-for detail, and unlike the tool catalogue it is paid again
-        /// every time. The transform and the component list are added by the tools that change
+        /// Only what the operation was about. Adding the parent, all three transform vectors,
+        /// every component name and the child count to every reply costs a few hundred
+        /// characters of unasked-for detail per call, and unlike the tool catalogue that is
+        /// paid again every time — on gameobject_set_active the caller only wants to know that
+        /// it worked. The transform and the component list are added by the tools that change
         /// them; scene_browse_hierarchy and inspect_read answer the rest when it is the actual
         /// question.
         /// </remarks>

@@ -43,8 +43,8 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AbandonedWorkNeverRuns()
         {
-            // This is the v2 double-execution bug: a request that timed out left its action
-            // queued, so the side effect landed anyway and a retry produced it twice.
+            // A request that gives up must not leave its action queued: the side effect would
+            // land anyway and a retry would produce it twice.
             var ran = false;
             var item = this.dispatcher.Submit(() =>
             {
@@ -112,8 +112,8 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void SubmitIsNotBlockedByRunningWork()
         {
-            // v2 held the queue lock while executing, so one slow action stalled every other
-            // worker thread trying to enqueue. Enqueueing must stay cheap during execution.
+            // Holding the queue lock across execution stalls every other worker thread trying
+            // to enqueue. Enqueueing must stay cheap during execution.
             var started = new ManualResetEventSlim(false);
             var release = new ManualResetEventSlim(false);
 
@@ -178,6 +178,52 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(ran, Is.False, "Drained work must not execute afterwards.");
             Assert.That(this.dispatcher.PendingCount, Is.Zero);
+        }
+
+        [Test]
+        public void DeferredItemIsRunningUntilCompleted()
+        {
+            var item = McpMainThreadDispatcher.CreateDeferred();
+
+            Assert.That(item.IsCompleted, Is.False);
+            Assert.That(item.WasAbandoned, Is.False);
+            Assert.That(item.TryAbandon(), Is.False,
+                "A deferred item has no queue entry to cancel, so a successful cancel would misreport it.");
+            Assert.That(this.dispatcher.PendingCount, Is.Zero, "A deferred item must not enter the queue.");
+
+            item.Complete(new JObject { ["value"] = 3 });
+
+            Assert.That(item.IsCompleted, Is.True);
+            Assert.That(item.Result["value"].Value<int>(), Is.EqualTo(3));
+            Assert.That(item.Error, Is.Null);
+        }
+
+        [Test]
+        public void DeferredCompleteIsIdempotent()
+        {
+            // The sequence that owns the item and the shutdown path that cancels it can both
+            // settle it, and whichever lost the race must not overwrite the answer already sent.
+            var item = McpMainThreadDispatcher.CreateDeferred();
+
+            item.Complete(new JObject { ["value"] = 1 });
+            item.Complete(new JObject { ["value"] = 2 });
+            item.Fail(new InvalidOperationException("late"));
+
+            Assert.That(item.Result["value"].Value<int>(), Is.EqualTo(1));
+            Assert.That(item.Error, Is.Null);
+        }
+
+        [Test]
+        public void DeferredFailCarriesTheError()
+        {
+            var item = McpMainThreadDispatcher.CreateDeferred();
+
+            item.Fail(new InvalidOperationException("no window"));
+
+            Assert.That(item.IsCompleted, Is.True);
+            Assert.That(item.Error, Is.InstanceOf<InvalidOperationException>());
+            Assert.That(item.Error.Message, Is.EqualTo("no window"));
+            Assert.That(item.Result, Is.Null);
         }
 
         [Test]

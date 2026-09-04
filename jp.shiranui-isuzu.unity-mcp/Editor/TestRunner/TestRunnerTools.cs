@@ -18,7 +18,8 @@ namespace UnityMCP.Editor.TestRunner
     /// Runs Unity's own test suites and reports what happened.
     /// </summary>
     /// <remarks>
-    /// Lives in its own assembly, constrained to <c>UNITY_INCLUDE_TESTS</c>, so that a project
+    /// Lives in its own assembly, constrained to a version define on com.unity.test-framework
+    /// (UNITY_INCLUDE_TESTS would only be set for a package listed in testables), so that a project
     /// without the test framework simply does not see these two tools rather than failing to
     /// compile the whole package. Declaring <c>com.unity.test-framework</c> as a dependency
     /// would have been simpler, but it would push the framework onto every consumer to make an
@@ -183,6 +184,19 @@ namespace UnityMCP.Editor.TestRunner
             }
         }
 
+        private static bool HasDirtyScene()
+        {
+            for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                if (UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).isDirty)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private sealed class Callbacks : ICallbacks
         {
             public void RunStarted(ITestAdaptor testsToRun)
@@ -291,7 +305,9 @@ namespace UnityMCP.Editor.TestRunner
             [McpArg("filter", "Restrict to tests whose full name matches this regular expression.")]
             string filter = null,
             [McpArg("category", "Restrict to one NUnit category.")]
-            string category = null)
+            string category = null,
+            [McpArg("force", "Start even if the previous run still reads as running, for a run that was interrupted before it could report.")]
+            bool force = false)
         {
             TestMode testMode;
 
@@ -313,14 +329,25 @@ namespace UnityMCP.Editor.TestRunner
                         $"'{mode}' is not a test mode. Use 'edit' or 'play'.");
             }
 
+            // The runner closes the open scenes before an EditMode run. With unsaved changes it
+            // asks with a modal dialog, which blocks the main thread and therefore every tool,
+            // while the request that caused it has already returned "started".
+            if (testMode == TestMode.EditMode && HasDirtyScene())
+            {
+                throw new McpToolException(
+                    "scene_dirty",
+                    "An open scene has unsaved changes. Save it (scene_save) or discard them before running EditMode tests; the runner would otherwise stop at a save dialog.",
+                    409);
+            }
+
             lock (Gate)
             {
-                if (current.Status == "running")
+                if (current.Status == "running" && !force)
                 {
                     return new JObject
                     {
                         ["started"] = false,
-                        ["message"] = "A test run is already in progress; poll test_results instead.",
+                        ["message"] = "A test run is already in progress; poll test_results instead. Pass force: true if the previous run was interrupted and never reported.",
                     };
                 }
 

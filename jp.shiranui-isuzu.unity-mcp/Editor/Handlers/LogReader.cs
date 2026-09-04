@@ -64,7 +64,7 @@ namespace UnityMCP.Editor.Handlers
 
             try
             {
-                // Legacy "count" param maps to limit for backward compat
+                // "count" is accepted as an alias for limit.
                 var limit = parameters["limit"]?.Value<int>()
                     ?? parameters["count"]?.Value<int>()
                     ?? 50;
@@ -148,11 +148,31 @@ namespace UnityMCP.Editor.Handlers
             }
         }
 
-        private static string GetTypeChar(int mode)
+        // LogEntry.mode flags from the Editor's LogMessageFlags. A Debug.LogError sets
+        // kScriptingError, not kError, and a compiler error sets kScriptCompileError, so testing
+        // bit 0 alone classifies almost everything as a plain log while the count API, which
+        // knows the full set, still reports errors.
+        private const int ErrorFlags =
+            1           // kError
+            | 2         // kAssert
+            | 16        // kFatal
+            | 64        // kAssetImportError
+            | 256       // kScriptingError
+            | 2048      // kScriptCompileError
+            | 8192      // kStickyError
+            | 131072    // kScriptingException
+            | 1048576   // kGraphCompileError
+            | 2097152;  // kScriptingAssertion
+
+        private const int WarningFlags =
+            128         // kAssetImportWarning
+            | 512       // kScriptingWarning
+            | 4096;     // kScriptCompileWarning
+
+        internal static string GetTypeChar(int mode)
         {
-            // Unity log mode flags: bit 0 = error, bit 1 = warning
-            if ((mode & 0x01) != 0) return "E";
-            if ((mode & 0x02) != 0) return "W";
+            if ((mode & ErrorFlags) != 0) return "E";
+            if ((mode & WarningFlags) != 0) return "W";
             return "L";
         }
     }

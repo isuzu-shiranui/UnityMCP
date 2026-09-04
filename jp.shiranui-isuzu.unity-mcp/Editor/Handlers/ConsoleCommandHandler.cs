@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 
@@ -12,7 +12,7 @@ namespace UnityMCP.Editor.Handlers
     /// <summary>
     /// Command handler for accessing and managing Unity Console logs.
     /// </summary>
-    internal sealed class ConsoleCommandHandler : IMcpCommandHandler
+    internal sealed class ConsoleCommandHandler
     {
         // Cached reflection methods for LogEntries
         private static readonly Type LogEntriesType;
@@ -34,7 +34,7 @@ namespace UnityMCP.Editor.Handlers
                 LogEntriesType = typeof(UnityEditor.EditorWindow).Assembly.GetType("UnityEditor.LogEntries");
                 if (LogEntriesType == null)
                 {
-                    Debug.LogError("Failed to find LogEntries type via reflection");
+                    Debug.LogError("[ConsoleCommandHandler] Failed to find LogEntries type via reflection");
                     return;
                 }
 
@@ -52,44 +52,14 @@ namespace UnityMCP.Editor.Handlers
                 LogEntryType = typeof(UnityEditor.EditorWindow).Assembly.GetType("UnityEditor.LogEntry");
                 if (LogEntryType == null)
                 {
-                    Debug.LogError("Failed to find LogEntry type via reflection");
+                    Debug.LogError("[ConsoleCommandHandler] Failed to find LogEntry type via reflection");
                 }
-
-                Debug.Log("Successfully initialized reflection cache for LogEntries");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error initializing LogEntries reflection: {ex.Message}");
+                Debug.LogError($"[ConsoleCommandHandler] Error initializing LogEntries reflection: {ex.Message}");
             }
         }
-
-        /// <summary>
-        /// Gets the command prefix for this handler.
-        /// </summary>
-        public string CommandPrefix => "console";
-
-        /// <summary>
-        /// Gets the description of this command handler.
-        /// </summary>
-        public string Description => "Access and manage Unity Console logs";
-
-        /// <summary>
-        /// Gets the idempotency classification. Unsafe is the conservative class-level
-        /// default; per-action granularity is declared via <see cref="Actions"/>.
-        /// </summary>
-        public McpIdempotency Idempotency => McpIdempotency.Unsafe;
-
-        /// <summary>
-        /// Per-action idempotency: console.getLogs / getCount are read-only (Safe),
-        /// while clear / setFilter mutate Editor state (Unsafe).
-        /// </summary>
-        public IReadOnlyList<McpHandlerAction> Actions { get; } = new[]
-        {
-            new McpHandlerAction("getLogs",   McpIdempotency.Safe),
-            new McpHandlerAction("getCount",  McpIdempotency.Safe),
-            new McpHandlerAction("clear",     McpIdempotency.Unsafe),
-            new McpHandlerAction("setFilter", McpIdempotency.Unsafe)
-        };
 
         /// <summary>
         /// Executes the command with the given parameters.
@@ -203,7 +173,7 @@ namespace UnityMCP.Editor.Handlers
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error getting logs: {ex.Message}");
+                Debug.LogError($"[ConsoleCommandHandler] Error getting logs: {ex.Message}");
                 return new JObject
                 {
                     ["success"] = false,
@@ -244,7 +214,7 @@ namespace UnityMCP.Editor.Handlers
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error getting log counts: {ex.Message}");
+                Debug.LogError($"[ConsoleCommandHandler] Error getting log counts: {ex.Message}");
                 return new JObject
                 {
                     ["success"] = false,
@@ -269,7 +239,7 @@ namespace UnityMCP.Editor.Handlers
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error clearing logs: {ex.Message}");
+                Debug.LogError($"[ConsoleCommandHandler] Error clearing logs: {ex.Message}");
                 return new JObject
                 {
                     ["success"] = false,
@@ -298,7 +268,7 @@ namespace UnityMCP.Editor.Handlers
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error setting filter: {ex.Message}");
+                Debug.LogError($"[ConsoleCommandHandler] Error setting filter: {ex.Message}");
                 return new JObject
                 {
                     ["success"] = false,

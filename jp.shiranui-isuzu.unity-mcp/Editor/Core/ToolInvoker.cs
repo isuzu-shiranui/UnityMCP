@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 
 using Newtonsoft.Json;
@@ -21,9 +22,9 @@ namespace UnityMCP.Editor.Core
     /// the return value.
     /// </summary>
     /// <remarks>
-    /// v2 required every handler to pull its own values out of a raw <c>JObject</c> and
-    /// build its own <c>JObject</c> reply. Centralising that here is what lets a tool method
-    /// be an ordinary typed C# function, which in turn is what makes the schema derivable.
+    /// Argument binding and reply serialization live here rather than in each tool, which is
+    /// what lets a tool method be an ordinary typed C# function, which in turn is what makes
+    /// its schema derivable from the signature.
     /// </remarks>
     internal static class ToolInvoker
     {
@@ -45,6 +46,30 @@ namespace UnityMCP.Editor.Core
             NullValueHandling = NullValueHandling.Ignore,
             MaxDepth = 16,
         });
+
+        private static readonly MethodInfo CannotReadMethod =
+            typeof(McpParameterBinding).GetMethod(nameof(McpParameterBinding.CannotRead));
+
+        private static readonly MethodInfo ReadArgumentMethod = Helper(nameof(ReadArgument));
+        private static readonly MethodInfo MissingArgumentMethod = Helper(nameof(MissingArgument));
+        private static readonly MethodInfo CoerceStringMethod = Helper(nameof(CoerceString));
+        private static readonly MethodInfo CoerceBooleanMethod = Helper(nameof(CoerceBoolean));
+        private static readonly MethodInfo CoerceByteMethod = Helper(nameof(CoerceByte));
+        private static readonly MethodInfo CoerceSByteMethod = Helper(nameof(CoerceSByte));
+        private static readonly MethodInfo CoerceInt16Method = Helper(nameof(CoerceInt16));
+        private static readonly MethodInfo CoerceUInt16Method = Helper(nameof(CoerceUInt16));
+        private static readonly MethodInfo CoerceInt32Method = Helper(nameof(CoerceInt32));
+        private static readonly MethodInfo CoerceUInt32Method = Helper(nameof(CoerceUInt32));
+        private static readonly MethodInfo CoerceInt64Method = Helper(nameof(CoerceInt64));
+        private static readonly MethodInfo CoerceUInt64Method = Helper(nameof(CoerceUInt64));
+        private static readonly MethodInfo CoerceSingleMethod = Helper(nameof(CoerceSingle));
+        private static readonly MethodInfo CoerceDoubleMethod = Helper(nameof(CoerceDouble));
+        private static readonly MethodInfo CoerceDecimalMethod = Helper(nameof(CoerceDecimal));
+        private static readonly MethodInfo CoerceEnumMethod = Helper(nameof(CoerceEnum));
+        private static readonly MethodInfo CoerceArrayMethod = Helper(nameof(CoerceArray));
+        private static readonly MethodInfo CoerceListMethod = Helper(nameof(CoerceList));
+        private static readonly MethodInfo CoerceJsonMethod = Helper(nameof(CoerceJson));
+        private static readonly MethodInfo CoerceObjectMethod = Helper(nameof(CoerceObject));
 
         /// <summary>
         /// Executes a tool.
@@ -69,15 +94,12 @@ namespace UnityMCP.Editor.Core
 
                 if (dryRun)
                 {
-                    // Bind anyway: a dry run whose arguments do not even bind is not a
-                    // useful preview, and the caller should hear about that now.
-                    var previewArgs = BindArguments(descriptor, arguments);
                     return new JObject
                     {
                         ["dry_run"] = true,
                         ["tool"] = descriptor.Name,
                         ["would_execute"] = true,
-                        ["arguments"] = DescribeBoundArguments(descriptor, previewArgs),
+                        ["arguments"] = DescribePreviewArguments(descriptor, arguments),
                     };
                 }
 
@@ -90,8 +112,6 @@ namespace UnityMCP.Editor.Core
                         409);
                 }
             }
-
-            var boundArguments = BindArguments(descriptor, arguments);
 
             object returnValue;
             var undoGroup = -1;
@@ -111,7 +131,24 @@ namespace UnityMCP.Editor.Core
 
             try
             {
-                returnValue = descriptor.Method.Invoke(null, boundArguments);
+                if (descriptor.Direct != null)
+                {
+                    returnValue = descriptor.Direct(arguments);
+                }
+                else
+                {
+                    var plan = descriptor.BindPlan;
+
+                    returnValue = plan.Compiled != null
+                        ? plan.Compiled(arguments)
+                        : descriptor.Method.Invoke(null, BindArguments(plan, arguments));
+                }
+            }
+            catch (McpToolException)
+            {
+                // A refused argument and a tool's own refusal both already carry the code and
+                // status the caller acts on.
+                throw;
             }
             catch (TargetInvocationException ex)
             {
@@ -122,6 +159,12 @@ namespace UnityMCP.Editor.Core
                 }
 
                 throw new McpToolException("tool_failed", $"{descriptor.Name} threw {inner.GetType().Name}: {inner.Message}", 500);
+            }
+            catch (Exception ex)
+            {
+                // The compiled delegate calls the method directly, so nothing wraps a failure
+                // inside the tool body in a TargetInvocationException.
+                throw new McpToolException("tool_failed", $"{descriptor.Name} threw {ex.GetType().Name}: {ex.Message}", 500);
             }
             finally
             {
@@ -136,34 +179,420 @@ namespace UnityMCP.Editor.Core
             return SerializeResult(descriptor, returnValue);
         }
 
+        // ── the per-descriptor plan ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Resolves each parameter to a <see cref="BindKind"/> and compiles the descriptor's
+        /// invoker. Called once per descriptor, behind <see cref="McpToolDescriptor.BindPlan"/>.
+        /// </summary>
+        internal static ToolBindPlan CreateBindPlan(McpToolDescriptor descriptor)
+        {
+            var parameters = descriptor.Parameters;
+            var bindings = new McpParameterBinding[parameters.Count];
+
+            for (var i = 0; i < bindings.Length; i++)
+            {
+                var parameter = parameters[i];
+                bindings[i] = new McpParameterBinding(
+                    descriptor.Name,
+                    parameter.Name,
+                    parameter.Parameter.ParameterType,
+                    parameter.Required,
+                    parameter.DefaultValue);
+            }
+
+            try
+            {
+                return new ToolBindPlan(bindings, BuildInvoker(descriptor, bindings).Compile(), null);
+            }
+            catch (Exception ex)
+            {
+                // A signature the expression builder cannot express still has to be callable, so
+                // the descriptor keeps the reflection path. EveryLiveToolCompiles asserts that no
+                // shipped tool reaches this.
+                return new ToolBindPlan(bindings, null, $"{ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Builds <c>arguments =&gt; Tool(coerce(arguments["a"]), coerce(arguments["b"]), ...)</c>.
+        /// </summary>
+        /// <remarks>
+        /// Value-type arguments reach the method as themselves rather than through an
+        /// <c>object[]</c>, so a call allocates nothing beyond the result. Only the return value
+        /// is boxed, which a uniform delegate signature cannot avoid.
+        /// </remarks>
+        internal static Expression<Func<JObject, object>> BuildInvoker(
+            McpToolDescriptor descriptor, McpParameterBinding[] bindings)
+        {
+            var method = descriptor.Method;
+            var methodParameters = method.GetParameters();
+
+            if (methodParameters.Length != bindings.Length)
+            {
+                throw new InvalidOperationException(
+                    $"'{descriptor.Name}' has {methodParameters.Length} parameters but {bindings.Length} bindings.");
+            }
+
+            var argumentsParameter = Expression.Parameter(typeof(JObject), "arguments");
+            var callArguments = new Expression[bindings.Length];
+
+            for (var i = 0; i < bindings.Length; i++)
+            {
+                PrepareElementCoercer(bindings[i]);
+                callArguments[i] = BindExpression(argumentsParameter, bindings[i], methodParameters[i].ParameterType);
+            }
+
+            Expression body = Expression.Call(null, method, callArguments);
+
+            body = method.ReturnType == typeof(void)
+                ? (Expression)Expression.Block(typeof(object), body, Expression.Constant(null, typeof(object)))
+                : Expression.Convert(body, typeof(object));
+
+            return Expression.Lambda<Func<JObject, object>>(body, argumentsParameter);
+        }
+
+        /// <summary>
+        /// One argument: read the token, coerce it, or fall back to the default and refuse when
+        /// the argument is required.
+        /// </summary>
+        private static Expression BindExpression(
+            ParameterExpression arguments, McpParameterBinding binding, Type parameterType)
+        {
+            var token = Expression.Variable(typeof(JToken), "token");
+            var bindingConstant = Expression.Constant(binding, typeof(McpParameterBinding));
+
+            Expression coerced = Expression.Call(CoercionMethod(binding), token, bindingConstant);
+            if (coerced.Type != parameterType)
+            {
+                coerced = Expression.Convert(coerced, parameterType);
+            }
+
+            var absent = binding.Required
+                ? (Expression)Expression.Throw(Expression.Call(MissingArgumentMethod, bindingConstant), parameterType)
+                : DefaultExpression(binding, parameterType);
+
+            return Expression.Block(
+                parameterType,
+                new[] { token },
+                Expression.Assign(
+                    token,
+                    Expression.Call(ReadArgumentMethod, arguments, Expression.Constant(binding.Name))),
+                Expression.Condition(
+                    Expression.ReferenceNotEqual(token, Expression.Constant(null, typeof(JToken))),
+                    Guarded(coerced, bindingConstant),
+                    absent,
+                    parameterType));
+        }
+
+        /// <summary>
+        /// Turns whatever the coercion throws into the same <c>invalid_params</c> the boxing path
+        /// reports, naming the argument and its declared type.
+        /// </summary>
+        private static Expression Guarded(Expression coerced, Expression bindingConstant)
+        {
+            var error = Expression.Parameter(typeof(Exception), "error");
+
+            return Expression.TryCatch(
+                coerced,
+                Expression.Catch(typeof(McpToolException), Expression.Rethrow(coerced.Type)),
+                Expression.Catch(
+                    error,
+                    Expression.Throw(Expression.Call(bindingConstant, CannotReadMethod, error), coerced.Type)));
+        }
+
+        /// <summary>
+        /// The value an omitted optional argument binds to, as a constant of the parameter's type.
+        /// </summary>
+        /// <remarks>
+        /// A struct parameter declared <c>= default</c> carries a null in metadata, and an enum
+        /// parameter can carry its underlying integer, so the stored value is normalised to the
+        /// parameter's own type before it becomes a constant.
+        /// </remarks>
+        private static Expression DefaultExpression(McpParameterBinding binding, Type parameterType)
+        {
+            var value = binding.DefaultValue;
+
+            if (value == null)
+            {
+                return Expression.Default(parameterType);
+            }
+
+            var target = binding.Underlying;
+
+            if (!target.IsInstanceOfType(value))
+            {
+                value = target.IsEnum
+                    ? Enum.ToObject(target, value)
+                    : Convert.ChangeType(value, target, CultureInfo.InvariantCulture);
+            }
+
+            Expression constant = Expression.Constant(value, target);
+            return target == parameterType ? constant : (Expression)Expression.Convert(constant, parameterType);
+        }
+
+        private static MethodInfo CoercionMethod(McpParameterBinding binding)
+        {
+            switch (binding.Kind)
+            {
+                case BindKind.JsonToken:
+                    return CoerceJsonMethod.MakeGenericMethod(binding.Underlying);
+                case BindKind.String:
+                    return CoerceStringMethod;
+                case BindKind.Boolean:
+                    return CoerceBooleanMethod;
+                case BindKind.Enum:
+                    return CoerceEnumMethod.MakeGenericMethod(binding.Underlying);
+                case BindKind.Byte:
+                    return CoerceByteMethod;
+                case BindKind.SByte:
+                    return CoerceSByteMethod;
+                case BindKind.Int16:
+                    return CoerceInt16Method;
+                case BindKind.UInt16:
+                    return CoerceUInt16Method;
+                case BindKind.Int32:
+                    return CoerceInt32Method;
+                case BindKind.UInt32:
+                    return CoerceUInt32Method;
+                case BindKind.Int64:
+                    return CoerceInt64Method;
+                case BindKind.UInt64:
+                    return CoerceUInt64Method;
+                case BindKind.Single:
+                    return CoerceSingleMethod;
+                case BindKind.Double:
+                    return CoerceDoubleMethod;
+                case BindKind.Decimal:
+                    return CoerceDecimalMethod;
+                case BindKind.Array:
+                    return CoerceArrayMethod.MakeGenericMethod(binding.Underlying.GetElementType());
+                case BindKind.List:
+                    return CoerceListMethod.MakeGenericMethod(binding.Underlying.GetGenericArguments()[0]);
+                default:
+                    return CoerceObjectMethod.MakeGenericMethod(binding.Underlying);
+            }
+        }
+
+        /// <summary>
+        /// Gives an array or list binding the typed delegate its elements are coerced through.
+        /// </summary>
+        private static void PrepareElementCoercer(McpParameterBinding binding)
+        {
+            var element = binding.Element;
+
+            if (element == null || element.Coercer != null)
+            {
+                return;
+            }
+
+            PrepareElementCoercer(element);
+
+            var signature = typeof(Func<,,>).MakeGenericType(
+                typeof(JToken), typeof(McpParameterBinding), element.DeclaredType);
+
+            element.Coercer = Delegate.CreateDelegate(signature, CoercionMethod(element));
+        }
+
+        private static MethodInfo Helper(string name)
+        {
+            return typeof(ToolInvoker).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static);
+        }
+
+        // ── typed coercion ────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// The argument's token, or null when it is absent or explicitly null.
+        /// </summary>
+        internal static JToken ReadArgument(JObject arguments, string name)
+        {
+            if (!arguments.TryGetValue(name, out var token) || token == null)
+            {
+                return null;
+            }
+
+            return token.Type == JTokenType.Null || token.Type == JTokenType.Undefined ? null : token;
+        }
+
+        internal static McpToolException MissingArgument(McpParameterBinding binding)
+        {
+            return new McpToolException("invalid_params", binding.MissingArgumentMessage);
+        }
+
+        internal static string CoerceString(JToken token, McpParameterBinding binding)
+        {
+            return token.Type == JTokenType.String ? token.Value<string>() : token.ToString(Formatting.None);
+        }
+
+        internal static bool CoerceBoolean(JToken token, McpParameterBinding binding)
+        {
+            return CoerceBoolValue(token);
+        }
+
+        internal static byte CoerceByte(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((byte)exact) : checked((byte)WholeNumber(token));
+        }
+
+        internal static sbyte CoerceSByte(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((sbyte)exact) : checked((sbyte)WholeNumber(token));
+        }
+
+        internal static short CoerceInt16(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((short)exact) : checked((short)WholeNumber(token));
+        }
+
+        internal static ushort CoerceUInt16(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((ushort)exact) : checked((ushort)WholeNumber(token));
+        }
+
+        internal static int CoerceInt32(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((int)exact) : checked((int)WholeNumber(token));
+        }
+
+        internal static uint CoerceUInt32(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((uint)exact) : checked((uint)WholeNumber(token));
+        }
+
+        internal static long CoerceInt64(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? exact : checked((long)WholeNumber(token));
+        }
+
+        internal static ulong CoerceUInt64(JToken token, McpParameterBinding binding)
+        {
+            return TryExactInt64(token, out var exact) ? checked((ulong)exact) : checked((ulong)WholeNumber(token));
+        }
+
+        internal static float CoerceSingle(JToken token, McpParameterBinding binding)
+        {
+            return (float)CoerceDoubleValue(token);
+        }
+
+        internal static double CoerceDouble(JToken token, McpParameterBinding binding)
+        {
+            return CoerceDoubleValue(token);
+        }
+
+        internal static decimal CoerceDecimal(JToken token, McpParameterBinding binding)
+        {
+            return (decimal)CoerceDoubleValue(token);
+        }
+
+        internal static T CoerceEnum<T>(JToken token, McpParameterBinding binding)
+            where T : struct
+        {
+            if (token.Type == JTokenType.Integer)
+            {
+                return (T)Enum.ToObject(binding.Underlying, token.Value<long>());
+            }
+
+            var name = token.Value<string>();
+
+            if (!string.IsNullOrEmpty(name))
+            {
+                var names = binding.EnumNames;
+                var values = (T[])binding.EnumValues;
+
+                for (var i = 0; i < names.Length; i++)
+                {
+                    if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return values[i];
+                    }
+                }
+            }
+
+            throw new McpToolException(
+                "invalid_params",
+                $"'{name}' is not a valid value. Expected one of: {binding.EnumNamesJoined}.");
+        }
+
+        internal static T[] CoerceArray<T>(JToken token, McpParameterBinding binding)
+        {
+            var element = binding.Element;
+            var coerce = (Func<JToken, McpParameterBinding, T>)element.Coercer;
+
+            if (token is JArray array)
+            {
+                var items = new T[array.Count];
+                for (var i = 0; i < items.Length; i++)
+                {
+                    items[i] = coerce(array[i], element);
+                }
+
+                return items;
+            }
+
+            // A single value where an array is expected is a common client slip; treat it
+            // as a one-element array rather than failing the whole call.
+            return new[] { coerce(token, element) };
+        }
+
+        internal static List<T> CoerceList<T>(JToken token, McpParameterBinding binding)
+        {
+            var element = binding.Element;
+            var coerce = (Func<JToken, McpParameterBinding, T>)element.Coercer;
+
+            if (token is JArray array)
+            {
+                var items = new List<T>(array.Count);
+                for (var i = 0; i < array.Count; i++)
+                {
+                    items.Add(coerce(array[i], element));
+                }
+
+                return items;
+            }
+
+            return new List<T>(1) { coerce(token, element) };
+        }
+
+        internal static T CoerceJson<T>(JToken token, McpParameterBinding binding)
+            where T : JToken
+        {
+            return (T)token;
+        }
+
+        internal static T CoerceObject<T>(JToken token, McpParameterBinding binding)
+        {
+            return token.ToObject<T>(ResultSerializer);
+        }
+
+        // ── the boxing path: dry runs, and any descriptor that did not compile ─────────
+
         /// <summary>
         /// Maps the JSON argument object onto the method's parameter array.
         /// </summary>
-        private static object[] BindArguments(McpToolDescriptor descriptor, JObject arguments)
+        private static object[] BindArguments(ToolBindPlan plan, JObject arguments)
         {
-            var bound = new object[descriptor.Parameters.Count];
+            var bindings = plan.Parameters;
+            var bound = new object[bindings.Length];
 
-            for (var i = 0; i < descriptor.Parameters.Count; i++)
+            for (var i = 0; i < bindings.Length; i++)
             {
-                var parameter = descriptor.Parameters[i];
-                var token = arguments[parameter.Name];
+                var binding = bindings[i];
+                var token = ReadArgument(arguments, binding.Name);
 
-                if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined)
+                if (token == null)
                 {
-                    if (parameter.Required)
+                    if (binding.Required)
                     {
-                        throw new McpToolException(
-                            "invalid_params",
-                            $"'{descriptor.Name}' requires argument '{parameter.Name}'.");
+                        throw MissingArgument(binding);
                     }
 
-                    bound[i] = parameter.DefaultValue;
+                    bound[i] = binding.DefaultValue;
                     continue;
                 }
 
                 try
                 {
-                    bound[i] = Coerce(token, parameter.Parameter.ParameterType);
+                    bound[i] = Coerce(token, binding.DeclaredType);
                 }
                 catch (McpToolException)
                 {
@@ -171,10 +600,7 @@ namespace UnityMCP.Editor.Core
                 }
                 catch (Exception ex)
                 {
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"Argument '{parameter.Name}' of '{descriptor.Name}' could not be read as " +
-                        $"{FriendlyTypeName(parameter.Parameter.ParameterType)}: {ex.Message}");
+                    throw binding.CannotRead(ex);
                 }
             }
 
@@ -205,12 +631,12 @@ namespace UnityMCP.Editor.Core
 
             if (underlying == typeof(bool))
             {
-                return CoerceBool(token);
+                return CoerceBoolValue(token);
             }
 
             if (underlying.IsEnum)
             {
-                return CoerceEnum(token, underlying);
+                return CoerceEnumValue(token, underlying);
             }
 
             if (IsIntegral(underlying) || IsFloating(underlying))
@@ -254,7 +680,47 @@ namespace UnityMCP.Editor.Core
             return token.ToObject(underlying, ResultSerializer);
         }
 
-        private static bool CoerceBool(JToken token)
+        private static object CoerceEnumValue(JToken token, Type enumType)
+        {
+            if (token.Type == JTokenType.Integer)
+            {
+                return Enum.ToObject(enumType, token.Value<long>());
+            }
+
+            var name = token.Value<string>();
+            if (!string.IsNullOrEmpty(name))
+            {
+                foreach (var candidate in Enum.GetNames(enumType))
+                {
+                    if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Enum.Parse(enumType, candidate);
+                    }
+                }
+            }
+
+            throw new McpToolException(
+                "invalid_params",
+                $"'{name}' is not a valid value. Expected one of: {string.Join(", ", Enum.GetNames(enumType))}.");
+        }
+
+        private static object CoerceNumber(JToken token, Type targetType)
+        {
+            var integral = IsIntegral(targetType);
+
+            if (integral && TryExactInt64(token, out var exact))
+            {
+                return Convert.ChangeType(exact, targetType, CultureInfo.InvariantCulture);
+            }
+
+            var value = integral ? WholeNumber(token) : CoerceDoubleValue(token);
+
+            return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+        }
+
+        // ── the conversions both paths share ──────────────────────────────────────────
+
+        private static bool CoerceBoolValue(JToken token)
         {
             switch (token.Type)
             {
@@ -286,79 +752,65 @@ namespace UnityMCP.Editor.Core
             }
         }
 
-        private static object CoerceEnum(JToken token, Type enumType)
+        /// <summary>
+        /// The token's exact 64-bit value, when it has one.
+        /// </summary>
+        /// <remarks>
+        /// An integral target never goes through a double. A Unity 6.5 EntityId is about 5.7e17,
+        /// above the 2^53 a double holds exactly, and rounding one names a different object.
+        /// </remarks>
+        private static bool TryExactInt64(JToken token, out long value)
         {
             if (token.Type == JTokenType.Integer)
             {
-                return Enum.ToObject(enumType, token.Value<long>());
+                value = token.Value<long>();
+                return true;
             }
 
-            var name = token.Value<string>();
-            if (!string.IsNullOrEmpty(name))
+            if (token.Type == JTokenType.String &&
+                long.TryParse(token.Value<string>(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
             {
-                foreach (var candidate in Enum.GetNames(enumType))
-                {
-                    if (string.Equals(candidate, name, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return Enum.Parse(enumType, candidate);
-                    }
-                }
+                return true;
             }
 
-            throw new McpToolException(
-                "invalid_params",
-                $"'{name}' is not a valid value. Expected one of: {string.Join(", ", Enum.GetNames(enumType))}.");
+            value = 0L;
+            return false;
         }
 
-        private static object CoerceNumber(JToken token, Type targetType)
+        private static double CoerceDoubleValue(JToken token)
         {
-            // An integral target never goes through a double. A Unity 6.5 EntityId is about 5.7e17,
-            // above the 2^53 a double holds exactly, and rounding one names a different object.
-            if (IsIntegral(targetType))
-            {
-                if (token.Type == JTokenType.Integer)
-                {
-                    return Convert.ChangeType(token.Value<long>(), targetType, CultureInfo.InvariantCulture);
-                }
-
-                if (token.Type == JTokenType.String &&
-                    long.TryParse(token.Value<string>(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var exact))
-                {
-                    return Convert.ChangeType(exact, targetType, CultureInfo.InvariantCulture);
-                }
-            }
-
-            double value;
-
             switch (token.Type)
             {
                 case JTokenType.Integer:
                 case JTokenType.Float:
-                    value = token.Value<double>();
-                    break;
+                    return token.Value<double>();
                 case JTokenType.Boolean:
-                    value = token.Value<bool>() ? 1d : 0d;
-                    break;
+                    return token.Value<bool>() ? 1d : 0d;
                 case JTokenType.String:
                     var text = token.Value<string>();
-                    if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+                    if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
                     {
                         throw new McpToolException("invalid_params", $"'{text}' is not a number.");
                     }
 
-                    break;
+                    return parsed;
                 default:
                     throw new McpToolException("invalid_params", $"{token.Type} is not a number.");
             }
+        }
 
-            if (IsIntegral(targetType) && value != Math.Floor(value))
+        private static double WholeNumber(JToken token)
+        {
+            var value = CoerceDoubleValue(token);
+
+            if (value != Math.Floor(value))
             {
                 throw new McpToolException(
                     "invalid_params",
                     $"{value.ToString(CultureInfo.InvariantCulture)} is not a whole number.");
             }
 
-            return Convert.ChangeType(value, targetType, CultureInfo.InvariantCulture);
+            return value;
         }
 
         private static IReadOnlyList<JToken> AsArray(JToken token)
@@ -394,15 +846,37 @@ namespace UnityMCP.Editor.Core
                 return false;
             }
 
-            return CoerceBool(token);
+            return CoerceBoolValue(token);
         }
 
-        private static JObject DescribeBoundArguments(McpToolDescriptor descriptor, object[] bound)
+        /// <summary>
+        /// The <c>arguments</c> a dry run reports back.
+        /// </summary>
+        /// <remarks>
+        /// A method tool binds first: a preview whose arguments do not even bind is not a useful
+        /// preview, and the caller has to hear about that now. A direct tool has no bindings, so
+        /// its arguments are echoed minus the two flags the invoker consumes itself.
+        /// </remarks>
+        private static JObject DescribePreviewArguments(McpToolDescriptor descriptor, JObject arguments)
+        {
+            if (descriptor.Direct != null)
+            {
+                var echoed = (JObject)arguments.DeepClone();
+                echoed.Remove("confirm");
+                echoed.Remove("dry_run");
+                return echoed;
+            }
+
+            var plan = descriptor.BindPlan;
+            return DescribeBoundArguments(plan, BindArguments(plan, arguments));
+        }
+
+        private static JObject DescribeBoundArguments(ToolBindPlan plan, object[] bound)
         {
             var described = new JObject();
-            for (var i = 0; i < descriptor.Parameters.Count; i++)
+            for (var i = 0; i < bound.Length; i++)
             {
-                described[descriptor.Parameters[i].Name] = ToToken(bound[i]);
+                described[plan.Parameters[i].Name] = ToToken(bound[i]);
             }
 
             return described;
@@ -413,7 +887,9 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         private static JObject SerializeResult(McpToolDescriptor descriptor, object returnValue)
         {
-            if (descriptor.Method.ReturnType == typeof(void))
+            // A direct tool has no return type to inspect, so returning null is how it says it
+            // produced no payload.
+            if (descriptor.Method != null ? descriptor.Method.ReturnType == typeof(void) : returnValue == null)
             {
                 return new JObject { ["ok"] = true };
             }
@@ -446,12 +922,6 @@ namespace UnityMCP.Editor.Core
                 default:
                     return JToken.FromObject(value, ResultSerializer);
             }
-        }
-
-        private static string FriendlyTypeName(Type type)
-        {
-            var underlying = Nullable.GetUnderlyingType(type);
-            return underlying != null ? $"{underlying.Name}?" : type.Name;
         }
     }
 }

@@ -1,25 +1,31 @@
 {
-  "name": "UnityMCP.Editor.TestRunner",
-  "rootNamespace": "",
-  "references": [
-    "UnityMCP.Editor",
-    "UnityEngine.TestRunner",
-    "UnityEditor.TestRunner",
-    "Newtonsoft.Json"
-  ],
-  "includePlatforms": [
-    "Editor"
-  ],
-  "excludePlatforms": [],
-  "allowUnsafeCode": false,
-  "overrideReferences": true,
-  "precompiledReferences": [
-    "Newtonsoft.Json.dll"
-  ],
-  "autoReferenced": false,
-  "defineConstraints": [
-    "UNITY_INCLUDE_TESTS"
-  ],
-  "versionDefines": [],
-  "noEngineReferences": false
+    "name": "UnityMCP.Editor.TestRunner",
+    "rootNamespace": "",
+    "references": [
+        "UnityMCP.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Newtonsoft.Json"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_MCP_TEST_FRAMEWORK"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.test-framework",
+            "expression": "1.0.0",
+            "define": "UNITY_MCP_TEST_FRAMEWORK"
+        }
+    ],
+    "noEngineReferences": false
 }

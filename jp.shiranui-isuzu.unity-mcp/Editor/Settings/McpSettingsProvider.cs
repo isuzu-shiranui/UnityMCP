@@ -1,28 +1,49 @@
 using System.Collections.Generic;
+using System.Diagnostics;
+
 using UnityEditor;
 using UnityEngine;
+
 using UnityMCP.Editor.Core;
-using UnityMCP.Editor.Installer;
 
 namespace UnityMCP.Editor.Settings
 {
     /// <summary>
-    /// Provides a settings UI for Unity MCP in the Preferences window.
+    /// Preferences > Unity MCP: what still has to be done to reach a working setup, the
+    /// connection details an MCP client needs, and the settings behind them.
     /// </summary>
     internal sealed class McpSettingsProvider : SettingsProvider
     {
+        private static readonly string[] SnippetLabels =
+        {
+            "Claude Code (command)",
+            "Cursor / Claude Code .mcp.json",
+            "Codex config.toml",
+            "Gemini CLI settings.json",
+            "VS Code .vscode/mcp.json",
+            "Claude Desktop (stdio bridge)",
+        };
+
+        private const string SettingsFoldoutKey = "UnityMCP.Preferences.Settings";
+        private const string HelpFoldoutKey = "UnityMCP.Preferences.Help";
+
+        private const string GuideUrlEnglish = "https://unity-mcp.shiranui-isuzu.dev/en/";
+        private const string GuideUrlJapanese = "https://unity-mcp.shiranui-isuzu.dev/";
+        private const string RepositoryUrl = "https://github.com/isuzu-shiranui/UnityMCP";
+        private const string TroubleshootingUrlEnglish = RepositoryUrl + "/blob/main/docs/en/troubleshooting.md";
+        private const string TroubleshootingUrlJapanese = RepositoryUrl + "/blob/main/docs/troubleshooting.md";
+
+        /// <summary>Width of the label column, wide enough for the Japanese labels as well.</summary>
+        private const float LabelWidth = 140f;
+
         private UnityEditor.Editor editor;
-        private bool showCommandHandlers = false;
-        private bool showResourceHandlers = false;
-        private Vector2 handlersRootScrollPosition;
         private McpHttpServer mcpServer;
         private GUIStyle headerStyle;
-        private GUIStyle subHeaderStyle;
-        private GUIStyle descriptionStyle;
-        private GUIContent enabledIcon;
-        private GUIContent disabledIcon;
-        private Color defaultBackgroundColor;
-        private bool defaultBackgroundColorCaptured;
+        private GUIStyle snippetStyle;
+        private int snippetIndex;
+        private bool showSnippet;
+        private string cliPath;
+        private bool cliLooked;
 
         // EditorStyles はドメインリロード直後の OnActivate では未初期化で NullReferenceException になり、
         // SettingsWindow が選択復元を無限再帰してエディタが固まる。GUI リソースは OnGUI 内で遅延初期化する。
@@ -32,19 +53,11 @@ namespace UnityMCP.Editor.Settings
             margin = new RectOffset(0, 0, 10, 5)
         };
 
-        private GUIStyle SubHeaderStyle => this.subHeaderStyle ??= new GUIStyle(EditorStyles.boldLabel)
+        private GUIStyle SnippetStyle => this.snippetStyle ??= new GUIStyle(EditorStyles.textArea)
         {
-            fontSize = 12,
-            margin = new RectOffset(0, 0, 5, 3)
+            wordWrap = false,
+            font = Font.CreateDynamicFontFromOSFont(new[] { "Consolas", "Menlo", "DejaVu Sans Mono" }, 11),
         };
-
-        private GUIStyle DescriptionStyle => this.descriptionStyle ??= new GUIStyle(EditorStyles.miniLabel)
-        {
-            wordWrap = true
-        };
-
-        private GUIContent EnabledIcon => this.enabledIcon ??= EditorGUIUtility.IconContent("TestPassed");
-        private GUIContent DisabledIcon => this.disabledIcon ??= EditorGUIUtility.IconContent("TestFailed");
 
         [SettingsProvider]
         public static SettingsProvider CreateMcpSettingsProvider()
@@ -59,10 +72,6 @@ namespace UnityMCP.Editor.Settings
         public McpSettingsProvider(string path, SettingsScope scopes, IEnumerable<string> keywords = null)
             : base(path, scopes, keywords)
         {
-            if (McpServiceManager.Instance.TryGetService<McpHttpServer>(out var server))
-            {
-                this.mcpServer = server;
-            }
         }
 
         public override void OnActivate(string searchContext, UnityEngine.UIElements.VisualElement rootElement)
@@ -70,317 +79,396 @@ namespace UnityMCP.Editor.Settings
             var settings = McpSettings.instance;
             settings.hideFlags = HideFlags.HideAndDontSave & ~HideFlags.NotEditable;
             UnityEditor.Editor.CreateCachedEditor(settings, null, ref this.editor);
+            this.cliLooked = false;
         }
 
         public override void OnGUI(string searchContext)
         {
-            if (!this.defaultBackgroundColorCaptured)
-            {
-                this.defaultBackgroundColor = GUI.backgroundColor;
-                this.defaultBackgroundColorCaptured = true;
-            }
+            // The server is recreated on every domain reload, so the reference is refreshed
+            // rather than captured once in the constructor.
+            McpServiceManager.Instance.TryGetService(out this.mcpServer);
 
             EditorGUI.BeginChangeCheck();
 
-            GUILayout.Label("TypeScript MCP Settings", this.HeaderStyle);
-            if (GUILayout.Button("Open Installer Window", GUILayout.Height(25)))
-            {
-                EditorWindow.GetWindow<McpInstallerWindow>();
-            }
-
-            GUILayout.Label("HTTP Server Configuration", this.HeaderStyle);
-            EditorGUILayout.Space(5);
-
-            var settings = McpSettings.instance;
-
-            // HTTP port
-            settings.httpPort = EditorGUILayout.IntField("HTTP Port", settings.httpPort);
-
-            EditorGUILayout.HelpBox(
-                "Unity starts an HTTP server on this port. If the port is in use, it will automatically try the next available port.",
-                MessageType.Info);
-
-            EditorGUILayout.Space(5);
-
-            EditorGUILayout.LabelField("Discovery", this.SubHeaderStyle);
-            EditorGUILayout.SelectableLabel(
-                UnityMCP.Editor.Core.McpInstanceDescriptor.PathFor(Application.dataPath),
-                EditorStyles.textField,
-                GUILayout.Height(EditorGUIUtility.singleLineHeight));
-
-            EditorGUILayout.HelpBox(
-                "While the server runs it publishes this descriptor file, holding the port and the " +
-                "bearer token clients authenticate with. The MCP server reads it to find this Editor. " +
-                "Treat the file as a credential: anything that can read it can run code in this Editor.",
-                MessageType.Info);
-
+            this.DrawSetupSection();
             EditorGUILayout.Space(10);
 
-            // Auto-start options
-            settings.autoStartOnLaunch = EditorGUILayout.Toggle("Auto-start on Launch", settings.autoStartOnLaunch);
-
-            EditorGUILayout.Space(5);
-
-            settings.detailedLogs = EditorGUILayout.Toggle("Detailed Logs", settings.detailedLogs);
-
+            this.DrawConnectionSection();
             EditorGUILayout.Space(10);
 
-            // Server status section
-            this.DrawServerStatusSection();
-
-            EditorGUILayout.Space(10);
-
-            this.handlersRootScrollPosition = EditorGUILayout.BeginScrollView(this.handlersRootScrollPosition);
-
-            if (this.mcpServer != null)
-            {
-                this.DrawHandlersSection();
-                this.DrawResourceHandlersSection();
-            }
-
-            EditorGUILayout.EndScrollView();
+            this.DrawSettingsSection();
+            this.DrawHelpSection();
 
             if (EditorGUI.EndChangeCheck())
             {
-                settings.Save();
+                McpSettings.instance.Save();
             }
         }
 
-        private void DrawHandlersSection()
+        /// <summary>
+        /// What is done and what is not, in the order it has to happen. A client registration
+        /// cannot be detected from inside the Editor, so it is stated as the remaining step
+        /// rather than shown with a mark that would have to be guessed.
+        /// </summary>
+        private void DrawSetupSection()
         {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            GUILayout.Label(McpEditorText.Tr("Setup"), this.HeaderStyle);
 
-            EditorGUILayout.BeginHorizontal();
-            this.showCommandHandlers = EditorGUILayout.Foldout(this.showCommandHandlers, "Command Handlers", true);
+            this.DrawServerRow();
+            this.DrawCliRow();
 
-            var handlers = this.mcpServer.GetRegisteredHandlers();
-            var enabledCount = 0;
-            foreach (var handler in handlers)
+            EditorGUILayout.Space(4);
+            EditorGUILayout.HelpBox(
+                McpEditorText.Tr("Register an MCP client with the configuration below, or run isuzu-unity-cli setup --mcp."),
+                MessageType.Info);
+
+            if (this.mcpServer != null && this.mcpServer.IsRunning && this.mcpServer.PortMismatch)
             {
-                if (handler.Value.Enabled) enabledCount++;
-            }
-            EditorGUILayout.LabelField($"{enabledCount}/{handlers.Count} enabled", EditorStyles.miniLabel, GUILayout.Width(80));
-            EditorGUILayout.EndHorizontal();
-
-            if (!this.showCommandHandlers)
-            {
-                EditorGUILayout.EndVertical();
-                return;
-            }
-
-            if (handlers.Count == 0)
-            {
-                EditorGUILayout.HelpBox("No command handlers registered", MessageType.Info);
-                EditorGUILayout.EndVertical();
-                return;
+                EditorGUILayout.HelpBox(
+                    string.Format(
+                        McpEditorText.Tr("Port {0} was busy, so this Editor is on {1}. Clients configured for the usual URL cannot reach it. Close whatever holds the port, or pin an HTTP Port in Settings and register the clients again."),
+                        this.mcpServer.PreferredPort,
+                        this.mcpServer.BoundPort),
+                    MessageType.Warning);
             }
 
-            var handlersByAssembly = new Dictionary<string, List<KeyValuePair<string, McpHttpServer.HandlerRegistration>>>();
-
-            foreach (var handler in handlers)
-            {
-                var assemblyName = handler.Value.AssemblyName;
-                if (!handlersByAssembly.ContainsKey(assemblyName))
-                {
-                    handlersByAssembly[assemblyName] = new List<KeyValuePair<string, McpHttpServer.HandlerRegistration>>();
-                }
-                handlersByAssembly[assemblyName].Add(handler);
-            }
-
-            foreach (var assemblyGroup in handlersByAssembly)
-            {
-                EditorGUILayout.Space(5);
-                EditorGUILayout.LabelField(assemblyGroup.Key, this.SubHeaderStyle);
-
-                foreach (var handler in assemblyGroup.Value)
-                {
-                    EditorGUILayout.BeginHorizontal(GUILayout.Height(24));
-
-                    var enabled = handler.Value.Enabled;
-                    var newEnabled = EditorGUILayout.Toggle(enabled, GUILayout.Width(20));
-                    if (enabled != newEnabled)
-                    {
-                        this.mcpServer.SetHandlerEnabled(handler.Key, newEnabled);
-                    }
-
-                    GUILayout.Label(enabled ? this.EnabledIcon : this.DisabledIcon, GUILayout.Width(20));
-                    EditorGUILayout.LabelField(handler.Key, GUILayout.Width(120));
-                    EditorGUILayout.LabelField(handler.Value.Description, this.DescriptionStyle);
-                    EditorGUILayout.EndHorizontal();
-                }
-            }
-
-            EditorGUILayout.EndVertical();
+            EditorGUILayout.LabelField(
+                $"{Application.productName} · {Application.unityVersion}"
+                + (this.mcpServer != null && this.mcpServer.IsRunning
+                    ? " · " + this.mcpServer.ConnectedSince.ToString("HH:mm:ss")
+                    : string.Empty),
+                EditorStyles.miniLabel);
         }
 
-        private void DrawResourceHandlersSection()
+        private void DrawServerRow()
         {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            EditorGUILayout.BeginHorizontal();
-            this.showResourceHandlers = EditorGUILayout.Foldout(this.showResourceHandlers, "Resource Handlers", true);
-
-            var resourceHandlers = this.mcpServer.GetRegisteredResourceHandlers();
-            var enabledCount = 0;
-            foreach (var handler in resourceHandlers)
+            if (this.mcpServer == null)
             {
-                if (handler.Value.Enabled) enabledCount++;
-            }
-            EditorGUILayout.LabelField($"{enabledCount}/{resourceHandlers.Count} enabled", EditorStyles.miniLabel, GUILayout.Width(80));
-            EditorGUILayout.EndHorizontal();
-
-            if (!this.showResourceHandlers)
-            {
-                EditorGUILayout.EndVertical();
-                return;
-            }
-
-            if (resourceHandlers.Count == 0)
-            {
-                EditorGUILayout.HelpBox("No resource handlers registered", MessageType.Info);
-                EditorGUILayout.EndVertical();
-                return;
-            }
-
-            var handlersByAssembly = new Dictionary<string, List<KeyValuePair<string, McpHttpServer.ResourceHandlerRegistration>>>();
-
-            foreach (var handler in resourceHandlers)
-            {
-                var assemblyName = handler.Value.AssemblyName;
-                if (!handlersByAssembly.ContainsKey(assemblyName))
-                {
-                    handlersByAssembly[assemblyName] = new List<KeyValuePair<string, McpHttpServer.ResourceHandlerRegistration>>();
-                }
-                handlersByAssembly[assemblyName].Add(handler);
-            }
-
-            foreach (var assemblyGroup in handlersByAssembly)
-            {
-                EditorGUILayout.Space(5);
-                EditorGUILayout.LabelField(assemblyGroup.Key, this.SubHeaderStyle);
-
-                foreach (var handler in assemblyGroup.Value)
-                {
-                    EditorGUILayout.BeginHorizontal(GUILayout.Height(24));
-
-                    var enabled = handler.Value.Enabled;
-                    var newEnabled = EditorGUILayout.Toggle(enabled, GUILayout.Width(20));
-                    if (enabled != newEnabled)
-                    {
-                        this.mcpServer.SetResourceHandlerEnabled(handler.Key, newEnabled);
-                    }
-
-                    GUILayout.Label(enabled ? this.EnabledIcon : this.DisabledIcon, GUILayout.Width(20));
-                    EditorGUILayout.LabelField(handler.Key, GUILayout.Width(120));
-
-                    var resourceUri = handler.Value.Handler.ResourceUri;
-                    var oldColor = GUI.contentColor;
-                    GUI.contentColor = new Color(0.4f, 0.8f, 1.0f);
-                    EditorGUILayout.LabelField(resourceUri, GUILayout.Width(150));
-                    GUI.contentColor = oldColor;
-
-                    EditorGUILayout.LabelField(handler.Value.Description, this.DescriptionStyle);
-                    EditorGUILayout.EndHorizontal();
-                }
-            }
-
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawServerStatusSection()
-        {
-            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-            GUILayout.Label("Server Status", this.HeaderStyle);
-
-            if (this.mcpServer != null)
-            {
-                var isRunning = this.mcpServer.IsRunning;
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Status:", GUILayout.Width(120));
-
-                var oldColor = GUI.color;
-                if (isRunning)
-                {
-                    GUI.color = Color.green;
-                    GUILayout.Label($"● Listening on port {this.mcpServer.BoundPort}", EditorStyles.boldLabel);
-                }
-                else
-                {
-                    GUI.color = Color.red;
-                    GUILayout.Label("● Stopped", EditorStyles.boldLabel);
-                }
-                GUI.color = oldColor;
-                EditorGUILayout.EndHorizontal();
-
-                // Project info
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Project:", GUILayout.Width(120));
-                GUILayout.Label(Application.productName);
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Unity Version:", GUILayout.Width(120));
-                GUILayout.Label(Application.unityVersion);
-                EditorGUILayout.EndHorizontal();
-
-                if (isRunning)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.Label("Started Since:", GUILayout.Width(120));
-                    GUILayout.Label(this.mcpServer.ConnectedSince.ToString("yyyy-MM-dd HH:mm:ss"));
-                    EditorGUILayout.EndHorizontal();
-
-                    // Endpoint info
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.Label("Endpoint:", GUILayout.Width(120));
-                    var endpoint = $"http://127.0.0.1:{this.mcpServer.BoundPort}";
-                    GUILayout.Label(endpoint);
-                    if (GUILayout.Button("Copy", GUILayout.Width(70)))
-                    {
-                        EditorGUIUtility.systemCopyBuffer = endpoint;
-                    }
-                    EditorGUILayout.EndHorizontal();
-                }
-
-                EditorGUILayout.Space(10);
-
-                // Controls
-                EditorGUILayout.BeginHorizontal();
-
-                if (isRunning)
-                {
-                    GUI.backgroundColor = new Color(0.9f, 0.6f, 0.6f);
-                    if (GUILayout.Button("Stop Server", GUILayout.Height(25)))
-                    {
-                        this.mcpServer.Stop();
-                    }
-                    GUI.backgroundColor = this.defaultBackgroundColor;
-                }
-                else
-                {
-                    GUI.backgroundColor = new Color(0.6f, 0.9f, 0.6f);
-                    if (GUILayout.Button("Start Server", GUILayout.Height(25)))
-                    {
-                        this.mcpServer.Start();
-                    }
-                    GUI.backgroundColor = this.defaultBackgroundColor;
-                }
-
-                EditorGUILayout.EndHorizontal();
-            }
-            else
-            {
-                EditorGUILayout.HelpBox("MCP HTTP server not initialized", MessageType.Warning);
-
-                if (GUILayout.Button("Initialize MCP Server"))
+                if (this.DrawCheckRow(false, McpEditorText.Tr("Server not initialized"), McpEditorText.Tr("Initialize")))
                 {
                     this.mcpServer = new McpHttpServer();
                     McpServiceManager.Instance.RegisterService(this.mcpServer);
                 }
+
+                return;
             }
 
-            EditorGUILayout.EndVertical();
+            if (this.mcpServer.IsRunning)
+            {
+                var label = string.Format(McpEditorText.Tr("Listening on port {0}"), this.mcpServer.BoundPort);
+
+                if (this.DrawCheckRow(true, label, McpEditorText.Tr("Stop")))
+                {
+                    this.mcpServer.Stop();
+                }
+
+                return;
+            }
+
+            if (this.DrawCheckRow(false, McpEditorText.Tr("Server stopped"), McpEditorText.Tr("Start")))
+            {
+                this.mcpServer.Start();
+            }
+        }
+
+        private void DrawCliRow()
+        {
+            if (!this.cliLooked)
+            {
+                this.cliLooked = true;
+                this.cliPath = IsuzuCliLocator.TryFind(out var found) ? found : null;
+            }
+
+            if (this.cliPath != null)
+            {
+                if (this.DrawCheckRow(true, McpEditorText.Tr("isuzu-unity-cli found") + "  " + this.cliPath, McpEditorText.Tr("Refresh")))
+                {
+                    this.cliLooked = false;
+                }
+
+                return;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("✗", GUILayout.Width(16));
+            GUILayout.Label(McpEditorText.Tr("isuzu-unity-cli not found on PATH"));
+            GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button(McpEditorText.Tr("Install"), GUILayout.Width(90)))
+            {
+                OpenInstallTerminal();
+                this.cliLooked = false;
+            }
+
+            if (GUILayout.Button(McpEditorText.Tr("Copy command"), GUILayout.Width(130)))
+            {
+                EditorGUIUtility.systemCopyBuffer = IsuzuCliLocator.InstallCommand();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.HelpBox(
+                McpEditorText.Tr("Command-line agents need the CLI. MCP clients reach the endpoint below without it.")
+                + "\n" + IsuzuCliLocator.InstallCommand(),
+                MessageType.None);
+        }
+
+        /// <summary>One checklist row. Returns true on the frame its button is pressed.</summary>
+        private bool DrawCheckRow(bool done, string label, string button)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(done ? "✓" : "✗", GUILayout.Width(16));
+            GUILayout.Label(label);
+            GUILayout.FlexibleSpace();
+            var pressed = GUILayout.Button(button, GUILayout.Width(90));
+            EditorGUILayout.EndHorizontal();
+            return pressed;
+        }
+
+        private void DrawConnectionSection()
+        {
+            GUILayout.Label(McpEditorText.Tr("Connection"), this.HeaderStyle);
+
+            if (this.mcpServer == null || !this.mcpServer.IsRunning)
+            {
+                EditorGUILayout.HelpBox(McpEditorText.Tr("Start the server to see the connection details."), MessageType.Info);
+                return;
+            }
+
+            var url = this.mcpServer.McpUrl;
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(McpEditorText.Tr("MCP URL"), GUILayout.Width(LabelWidth));
+            EditorGUILayout.SelectableLabel(url, EditorStyles.textField, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+            if (GUILayout.Button(McpEditorText.Tr("Copy"), GUILayout.Width(70)))
+            {
+                EditorGUIUtility.systemCopyBuffer = url;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(McpEditorText.Tr("Bearer token"), GUILayout.Width(LabelWidth));
+            GUILayout.Label("••••••••", EditorStyles.miniLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button(McpEditorText.Tr("Copy"), GUILayout.Width(70)))
+            {
+                EditorGUIUtility.systemCopyBuffer = this.mcpServer.Token;
+            }
+            if (GUILayout.Button(McpEditorText.Tr("Regenerate"), GUILayout.Width(100)))
+            {
+                if (EditorUtility.DisplayDialog(
+                        McpEditorText.Tr("Regenerate token"),
+                        McpEditorText.Tr("Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"),
+                        McpEditorText.Tr("Regenerate"),
+                        McpEditorText.Tr("Cancel")))
+                {
+                    this.mcpServer.RegenerateToken();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(McpEditorText.Tr("Configuration for"), GUILayout.Width(LabelWidth));
+            this.snippetIndex = EditorGUILayout.Popup(this.snippetIndex, SnippetLabels);
+            if (GUILayout.Button(McpEditorText.Tr(this.showSnippet ? "Hide" : "Show"), GUILayout.Width(70)))
+            {
+                this.showSnippet = !this.showSnippet;
+            }
+            if (GUILayout.Button(McpEditorText.Tr("Copy"), GUILayout.Width(70)))
+            {
+                EditorGUIUtility.systemCopyBuffer = this.Snippet();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (this.showSnippet)
+            {
+                EditorGUILayout.TextArea(this.Snippet(), this.SnippetStyle);
+            }
+
+            EditorGUILayout.HelpBox(
+                string.Format(
+                    McpEditorText.Tr("The descriptor and token files under {0} are credentials. Anything that can read them can run code in this Editor."),
+                    McpInstanceDescriptor.StateRoot),
+                MessageType.Info);
+        }
+
+        private string Snippet()
+        {
+            var url = this.mcpServer.McpUrl;
+            var token = this.mcpServer.Token;
+
+            switch (this.snippetIndex)
+            {
+                case 0: return McpClientConfigSnippets.ClaudeCodeCommand(url, token);
+                case 1: return McpClientConfigSnippets.CursorJson(url, token);
+                case 2: return McpClientConfigSnippets.CodexToml(url, token);
+                case 3: return McpClientConfigSnippets.GeminiJson(url, token);
+                case 4: return McpClientConfigSnippets.VsCodeJson(url, token);
+                default:
+                    return McpClientConfigSnippets.ClaudeDesktopJson(
+                        this.cliPath ?? IsuzuCliLocator.ExecutableName,
+                        Application.productName);
+            }
+        }
+
+        private void DrawSettingsSection()
+        {
+            var open = EditorPrefs.GetBool(SettingsFoldoutKey, false);
+            var next = EditorGUILayout.Foldout(open, McpEditorText.Tr("Settings"), true, EditorStyles.foldoutHeader);
+
+            if (next != open)
+            {
+                EditorPrefs.SetBool(SettingsFoldoutKey, next);
+            }
+
+            if (!next)
+            {
+                return;
+            }
+
+            var settings = McpSettings.instance;
+            EditorGUI.indentLevel++;
+
+            var previousWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = LabelWidth + 40f;
+
+            settings.httpPort = EditorGUILayout.IntField(
+                McpEditorText.Content(
+                    "HTTP Port",
+                    "0 derives a stable port from the project path, which is what MCP client configuration relies on. Set a positive port only to resolve a collision; clients then have to be registered again."),
+                settings.httpPort);
+
+            if (settings.httpPort != 0 && (settings.httpPort < 1024 || settings.httpPort > 65535))
+            {
+                EditorGUILayout.HelpBox(
+                    string.Format(McpEditorText.Tr("A port must be 0, or between 1024 and 65535. The server cannot bind {0}."), settings.httpPort),
+                    MessageType.Error);
+            }
+
+            settings.autoStartOnLaunch = EditorGUILayout.Toggle(
+                McpEditorText.Content("Auto-start on launch", "Start the server when the Editor opens this project."),
+                settings.autoStartOnLaunch);
+
+            settings.syncWaitMs = EditorGUILayout.IntField(
+                McpEditorText.Content(
+                    "Sync wait (ms)",
+                    "How long a request waits for its main-thread work before the server answers with a job id instead. The server does not go below 250 ms."),
+                settings.syncWaitMs);
+
+            if (settings.syncWaitMs < 250)
+            {
+                EditorGUILayout.HelpBox(McpEditorText.Tr("The server uses 250 ms, which is its floor."), MessageType.Info);
+            }
+
+            settings.detailedLogs = EditorGUILayout.Toggle(
+                McpEditorText.Content(
+                    "Detailed logs",
+                    "Write every request and each start and stop step to the Console. Those lines come back to the agent through console_read_logs. Warnings and errors are written either way."),
+                settings.detailedLogs);
+
+            var keepTicking = EditorGUILayout.Toggle(
+                McpEditorText.Content(
+                    "Keep Editor awake",
+                    "Without focus the Editor runs its main loop about every 100 ms, so calls that need it wait. The server wakes the loop while requests are queued. Turning this on keeps it awake for the whole session instead, at the cost of idle CPU."),
+                settings.keepEditorAwake);
+
+            if (keepTicking != settings.keepEditorAwake)
+            {
+                settings.keepEditorAwake = keepTicking;
+                if (this.mcpServer != null)
+                {
+                    this.mcpServer.KeepEditorAwake = keepTicking;
+                }
+            }
+
+            settings.uiLanguage = EditorGUILayout.Popup(
+                McpEditorText.Content("Language", "The language of this page. Tool descriptions and CLI output stay in English."),
+                settings.uiLanguage,
+                new[] { McpEditorText.Tr("Follow the Editor"), "English", "日本語" });
+
+            EditorGUIUtility.labelWidth = previousWidth;
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.HelpBox(
+                McpEditorText.Tr("These settings live in Unity's preferences folder and are shared by every project on this machine."),
+                MessageType.None);
+        }
+
+        private void DrawHelpSection()
+        {
+            var open = EditorPrefs.GetBool(HelpFoldoutKey, false);
+            var next = EditorGUILayout.Foldout(open, McpEditorText.Tr("Help"), true, EditorStyles.foldoutHeader);
+
+            if (next != open)
+            {
+                EditorPrefs.SetBool(HelpFoldoutKey, next);
+            }
+
+            if (!next)
+            {
+                return;
+            }
+
+            var japanese = McpEditorText.Resolve() == SystemLanguage.Japanese;
+
+            EditorGUI.indentLevel++;
+            DrawLink(McpEditorText.Tr("Getting started"), japanese ? GuideUrlJapanese : GuideUrlEnglish);
+            DrawLink(McpEditorText.Tr("Documentation"), RepositoryUrl);
+            DrawLink(McpEditorText.Tr("Troubleshooting"), japanese ? TroubleshootingUrlJapanese : TroubleshootingUrlEnglish);
+            EditorGUI.indentLevel--;
+        }
+
+        private static void DrawLink(string label, string url)
+        {
+            var rect = EditorGUI.IndentedRect(EditorGUILayout.GetControlRect());
+
+            if (EditorGUI.LinkButton(rect, label))
+            {
+                Application.OpenURL(url);
+            }
+        }
+
+        /// <summary>
+        /// Runs the install script in a terminal the user can see, so a failure is readable
+        /// rather than swallowed by a hidden process.
+        /// </summary>
+        private static void OpenInstallTerminal()
+        {
+            try
+            {
+                if (Application.platform == RuntimePlatform.WindowsEditor)
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "powershell.exe",
+                        Arguments = $"-NoExit -ExecutionPolicy Bypass -Command \"irm {IsuzuCliLocator.InstallScriptUrlWindows} | iex\"",
+                        UseShellExecute = true,
+                    });
+                }
+                else if (Application.platform == RuntimePlatform.OSXEditor)
+                {
+                    var script = $"curl -fsSL {IsuzuCliLocator.InstallScriptUrlUnix} | sh";
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "osascript",
+                        Arguments = $"-e 'tell application \"Terminal\" to do script \"{script}\"' -e 'tell application \"Terminal\" to activate'",
+                        UseShellExecute = false,
+                    });
+                }
+                else
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = "x-terminal-emulator",
+                        Arguments = $"-e sh -c \"curl -fsSL {IsuzuCliLocator.InstallScriptUrlUnix} | sh; exec sh\"",
+                        UseShellExecute = false,
+                    });
+                }
+            }
+            catch (System.Exception e)
+            {
+                UnityEngine.Debug.LogError($"[Unity MCP] Could not open a terminal: {e.Message}. Run this yourself: {IsuzuCliLocator.InstallCommand()}");
+            }
         }
     }
 }

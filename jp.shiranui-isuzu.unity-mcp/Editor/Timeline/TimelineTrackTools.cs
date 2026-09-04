@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 
 using Newtonsoft.Json.Linq;
@@ -47,7 +47,10 @@ namespace UnityMCP.Editor.Timeline
             string track = null,
             [McpArg("muted", "Mute or unmute the track. A muted track is left out of the timeline's length.")]
             bool? muted = null,
-            [McpArg("locked", "Lock or unlock the track. Locking only stops edits made through these tools.")]
+            [McpArg("locked", "Lock or unlock the track. This is Timeline's own lock flag: it is " +
+                              "saved into the asset and the Timeline window refuses edits to a " +
+                              "locked track as well, so it changes what the person at the Editor " +
+                              "can do. Unlocking is always allowed through this tool.")]
             bool? locked = null,
             [McpArg("name", "Rename the track.")]
             string name = null,
@@ -84,7 +87,7 @@ namespace UnityMCP.Editor.Timeline
 
             if (binding != null)
             {
-                var go = ObjectResolve.Object(binding, null, "binding");
+                var go = ObjectResolve.Object(binding, null, "binding", null);
 
                 bindValue = TimelineCreateTools.ResolveBindingValue(
                     trackAsset.outputs.FirstOrDefault().outputTargetType,
@@ -160,7 +163,9 @@ namespace UnityMCP.Editor.Timeline
             "timeline_delete",
             "Delete a track, or one clip from a track, on a Timeline. Deleting a track takes its " +
             "clips and any tracks grouped under it. This is undoable, so it does not ask for " +
-            "confirmation. Addresses come from timeline_inspect.",
+            "confirmation, but the .playable file is rewritten before it returns: undo restores " +
+            "the asset in memory, not the file, until something saves again. Addresses come from " +
+            "timeline_inspect.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Delete Timeline Item")]
         public static JObject Delete(

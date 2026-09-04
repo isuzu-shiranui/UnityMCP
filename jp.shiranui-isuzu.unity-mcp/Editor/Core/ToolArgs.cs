@@ -3,15 +3,14 @@ using Newtonsoft.Json.Linq;
 namespace UnityMCP.Editor.Core
 {
     /// <summary>
-    /// Builds the untyped parameter object the pre-v3 handlers still expect.
+    /// Builds the untyped parameter object the handlers under <c>Handlers/</c> take.
     /// </summary>
     /// <remarks>
-    /// The <c>[McpTool]</c> wrappers exist to give each operation a typed signature the
-    /// catalog can derive a schema from; their bodies still delegate to the original handler
-    /// implementations so behaviour is unchanged during the migration. This helper is the
-    /// seam between the two.
+    /// A <c>[McpTool]</c> method carries a typed signature so the catalog can derive its
+    /// schema, while the handler it calls reads its values out of a <c>JObject</c>. This
+    /// helper is the seam between the two.
     /// <para>
-    /// Null values are dropped rather than written as JSON null, because the legacy handlers
+    /// Null values are dropped rather than written as JSON null, because those handlers
     /// distinguish "absent, use my default" from "explicitly null" and would take the latter
     /// as a real value.
     /// </para>

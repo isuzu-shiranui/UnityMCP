@@ -1,0 +1,63 @@
+{
+  "manifest_version": "0.3",
+  "name": "isuzu-unity-cli",
+  "display_name": "Unity MCP (isuzu-unity-cli)",
+  "version": "0.0.0",
+  "description": "Connects Claude Desktop to a running Unity Editor that has the jp.shiranui-isuzu.unity-mcp package installed.",
+  "long_description": "The bundle carries the isuzu-unity-cli binary for Windows, macOS and Linux. It runs that binary as a stdio bridge to the MCP endpoint the Unity Editor publishes. The Editor must be open with the package installed. Its tools then appear in Claude Desktop: the console, compile status, the scene hierarchy, GameObject and asset authoring, Play Mode, screenshots, Timeline and more.",
+  "author": {
+    "name": "isuzu-shiranui",
+    "url": "https://github.com/isuzu-shiranui/UnityMCP"
+  },
+  "homepage": "https://github.com/isuzu-shiranui/UnityMCP",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/isuzu-shiranui/UnityMCP"
+  },
+  "documentation": "https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md",
+  "support": "https://github.com/isuzu-shiranui/UnityMCP/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/isuzu-unity-cli-win-x64.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/isuzu-unity-cli-linux-x64",
+      "args": [
+        "mcp-stdio",
+        "--project",
+        "${user_config.project}"
+      ],
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/isuzu-unity-cli-win-x64.exe"
+        },
+        "darwin": {
+          "command": "${__dirname}/server/isuzu-unity-cli-osx"
+        }
+      }
+    }
+  },
+  "tools_generated": true,
+  "user_config": {
+    "project": {
+      "type": "string",
+      "title": "Unity project name",
+      "description": "Leave this empty when only one Unity project is open, which is the usual case. With several open, name the one to connect to: either the name in the Editor's title bar, which is the project folder, or the Product Name from Player Settings. The Editor must be open with the jp.shiranui-isuzu.unity-mcp package installed.",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "win32",
+      "darwin",
+      "linux"
+    ]
+  },
+  "keywords": [
+    "unity",
+    "unity-editor",
+    "mcp",
+    "game-development",
+    "vrchat"
+  ],
+  "license": "MIT"
+}

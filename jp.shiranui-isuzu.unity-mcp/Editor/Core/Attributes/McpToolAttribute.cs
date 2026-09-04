@@ -5,8 +5,8 @@ namespace UnityMCP.Editor.Core.Attributes
     /// <summary>
     /// Marks a static method as an MCP tool. The method becomes discoverable by
     /// <see cref="ToolCatalog"/>, which derives the tool's JSON Schema from the
-    /// method signature — there is no second definition to keep in sync on the
-    /// TypeScript side (v3 design: Unity is the single source of truth).
+    /// method signature. The Editor is the only place a tool is defined, so there is
+    /// no second definition on the client to keep in step.
     /// </summary>
     /// <remarks>
     /// Modelled on <c>[CliCommand]</c> from Unity's <c>com.unity.pipeline</c> package.
@@ -21,7 +21,7 @@ namespace UnityMCP.Editor.Core.Attributes
         /// <summary>
         /// The tool name exposed over MCP, e.g. <c>console_get_logs</c>.
         /// Must match <c>^[a-z][a-z0-9_]{0,63}$</c> — the MCP tool-name grammar
-        /// forbids dots, so the v2 <c>prefix.action</c> form is not valid here.
+        /// forbids dots, so a <c>prefix.action</c> name has to be spelled <c>prefix_action</c>.
         /// <see cref="ToolCatalog"/> rejects names that do not conform.
         /// </summary>
         public string Name { get; }
@@ -104,6 +104,14 @@ namespace UnityMCP.Editor.Core.Attributes
         /// <c>anthropic/maxResultSizeChars</c> in the tool's <c>_meta</c>.
         /// </remarks>
         public int MaxResultSizeChars { get; set; }
+
+        /// <summary>
+        /// The group a client can ask for to receive a subset of the tools: one of
+        /// <c>diagnostics</c>, <c>authoring</c>, <c>rendering</c>, <c>timeline</c>, <c>build</c>,
+        /// <c>code</c>, <c>input</c>. Null derives it from the name prefix, which is right for
+        /// almost every tool.
+        /// </summary>
+        public string Group { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="McpToolAttribute"/> class.
