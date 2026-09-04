@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.0.1] - 2026-09-05
+
+### Fixed
+- The install line the READMEs and the getting started guide print now runs. `install.ps1`
+  carried a UTF-8 BOM, and `irm` hands `iex` a string whose first character is U+FEFF, so
+  `param()` was no longer the first statement and PowerShell refused the whole script with a
+  parse error on its first parameter. The file is ASCII, so the BOM bought nothing. CI checks
+  both install scripts for one now, because they are parsed rather than displayed.
+- The Install CLI button in Preferences now opens a terminal. It ran the same one-liner through
+  `Process.Start`, and security software refuses to create a process whose command line
+  downloads and runs a script in one expression, returning access denied to the caller. The
+  button fetches the script and hands the terminal a path instead, which also leaves the script
+  on disk to read when an install fails.
+
+Neither path had been exercised against a real release before 4.0.0 existed. The CLI binary is
+unchanged from 4.0.0.
+
 ## [4.0.0] - 2026-09-04
 
 ### Breaking
