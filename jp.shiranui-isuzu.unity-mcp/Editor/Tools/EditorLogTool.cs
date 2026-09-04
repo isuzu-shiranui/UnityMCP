@@ -17,8 +17,7 @@ namespace UnityMCP.Editor.Tools
     /// Reads Unity's <c>Editor.log</c> straight from disk.
     /// </summary>
     /// <remarks>
-    /// This is the first tool declared with <see cref="McpToolAttribute"/> and it is
-    /// deliberately <c>MainThread = false</c>. The console-backed <c>/read_logs</c> endpoint
+    /// Deliberately <c>MainThread = false</c>. The console-backed <c>console_read_logs</c>
     /// has to marshal onto the main thread, so it reports nothing at exactly the moment it is
     /// most needed — while the Editor is wedged importing, compiling, or stuck behind a modal
     /// "Hold on" dialog. Reading the file needs no Unity API at all, so this keeps answering.

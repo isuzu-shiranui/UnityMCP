@@ -1,26 +1,201 @@
 # Changelog
 
-## [3.3.1] - 2026-09-03
+## [4.0.0] - 2026-09-04
+
+### Breaking
+- The CLI binary and command are renamed: `isuzu-unity-mcp` is now `isuzu-unity-cli`.
+- The npm package `@shiranui_isuzu/unity-mcp` and the Node MCP server (`unity-mcp-ts`) are removed.
+  The Editor serves MCP itself at `http://127.0.0.1:<port>/mcp` over Streamable HTTP.
+- Removed: the tools `unity_list_clients`, `unity_set_active_client`, `unity_get_active_client`;
+  the `target` parameter on every tool; the `code_execute` MCP prompt; the interfaces
+  `IMcpCommandHandler` and `IMcpResourceHandler` (write a `[McpTool]` method instead).
+- Removed: the v2 HTTP routes `/command`, `/resource`, `/read_logs`, `/execute_code`,
+  `/browse_hierarchy`, `/capture_screenshot`, `/play_mode`, `/inspect`, `/hlsl/errors`; the
+  `/proxy` ProjectApi route; the environment variables `MCP_DESCRIPTOR_INTERVAL`,
+  `MCP_HEALTH_INTERVAL`, `MCP_RELOAD_RETRY_MAX_MS`, `MCP_PROJECT_API_PORT`.
+- Removed: the settings `clientInstallationPath` and per-handler enable/disable; the `/health`
+  fields `handlers[]` and `resources[]` (`/health` now reports `mcpUrl`, `preferredPort`,
+  `portMismatch`, `toolCount`); the npm installer window (Tools > Unity MCP > Installer).
+- `inspect_list`, `inspect_read` and `inspect_write` take `object_path` instead of
+  `game_object_path`. Every other tool that addresses a scene object already used that name.
+
+### Added
+- A component whose script Unity cannot resolve is named `<missing script>` rather than reported
+  as null, `scene_browse_hierarchy` and `inspect_list` count them per object, and
+  `scene_browse_hierarchy` takes `missing_scripts: true` to return only the objects carrying one.
+  That is what a removed package leaves behind, and it was previously indistinguishable from any
+  other null.
+- The package carries its own `LICENSE.md`, and `package.json` names the licence and links to the
+  documentation, the changelog and the licence. Installing by git URL brings only this directory,
+  so the licence has to travel with it.
+- The release publishes to NuGet through trusted publishing: nuget.org trades the workflow's
+  OpenID Connect token for a key that lasts an hour, so no API key is stored anywhere. Setting it
+  up is described in `scripts/README.md`.
+- Blocking dialogs are reported instead of looking like a hang. `/health` carries `mainThread`
+  (`stalledMs`, the visible dialog's title, message and buttons on Windows), and a call that is
+  still running because a dialog is up says so in its job envelope, in `job_status` and over MCP.
+  `editor_dialog_list` reads the dialog; `editor_dialog_press` (destructive, `confirm` required)
+  presses a button from outside the Editor. The CLI prints the notice while it waits.
+- `isuzu-unity-cli`. The binaries in the release, and the ones the install scripts place, are
+  native (.NET NativeAOT) and need no Node and no .NET runtime. The `dotnet tool` package is an
+  ordinary .NET 10 tool and runs on the runtime that ships with the SDK you install it with.
+  Install with `install.ps1`, `install.sh`, `dotnet tool install -g IsuzuUnityCli`, or a
+  GitHub Releases binary (`isuzu-unity-cli-win-x64.exe`, `-osx-arm64`, `-osx-x64`, `-linux-x64`,
+  verified against `SHA256SUMS`).
+  A call takes about 20 ms end to end on Windows: the binary is native code, the Editor is
+  reached over a plain loopback socket instead of a general HTTP client, and the descriptor is
+  read without the serializer's set-up. `UNITY_MCP_TRACE=1` prints where the time goes.
+- `isuzu-unity-cli.mcpb`, a Claude Desktop Extension bundle in the GitHub release. It carries the
+  Windows, macOS and Linux binaries, declares all three platforms, installs by double-click, and
+  asks only for the Unity project name.
+- A VPM repository at `https://unity-mcp.shiranui-isuzu.dev/vpm.json`, so VCC and ALCOM install
+  the package without a Git client on `PATH`, which is what Unity's git URL route requires. The
+  release attaches the package as `jp.shiranui-isuzu.unity-mcp-<version>.zip`, and
+  `scripts/build-vpm.sh` derives the listing from the releases themselves when the site deploys:
+  every release carrying that zip is one version in it, described by the `package.json` inside
+  that zip, so earlier versions stay installable without being stored anywhere.
+- `isuzu-unity-cli verify`: recompile, wait out the domain reload, collect compiler errors, run the
+  tests (`--test`, `--filter`, `--assembly`, `--category`, `--no-compile`) and read the console in
+  one call. Exit code 0 success, 1 compile errors or test failures, 4 `--timeout` (300 s). `--raw`
+  prints JSON.
+- `isuzu-unity-cli setup` installs the agent skill for Claude Code and Codex; `setup --mcp` also
+  registers the MCP endpoint from the running Editor's descriptor. Flags: `--agent
+  claude-code|claude-desktop|codex|cursor|gemini|vscode`, `--scope user|project` (project scope
+  writes `.mcp.json` with `${UNITY_MCP_TOKEN}`, never a raw token), `--no-skill`, `--project <name>`.
+- `doctor --fix`, `upgrade [--version vX.Y.Z]`, `mcp-stdio --project <name>` (stdio bridge for
+  Claude Desktop), `tools --group <name>[,<name>]`, and the environment variables
+  `UNITY_MCP_STATE_DIR` / `UNITY_MCP_HOST` for a CLI in WSL2 reaching an Editor on Windows.
+- Preferences > Unity MCP opens on a checklist of what is done and what is left: whether the
+  server is listening, whether the CLI is on `PATH`, and the client registration that has to
+  be made either from the page or with `isuzu-unity-cli setup --mcp`. Below it are the MCP URL,
+  the token, and a ready-to-paste config snippet for Claude Code, Cursor, Codex, Gemini CLI,
+  VS Code or the Claude Desktop stdio bridge. The settings and the help links sit behind
+  foldouts, since most projects never change a setting. "Install CLI" opens a terminal running
+  the install script.
+- Every setting carries a tooltip, and the two that can be given an unusable value say so:
+  an `HTTP Port` outside 1024-65535 cannot be bound, and a `Sync wait` below 250 ms is raised
+  to the floor the server enforces. Both were accepted silently before.
+- A screen-read capture is refused with `window_occluded` when another application is in front of
+  the Editor. The grab reads the desktop, not the window, so the picture would have been that
+  application's window, and it goes on to whatever the image is sent to. `game` and `scene` render
+  through the camera and are unaffected. The views that read the screen are `inspector`,
+  `hierarchy`, `project`, `console` and every view whose name ends in `_window`; the security page
+  and the tool description had listed only the panels. A window of the same Editor covering the
+  target is not detected, so a floating Package Manager still returns the wrong part of the screen.
+- A capture failure now carries its own code and status. `McpScreenshotException` did not derive
+  from `McpToolException`, so `ToolInvoker` turned every one of them into `tool_failed` with a 500.
+  A refusal read as a fault in the Editor, and a client that retries safe calls repeated it for its
+  whole budget.
+- `JToken` and `JValue` arguments declare every JSON type rather than `object`. A schema-validating
+  client could not send `inspect_write`'s own worked example, which passes a number. The four
+  `animator_` arguments of that shape were affected too. A test now checks every published example
+  against the schema its tool declares.
+- The Preferences page draws in Japanese when the Editor is set to Japanese, and `uiLanguage`
+  pins it either way. That page is the only translated surface: tool descriptions, the text a
+  tool returns and the CLI output stay in English, because a model reads them to decide what
+  to call.
+- MCP endpoint: stateless; protocol revisions 2025-11-25, 2025-06-18, 2025-03-26; `tools/list`
+  carries `readOnlyHint` / `idempotentHint` on safe tools and `destructiveHint` on destructive
+  ones; `tools/call` returns `structuredContent` alongside text and tool errors as `isError`
+  results; GET and DELETE answer 405; a foreign `Origin` answers 403.
+- Tool groups `diagnostics`, `authoring`, `rendering`, `timeline`, `build`, `code`, `input`, from
+  the name prefix or `[McpTool(Group = ...)]`. `?group=a,b` on the MCP URL or `GET /tools?group=a,b`
+  filters `tools/list`; calls are never filtered. Discovery rejects an unknown group and rejects
+  `UndoGroup` on a `MainThread = false` tool.
+- `job_status`, a safe tool that answers while the main thread is busy.
+- Animator Controller tools. `animator_inspect` reads a controller named by asset path or
+  reached through any component on a scene object that points at one, which is how a character
+  keeping one controller per body layer is reached without this package knowing that component.
+  Without a `layer` it reports the parameters and one line per layer and no states, because a
+  twenty-layer controller has hundreds of them. `animator_audit` reports what the Editor never
+  mentions: parameters nothing references, states with no motion, states unreachable from the
+  default state, layers with no states, duplicate layer names, transitions with neither a
+  condition nor an exit time, and Write Defaults mixed within one layer with the majority and
+  the states that disagree. Ten editing tools cover layers, states, transitions, parameters and
+  Write Defaults across a whole layer: `animator_add_layer`, `animator_remove_layer`,
+  `animator_add_state`, `animator_remove_state`, `animator_set_state`,
+  `animator_set_write_defaults`, `animator_add_transition`, `animator_remove_transition`,
+  `animator_add_parameter`, `animator_remove_parameter`. Each is one undo step. A controller is
+  a shared asset, so a write reaches every scene and character using it, and the `.controller`
+  file is written before the call returns; undo restores the controller in memory, not the file.
+- `material_read` and `material_set` take `object_path` and `slot`, so a material can be reached
+  through the scene object that draws it instead of only by its asset path. Reading reports every
+  material slot on the renderer with its shader and its property count, and naming a `slot` returns
+  that slot's property values. A shader that is missing or unsupported is named in `shaderProblem`,
+  which is what makes an object magenta. Writing goes to the shared material, never to a
+  per-renderer copy.
+- Defined tools: a JSON file under `%LOCALAPPDATA%\UnityMCP\tools\<projectHash>\` or
+  `...\tools\shared\` adds a tool without C#. Kinds: `probe` (reflection reads with root notations
+  `@type:`, `@scene:`, `@id:`, `@selection`, `@sceneview:camera` and a `changes` mode), `script` (a
+  `.cs` file receiving a `JObject`, re-read on every call), `sequence` (a chain of tool calls with
+  `{{stepId.json.path}}` templating). Files are watched; `GET /tools?refresh=1` forces a rebuild;
+  `definitions_list` reports what loaded and why something did not. Declared input types and enums
+  are checked at call time (`invalid_params`); a `script` compile error answers
+  `script_compile_error` (400); a `sequence` that contains a destructive step is destructive itself,
+  may contain multi-frame steps such as `input_replay`, and mutual references between sequences are
+  refused at load.
+- Input tools `input_pointer` (drags spread over frames with `steps` / `frames_per_step`),
+  `input_key`, `input_record` (writes `%LOCALAPPDATA%\UnityMCP\recordings\<projectHash>\<name>.json`)
+  and `input_replay` (`then_capture` chains into `capture_screenshot`), through the Editor's GUI path.
+- Preferences setting `keepEditorAwake`; `/health` reports `loopWaker` as `on-demand`, `always` or
+  `unavailable`.
+
+### Changed
+- `capture_screenshot` says in its own description, and the docs say, that a panel capture reads
+  the screen: an application in front of the Editor is in the image and in whatever the image is
+  sent to. `game` and `scene` are rendered by Unity and carry nothing else.
+- `prefab_apply` now requires `confirm: true`. It rewrites the prefab asset, reaches every
+  instance of it, and is not undoable.
+- `detailedLogs` starts off. Each request and each start and stop step went to the Unity console,
+  and those lines come back through `console_read_logs` to the agent driving the Editor. Warnings
+  and errors are logged either way, and the line naming the bound URL is always logged. The
+  settings live in Unity's preferences folder and are shared by every project on the machine, so a
+  machine that already saved them keeps its own value; turn it off in Preferences > Unity MCP.
+- The Editor main loop is woken while a request waits, so an unfocused Editor answers in a few
+  milliseconds instead of up to about 100 ms per call.
+- The port is derived from the project path into 27200-27999. Preferences `HTTP Port` 0 uses the
+  derived port; a positive value pins it. If the port is taken, the server scans for a free one and
+  reports `portMismatch` in `/health`, the descriptor and a Preferences warning.
+- The bearer token is fixed per project under `%LOCALAPPDATA%\UnityMCP\tokens\`
+  (`~/.local/share/UnityMCP/tokens/` on macOS/Linux, owner-only on Unix). Preferences has a
+  "Regenerate" action; run `isuzu-unity-cli doctor --fix` afterwards.
+- Descriptors carry `mcpUrl`, `preferredPort`, `portMismatch` and `mcpProtocolVersions`.
+- Window names `scene_view_window`, `game_view_window`, `inspector`, `hierarchy`, `project`,
+  `console`, `window:<title>` are shared by `capture_screenshot` and the input tools.
 
 ### Fixed
-- **Unity 2022.3 compiles again.** `PlayerSettings.GetStaticBatchingForPlatform` exists only from
-  2023.1, so `render_pipeline_info` reports `batchingStatic` as null on 2022.3 instead of failing
-  the whole package to compile. Reported in #20, fixed in #21 by @takara2314.
-- **Unity 6.5 instance ids reach the model intact.** A 6.5 EntityId is about 5.7e17, above the
-  2^53 a JSON number survives on its way through JavaScript. Ids were rounded twice: once by the
-  MCP server parsing the Editor's reply, once by the Editor coercing the argument through a
-  double. The rounded id then named nothing, and every id-addressed call on 6.5 failed with
-  `not_found`. On 6.5 and later `instanceId` is now a JSON string, and 64-bit arguments accept a
-  string or an integer without going through a double. Earlier Unity versions are unchanged.
-- The Settings window no longer freezes the Editor when it is open during a domain reload.
-  Styles are created on first draw instead of in `OnActivate`, where `EditorStyles` can still be
-  null.
-- `timeline_inspect` keeps its visited set as 64-bit ids, so a Control track that loops back to
-  its own timeline is still detected on 6.5.
+- A request that was in flight when the listener closed for a domain reload logged an error to
+  the console on every script compile, and `console_read_logs` handed it to the agent as if the
+  project had failed.
+- `test_run` on an EditMode run refuses with `scene_dirty` when an open scene has unsaved changes.
+  The runner would otherwise stop at the Editor's save dialog, which blocks every tool while the
+  call has already answered `started`. `force: true` restarts after a run that never reported.
+- `test_run` and `test_results` were absent from every project that did not list this package in
+  `testables`, because their assembly was constrained to `UNITY_INCLUDE_TESTS`. It is now constrained
+  on the presence of `com.unity.test-framework`, so `verify --test` works in an ordinary project.
+- `console_read_logs` with `type: error` or `type: warning` returned no entries while the counts
+  said otherwise. The classifier tested the wrong mode bits: a `Debug.LogError` sets the scripting
+  error flag and a compiler error the compile error flag, neither of which is bit 0.
+- Unity 2022.3 compiles again; `render_pipeline_info` reports `batchingStatic` as null there
+  (#20, #21, @takara2314).
+- Unity 6.5 and later: `instanceId` is a JSON string (an EntityId can exceed 2^53); `instance_id`
+  accepts a string or an integer.
+- The Settings window no longer freezes the Editor when open during a domain reload.
+- `timeline_inspect` detects a Control track that loops back to its own timeline on 6.5.
+
+### Migration
+| v3 | v4 |
+|---|---|
+| `isuzu-unity-mcp <cmd>` | `isuzu-unity-cli <cmd>` |
+| `npm i -g @shiranui_isuzu/unity-mcp` | an install script, or `dotnet tool install -g IsuzuUnityCli` |
+| `{"command":"node","args":[".../build/index.js"]}` | `{"type":"http","url":"http://127.0.0.1:<port>/mcp","headers":{"Authorization":"Bearer <token>"}}`, or `claude mcp add --transport http` |
+| `target` parameter to select an Editor | one URL per project |
+| `unity_list_clients` | `isuzu-unity-cli projects` |
+| skill `isuzu-unity-mcp` | skill `isuzu-unity-cli` (`setup` removes the old folder) |
+| Preferences npm installer window | Preferences "Install CLI" button |
 
 ### Verified
-EditMode suite (232 tests) on 2022.3.9f1, 2022.3.22f1, 2023.1.13f1, 2023.2.20f1, 6000.0.35f1,
-6000.1.17f1, 6000.3.19f1, 6000.5.10f1.
+EditMode suite on 2022.3.22f1, 6000.0.35f1, 6000.5.10f1. CLI: `dotnet test` in `isuzu-unity-cli/`.
 
 ## [3.3.0] - 2026-07-31
 

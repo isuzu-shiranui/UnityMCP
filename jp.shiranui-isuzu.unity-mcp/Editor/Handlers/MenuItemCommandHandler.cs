@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -9,23 +9,8 @@ namespace UnityMCP.Editor.Handlers
     /// <summary>
     /// Command handler for executing Unity menu items.
     /// </summary>
-    internal sealed class MenuItemCommandHandler : IMcpCommandHandler
+    internal sealed class MenuItemCommandHandler
     {
-        /// <summary>
-        /// Gets the command prefix for this handler.
-        /// </summary>
-        public string CommandPrefix => "menu";
-
-        /// <summary>
-        /// Gets the description of this command handler.
-        /// </summary>
-        public string Description => "Executes Unity Editor menu items (Built-in)";
-
-        /// <summary>
-        /// Gets the idempotency classification. Unsafe because menu item execution has side effects.
-        /// </summary>
-        public McpIdempotency Idempotency => McpIdempotency.Unsafe;
-
         /// <summary>
         /// Executes the command with the given parameters.
         /// </summary>

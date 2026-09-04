@@ -110,6 +110,32 @@ namespace UnityMCP.Editor.Tests
             return ToolCatalog.BuildFromTypes(types);
         }
 
+        /// <summary>
+        /// A descriptor of the shape a tool loaded from JSON produces: no backing method, a body
+        /// that reads the raw arguments, and a file path standing in for a declaring type.
+        /// </summary>
+        private static McpToolDescriptor Defined(
+            string name,
+            string description,
+            JObject inputSchema = null,
+            string group = null,
+            bool destructive = false)
+        {
+            return new McpToolDescriptor(
+                name,
+                description,
+                inputSchema ?? new JObject { ["type"] = "object", ["properties"] = new JObject() },
+                McpIdempotency.Unsafe,
+                true,
+                destructive,
+                null,
+                group,
+                false,
+                0,
+                "Assets/Defined/" + name + ".json",
+                _ => new JObject { ["ok"] = true });
+        }
+
         [Test]
         public void Discovers_StaticAttributedMethods()
         {
@@ -292,6 +318,27 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void McpEntryCarriesAnnotationsDerivedFromTheAttribute()
+        {
+            var catalog = ToolCatalog.BuildFromTypes(new[] { typeof(ValidTools) });
+
+            Assert.That(catalog.TryGet("sample_query", out var query), Is.True);
+            var safe = query.ToMcpToolEntry();
+            Assert.That(safe["annotations"]["readOnlyHint"].Value<bool>(), Is.True);
+            Assert.That(safe["annotations"]["idempotentHint"].Value<bool>(), Is.True);
+            Assert.That(safe["annotations"]["destructiveHint"].Value<bool>(), Is.False);
+            Assert.That(safe["annotations"]["openWorldHint"].Value<bool>(), Is.False);
+            Assert.That(safe["inputSchema"]["type"].Value<string>(), Is.EqualTo("object"));
+            Assert.That(safe["_meta"], Is.Null, "A tool without hints must not carry an empty _meta.");
+
+            Assert.That(catalog.TryGet("sample_delete", out var delete), Is.True);
+            var destructive = delete.ToMcpToolEntry();
+            Assert.That(destructive["annotations"]["readOnlyHint"].Value<bool>(), Is.False);
+            Assert.That(destructive["annotations"]["destructiveHint"].Value<bool>(), Is.True);
+            Assert.That(destructive["idempotency"], Is.Null, "The REST-only fields stay off the MCP entry.");
+        }
+
+        [Test]
         public void LiveCatalogBuildsWithoutErrors()
         {
             // Guards the real package: any [McpTool] added later that breaks the naming or
@@ -302,6 +349,101 @@ namespace UnityMCP.Editor.Tests
                 "ToolCatalog.Build() reported: " + string.Join(" | ", catalog.Errors));
             Assert.That(catalog.TryGet("sample_query", out _), Is.False,
                 "Test fixture tools must not leak into the live catalog.");
+        }
+
+        [Test]
+        public void DirectDescriptorRegistersLikeAnAttributeTool()
+        {
+            var catalog = ToolCatalog.BuildFromTypes(
+                new[] { typeof(ValidTools) },
+                null,
+                new[] { Defined("sample_direct", "Runs a body that has no backing method.") });
+
+            Assert.That(catalog.Errors, Is.Empty);
+            Assert.That(catalog.TryGet("sample_direct", out var direct), Is.True);
+            Assert.That(catalog.TryGet("sample_query", out var attributed), Is.True);
+
+            // A client cannot tell the two apart, so neither entry may carry a field the other
+            // lacks — that is the whole point of routing defined tools through the same catalog.
+            Assert.That(
+                direct.ToCatalogEntry().Properties().Select(p => p.Name),
+                Is.EquivalentTo(attributed.ToCatalogEntry().Properties().Select(p => p.Name)));
+            Assert.That(
+                direct.ToMcpToolEntry().Properties().Select(p => p.Name),
+                Is.EquivalentTo(attributed.ToMcpToolEntry().Properties().Select(p => p.Name)));
+
+            Assert.That(direct.Group, Is.EqualTo("code"), "An unprefixed name derives the code group.");
+            Assert.That(direct.UsesReflectionFallback, Is.False, "A direct tool has no signature to compile.");
+        }
+
+        [Test]
+        public void DirectDescriptorCollidingWithAttributeToolIsRejected()
+        {
+            var catalog = ToolCatalog.BuildFromTypes(
+                new[] { typeof(ValidTools) },
+                null,
+                new[] { Defined("sample_query", "Collides with an attribute tool.") });
+
+            Assert.That(catalog.Count, Is.EqualTo(2), "The attribute tool wins.");
+            Assert.That(catalog.TryGet("sample_query", out var kept), Is.True);
+            Assert.That(kept.Direct, Is.Null);
+
+            Assert.That(catalog.Errors.Count, Is.EqualTo(1));
+            Assert.That(
+                catalog.Errors[0],
+                Does.Contain("Assets/Defined/sample_query.json").And.Contain(typeof(ValidTools).FullName),
+                "The error has to name both origins to be actionable.");
+        }
+
+        [Test]
+        public void DirectDescriptorWithReservedInputIsRejected()
+        {
+            var schema = new JObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JObject { ["target"] = new JObject { ["type"] = "string" } },
+            };
+
+            var catalog = ToolCatalog.BuildFromTypes(
+                Array.Empty<Type>(),
+                null,
+                new[] { Defined("sample_direct_reserved", "Declares a reserved input.", schema) });
+
+            Assert.That(catalog.Count, Is.Zero);
+            Assert.That(catalog.Errors.Count, Is.EqualTo(1));
+            Assert.That(catalog.Errors[0], Does.Contain("reserved parameter").And.Contain("target"));
+        }
+
+        [Test]
+        public void DirectDestructiveToolMayPublishTheInjectedFlags()
+        {
+            var properties = new JObject();
+            ToolCatalog.AppendConfirmationProperties(properties);
+
+            var schema = new JObject { ["type"] = "object", ["properties"] = properties };
+
+            var catalog = ToolCatalog.BuildFromTypes(
+                Array.Empty<Type>(),
+                null,
+                new[] { Defined("sample_direct_delete", "Deletes something.", schema, destructive: true) });
+
+            // confirm and dry_run are reserved because the invoker injects them; a destructive
+            // tool's schema carries those very flags, so they are not a collision.
+            Assert.That(catalog.Errors, Is.Empty);
+            Assert.That(catalog.TryGet("sample_direct_delete", out _), Is.True);
+        }
+
+        [Test]
+        public void DirectDescriptorWithUnknownGroupIsRejected()
+        {
+            var catalog = ToolCatalog.BuildFromTypes(
+                Array.Empty<Type>(),
+                null,
+                new[] { Defined("sample_direct_group", "Names a group that does not exist.", group: "nonsense") });
+
+            Assert.That(catalog.Count, Is.Zero);
+            Assert.That(catalog.Errors.Count, Is.EqualTo(1));
+            Assert.That(catalog.Errors[0], Does.Contain("unknown group").And.Contain("nonsense"));
         }
 
         [Test]

@@ -7,7 +7,7 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 
-using Debug = UnityEngine.Debug;
+using UnityMCP.Editor.Core;
 
 namespace UnityMCP.Editor.Handlers
 {
@@ -20,17 +20,11 @@ namespace UnityMCP.Editor.Handlers
     /// </summary>
     internal static class ScreenshotCapture
     {
-        // ── Editor panel view → EditorWindow full type name map ──
-        internal static readonly IReadOnlyDictionary<string, string> ViewToTypeName =
-            new Dictionary<string, string>
-            {
-                ["inspector"]         = "UnityEditor.InspectorWindow",
-                ["hierarchy"]         = "UnityEditor.SceneHierarchyWindow",
-                ["project"]           = "UnityEditor.ProjectBrowser",
-                ["console"]           = "UnityEditor.ConsoleWindow",
-                ["game_view_window"]  = "UnityEditor.GameView",
-                ["scene_view_window"] = "UnityEditor.SceneView",
-            };
+        /// <summary>
+        /// Editor panel view to window type name. Owned by <see cref="EditorWindowLocator"/> so
+        /// capture and input replay cannot disagree about what a view name refers to.
+        /// </summary>
+        internal static IReadOnlyDictionary<string, string> ViewToTypeName => EditorWindowLocator.ViewToTypeName;
 
         /// <summary>
         /// Returns the capture as base64, or writes it to disk and returns the path instead.
@@ -73,7 +67,6 @@ namespace UnityMCP.Editor.Handlers
             return result;
         }
 
-        private const string WindowPrefix = "window:";
         private const uint SRCCOPY = 0x00CC0020;
         private const uint DIB_RGB_COLORS = 0;
 
@@ -109,7 +102,7 @@ namespace UnityMCP.Editor.Handlers
         private static bool IsEditorPanelView(string view)
         {
             if (string.IsNullOrEmpty(view)) return false;
-            if (view.StartsWith(WindowPrefix, StringComparison.Ordinal)) return true;
+            if (view.StartsWith(EditorWindowLocator.WindowPrefix, StringComparison.Ordinal)) return true;
             return ViewToTypeName.ContainsKey(view);
         }
 
@@ -249,6 +242,8 @@ namespace UnityMCP.Editor.Handlers
                 // Focus may fail in some edge cases; capture proceeds with the registered rect.
             }
 
+            RefuseIfAnotherApplicationIsInFront(window);
+
             Texture2D captured = null;
             Texture2D resized = null;
             try
@@ -311,64 +306,24 @@ namespace UnityMCP.Editor.Handlers
 
         private static EditorWindow ResolveEditorWindow(string view)
         {
-            var all = UnityEngine.Resources.FindObjectsOfTypeAll<EditorWindow>();
-
-            List<EditorWindow> candidates;
-            if (view.StartsWith(WindowPrefix, StringComparison.Ordinal))
+            try
             {
-                var needle = view.Substring(WindowPrefix.Length);
-                candidates = new List<EditorWindow>();
-                foreach (var win in all)
-                {
-                    if (win == null) continue;
-                    var title = win.titleContent?.text ?? string.Empty;
-                    if (title.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        candidates.Add(win);
-                    }
-                }
+                return EditorWindowLocator.Resolve(view);
             }
-            else if (ViewToTypeName.TryGetValue(view, out var typeName))
+            catch (McpToolException e)
             {
-                candidates = new List<EditorWindow>();
-                foreach (var win in all)
-                {
-                    if (win == null) continue;
-                    if (win.GetType().FullName == typeName)
-                    {
-                        candidates.Add(win);
-                    }
-                }
+                // The capture route translates only its own exception type into an error
+                // envelope; the code and status carry across unchanged.
+                throw new McpScreenshotException(e.Code, e.Message, e.HttpStatus);
             }
-            else
-            {
-                throw new McpScreenshotException(
-                    "invalid_params",
-                    $"Unknown view '{view}'.",
-                    400);
-            }
-
-            if (candidates.Count == 0)
-            {
-                throw new McpScreenshotException(
-                    "window_not_found",
-                    $"No EditorWindow matches view '{view}'.",
-                    400);
-            }
-
-            if (candidates.Count > 1)
-            {
-                Debug.LogWarning(
-                    $"[ScreenshotCapture] multiple_matches: {candidates.Count} EditorWindows match view '{view}'. Using the first one ('{candidates[0].titleContent.text}').");
-            }
-
-            return candidates[0];
         }
 
 #if UNITY_EDITOR_WIN
         // ── P/Invoke bindings (Windows GDI/User32) ──
 
         [DllImport("user32.dll")] private static extern IntPtr GetDesktopWindow();
+        [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
         [DllImport("user32.dll")] private static extern IntPtr GetWindowDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
         [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hWnd);
@@ -402,6 +357,39 @@ namespace UnityMCP.Editor.Handlers
             public BITMAPINFOHEADER bmiHeader;
             // Followed by RGBQUAD[1] in the native layout; unused for 32-bpp BI_RGB capture.
             public uint bmiColors0;
+        }
+
+        /// <summary>
+        /// Refuses the capture when the window in front belongs to another process.
+        /// </summary>
+        /// <remarks>
+        /// The grab reads the desktop, not the window, so whatever is drawn over the Editor is
+        /// what gets returned and then sent on to a model. Focus() above raises the panel within
+        /// the Editor but cannot raise the Editor over another application, and the caller has no
+        /// way to see that it happened.
+        /// </remarks>
+        private static void RefuseIfAnotherApplicationIsInFront(EditorWindow window)
+        {
+            var foreground = GetForegroundWindow();
+
+            if (foreground == IntPtr.Zero)
+            {
+                return;
+            }
+
+            GetWindowThreadProcessId(foreground, out var owner);
+
+            if (owner == 0 || owner == (uint)Process.GetCurrentProcess().Id)
+            {
+                return;
+            }
+
+            throw new McpScreenshotException(
+                "window_occluded",
+                $"Another application is in front of the Editor, so capturing '{window.titleContent.text}' " +
+                "off the screen would return that application's window instead. Bring the Editor to the " +
+                "front, or use 'game' or 'scene', which Unity renders and which no other window can reach.",
+                409);
         }
 
         private static Texture2D CaptureDesktopRegion(Rect logicalRect)
@@ -540,19 +528,19 @@ namespace UnityMCP.Editor.Handlers
     }
 
     /// <summary>
-    /// Exception carrying an MCP error code + HTTP status for screenshot capture failures.
-    /// Caught by McpHttpServer.HandleCaptureScreenshot and translated to an error envelope.
+    /// A capture failure the caller can act on: a minimised window, a bad size, another
+    /// application in front of the Editor.
     /// </summary>
-    internal sealed class McpScreenshotException : Exception
+    /// <remarks>
+    /// Derives from <see cref="McpToolException"/> so the code and status reach the envelope.
+    /// As a standalone type it was turned into <c>tool_failed</c> with a 500, which made a
+    /// refusal look like a fault and had the retry policy repeat it for fifteen seconds.
+    /// </remarks>
+    internal sealed class McpScreenshotException : McpToolException
     {
-        public string Code { get; }
-        public int HttpStatus { get; }
-
         public McpScreenshotException(string code, string message, int httpStatus)
-            : base(message)
+            : base(code, message, httpStatus)
         {
-            this.Code = code;
-            this.HttpStatus = httpStatus;
         }
     }
 }

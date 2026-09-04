@@ -22,26 +22,41 @@ namespace UnityMCP.Editor.Tools
             "scene_browse_hierarchy",
             "Walk the open scenes' GameObject hierarchy, optionally filtered by name, component " +
             "type, or tag. Prefer narrowing with a filter and a small limit over fetching the " +
-            "whole tree: a full hierarchy dump is large and mostly irrelevant to any one question.",
+            "whole tree: a full hierarchy dump is large and mostly irrelevant to any one question. " +
+            "A filtered walk also returns the parents leading down to each match, so results " +
+            "include objects that do not themselves satisfy the filter. While a prefab is open for " +
+            "editing this still reports the scene behind it, and paths from that scene cannot be " +
+            "resolved by the gameobject_ and inspect_ tools, which address the prefab contents " +
+            "instead.",
             Idempotency = McpIdempotency.Safe,
             // Produces the object paths every other tool takes as an argument, so it is needed
             // before most of them rather than instead of them.
             AlwaysLoad = true,
             MaxResultSizeChars = 200000)]
         public static JObject BrowseHierarchy(
-            [McpArg("name", "Only include objects whose name contains this text.")]
+            [McpArg("name", "Match objects whose name contains this text, ignoring case.")]
             string name = null,
-            [McpArg("component", "Only include objects carrying a component of this type.")]
+            [McpArg("component", "Match objects carrying a component of this type. The short type " +
+                                 "name only, spelled exactly: 'MeshRenderer' matches, 'Renderer' " +
+                                 "and 'UnityEngine.MeshRenderer' do not. The other tools accept " +
+                                 "base types and full names, this one does not.")]
             string component = null,
-            [McpArg("tag", "Only include objects with this tag.")]
+            [McpArg("tag", "Match objects with this tag.")]
             string tag = null,
             [McpArg("max_depth", "How deep to descend from each root.")]
             int maxDepth = 5,
-            [McpArg("active_only", "Skip inactive GameObjects.")]
+            [McpArg("active_only", "Match only objects that are active themselves. An active child " +
+                                   "of an inactive parent still matches.")]
             bool activeOnly = false,
+            [McpArg("missing_scripts", "Match only objects carrying a component whose script Unity " +
+                                       "cannot resolve, which is how a removed package or a renamed " +
+                                       "class shows up. Use it to find what a broken import left behind.")]
+            bool missingScripts = false,
             [McpArg("scene_index", "Restrict to a single open scene by index; omit for all scenes.")]
             int? sceneIndex = null,
-            [McpArg("limit", "Maximum entries to return.")]
+            [McpArg("limit", "Maximum entries to return. Omit it, or pass 0, to return every entry. " +
+                             "When paging separates children from their parent they are reported " +
+                             "at the top level rather than nested.")]
             int? limit = null,
             [McpArg("offset", "Entries to skip, for paging.")]
             int offset = 0,
@@ -54,6 +69,7 @@ namespace UnityMCP.Editor.Tools
                 ("tag", tag),
                 ("maxDepth", maxDepth),
                 ("activeOnly", activeOnly),
+                ("missingScripts", missingScripts),
                 ("sceneIndex", sceneIndex),
                 ("limit", limit),
                 ("offset", offset),
@@ -160,7 +176,10 @@ namespace UnityMCP.Editor.Tools
             "Save open scenes. Saves every dirty scene by default.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Save(
-            [McpArg("path", "Save the active scene to this path instead, as a copy (Save As).")]
+            [McpArg("path", "Save the active scene to this path instead. This is Save As, not a " +
+                            "copy: the open scene is retargeted to the new path, the file it came " +
+                            "from keeps its old contents, and every later scene_save, scene_list " +
+                            "and dirty check refers to the new path.")]
             string path = null)
         {
             if (!string.IsNullOrWhiteSpace(path))
@@ -205,7 +224,10 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "scene_create",
-            "Create a new scene and open it.",
+            "Create a new scene and open it, replacing the open scenes or adding to them. Refuses " +
+            "with conflict when any open scene has unsaved changes, unless it is being added " +
+            "additively; call scene_save first. The scene is only written to disk when a path is " +
+            "given.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Create(
             [McpArg("path", "Where to save it, e.g. Assets/Scenes/New.unity. Omit to leave it unsaved.")]

@@ -13,7 +13,6 @@ using UnityEditor;
 using UnityEngine;
 
 using UnityMCP.Editor.Handlers;
-using UnityMCP.Editor.Resources;
 using UnityMCP.Editor.Settings;
 
 namespace UnityMCP.Editor.Core
@@ -28,14 +27,13 @@ namespace UnityMCP.Editor.Core
         /// Version advertised in <c>/health</c> and in the instance descriptor.
         /// </summary>
         /// <remarks>
-        /// Read from the package manifest rather than written here. v2 left a hand-written
-        /// constant at 2.1.0 while the package moved to 2.1.1, so the number clients saw meant
-        /// nothing; v3 kept the constant and a comment saying to keep it in step, and it went
-        /// stale again on the very next release. A comment is not a mechanism. The literal
-        /// remains only as the answer for an assembly that is not loaded from a package, and CI
-        /// checks that it too stays in step.
+        /// The advertised version is read from the package manifest, not from this constant: a
+        /// hand-written number goes stale against the package on the next release, and a comment
+        /// asking for the two to be kept in step is not a mechanism. This literal is only the
+        /// answer for an assembly that is not loaded from a package, and CI checks that it too
+        /// stays in step.
         /// </remarks>
-        private const string FallbackVersion = "3.3.1";
+        private const string FallbackVersion = "4.0.0";
 
         private static string ProtocolVersion
         {
@@ -66,39 +64,12 @@ namespace UnityMCP.Editor.Core
 
         private static string cachedVersion;
 
-        // ── Built-in endpoint/action idempotency table ──
-        // Granular per-action entries exposed via /health.handlers[].
-        // Uses `:` as the action separator: "/inspect:write", "/play_mode:step", etc.
-        private static readonly (string Name, McpIdempotency Idem)[] BuiltinHandlerEntries =
-        {
-            ("/health",                McpIdempotency.Safe),
-            ("/resource",              McpIdempotency.Safe),
-            ("/read_logs",             McpIdempotency.Safe),
-            ("/browse_hierarchy",      McpIdempotency.Safe),
-            ("/capture_screenshot",    McpIdempotency.Safe),
-            ("/inspect:read",          McpIdempotency.Safe),
-            ("/inspect:list",          McpIdempotency.Safe),
-            ("/inspect:write",         McpIdempotency.Unsafe),
-            ("/play_mode:status",      McpIdempotency.Safe),
-            ("/play_mode:play",        McpIdempotency.Unsafe),
-            ("/play_mode:stop",        McpIdempotency.Unsafe),
-            ("/play_mode:pause",       McpIdempotency.Unsafe),
-            ("/play_mode:unpause",     McpIdempotency.Unsafe),
-            ("/play_mode:step",        McpIdempotency.Unsafe),
-            ("/execute_code",          McpIdempotency.Unsafe),
-            ("/jobs",                  McpIdempotency.Safe),
-            ("/jobs:cancel",           McpIdempotency.Unsafe),
-            ("/tools",                 McpIdempotency.Safe),
-            // Individual tool calls are not listed here: each one publishes its own
-            // idempotency in the /tools catalog, which is the point of the attribute.
-        };
-
         /// <summary>
         /// How long a request waits for its main-thread work before switching to a job id.
         /// <para>
-        /// v2 waited 10 seconds and then returned 504 while leaving the work queued, so a
-        /// client that retried executed it twice. The wait is now short on purpose: anything
-        /// slower is better served by a job the caller can poll than by a blocked socket.
+        /// The wait is short on purpose. Anything slower is better served by a job the caller
+        /// can poll than by a blocked socket: a timeout would leave the work queued, and a
+        /// client that retried on it would run the work twice.
         /// </para>
         /// </summary>
         private static int SyncWaitMs => Math.Max(250, McpSettings.instance.syncWaitMs);
@@ -110,26 +81,40 @@ namespace UnityMCP.Editor.Core
         private bool running;
 
         /// <summary>
-        /// Bearer token clients must present. Held in SessionState so it survives a domain
-        /// reload: Unity's own pipeline package regenerated its token on reload, which made
-        /// every call 401 after entering play mode until the client was restarted.
+        /// Bearer token clients must present. Fixed per project and stored in the user's
+        /// profile (<see cref="McpAuthToken"/>), because MCP clients keep it in configuration
+        /// that is written once.
         /// </summary>
-        private readonly string authToken;
-
-        private const string SessionKeyAuthToken = "UnityMCP.AuthToken";
-
-        // Command & resource handlers
-        private readonly Dictionary<string, HandlerRegistration> commandHandlers = new();
-        private readonly Dictionary<string, ResourceHandlerRegistration> resourceHandlers = new();
-        private readonly Dictionary<string, IMcpResourceHandler> resourceUriMap = new();
+        private string authToken;
 
         // Main thread marshalling and long-running job tracking
         private readonly McpMainThreadDispatcher dispatcher = new();
         private readonly McpJobRegistry jobs = new();
+        private readonly ToolCallRunner toolCalls;
+        private readonly McpStreamableHttpEndpoint mcpEndpoint;
+        private readonly EditorLoopWaker loopWaker;
+        private readonly MainThreadWatch mainThread = new();
+
+        /// <summary>Jobs tracked for calls that outlived the sync window.</summary>
+        public McpJobRegistry Jobs => this.jobs;
+
+        /// <summary>
+        /// How long the main thread has been away while work waited for it; zero when it is
+        /// keeping up or nothing is waiting. Readable from any thread.
+        /// </summary>
+        public long MainThreadStalledMs =>
+            this.mainThread.StalledMs(this.dispatcher.PendingCount > 0 || this.jobs.RunningCount > 0);
 
         // Attribute-declared tools, discovered lazily on first use and after an explicit refresh.
         private ToolCatalog toolCatalog;
         private readonly object catalogLock = new();
+
+        // Tools defined by JSON files, loaded with the catalog; the directories are computed on the
+        // main thread here because the catalog is rebuilt from an HTTP worker.
+        private readonly string definitionsDir;
+        private readonly string sharedDefinitionsDir;
+        private DefinedToolSet definedTools = DefinedToolSet.Empty;
+        private DefinedToolsWatcher definitionsWatcher;
 
         private CancellationTokenSource cancellationTokenSource;
 
@@ -144,8 +129,6 @@ namespace UnityMCP.Editor.Core
         // Events
         public event EventHandler<EventArgs> Started;
         public event EventHandler<EventArgs> Stopped;
-        public event EventHandler<CommandExecutedEventArgs> CommandExecuted;
-        public event EventHandler<ResourceFetchedEventArgs> ResourceFetched;
 
         /// <summary>Gets whether the server is running.</summary>
         public bool IsRunning => this.running;
@@ -155,6 +138,31 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>Gets the port the server is bound to.</summary>
         public int BoundPort => this.boundPort;
+
+        /// <summary>The port this project's clients are configured for.</summary>
+        public int PreferredPort { get; private set; }
+
+        /// <summary>
+        /// True when the preferred port was busy and the server had to scan. Clients configured
+        /// with the preferred URL cannot reach this instance until it is resolved.
+        /// </summary>
+        public bool PortMismatch => this.running && this.boundPort != this.PreferredPort;
+
+        /// <summary>The MCP endpoint URL for this Editor.</summary>
+        public string McpUrl => $"http://127.0.0.1:{this.boundPort}/mcp";
+
+        /// <summary>The bearer token clients present. A credential; never log it.</summary>
+        public string Token => this.authToken;
+
+        /// <summary>
+        /// See <see cref="McpSettings.keepEditorAwake"/>. The always-on pump runs only while the
+        /// server does; a stopped server has no requests for it to serve.
+        /// </summary>
+        public bool KeepEditorAwake
+        {
+            get => this.loopWaker.AlwaysOn;
+            set => this.loopWaker.AlwaysOn = value && this.running;
+        }
 
         /// <summary>Gets the server identifier (project name + port).</summary>
         public string ClientId => $"{this.productName}-{this.boundPort}";
@@ -169,23 +177,28 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         public McpHttpServer()
         {
-            var settings = McpSettings.instance;
-            this.boundPort = settings.httpPort;
-            // Reuse the token across domain reloads; only mint one when there is none.
-            var existingToken = SessionState.GetString(SessionKeyAuthToken, string.Empty);
-            if (string.IsNullOrEmpty(existingToken))
-            {
-                existingToken = McpInstanceDescriptor.GenerateToken();
-                SessionState.SetString(SessionKeyAuthToken, existingToken);
-            }
+            this.PreferredPort = McpPortPolicy.Resolve(McpSettings.instance, this.projectPath);
+            this.boundPort = this.PreferredPort;
+            this.authToken = McpAuthToken.Load(this.projectPath);
+            this.definitionsDir = DefinedTools.ProjectDirectory(this.projectPath);
+            this.sharedDefinitionsDir = DefinedTools.SharedDirectory;
+            this.toolCalls = new ToolCallRunner(this.dispatcher, this.jobs, () => SyncWaitMs);
+            this.mcpEndpoint = new McpStreamableHttpEndpoint(
+                () => this.GetToolCatalog(forceRefresh: false),
+                this.toolCalls.Run,
+                () => ProtocolVersion,
+                this.RunningNotice);
 
-            this.authToken = existingToken;
+            this.loopWaker = new EditorLoopWaker(() => this.dispatcher.PendingCount > 0 || FrameSequencer.ActiveCount > 0);
+            this.dispatcher.WorkQueued = this.loopWaker.Demand;
+            this.dispatcher.Pumped = this.mainThread.MarkPumped;
 
             EditorApplication.update += this.dispatcher.Pump;
+            EditorApplication.update += this.mainThread.MarkPumped;
 
             if (DetailedLogs)
             {
-                Debug.Log($"[McpHttpServer] Initialized, target port={this.boundPort}");
+                Debug.Log($"[McpHttpServer] Initialized, preferred port={this.PreferredPort}");
             }
         }
 
@@ -197,14 +210,16 @@ namespace UnityMCP.Editor.Core
         /// Starts the HTTP server and UDP broadcaster.
         /// </summary>
         /// <param name="preferredPort">
-        /// If provided, attempts to bind this port first before scanning the range.
-        /// Defaults to <c>McpSettings.instance.httpPort</c> when null.
+        /// The port to try first. Defaults to the project's stable port
+        /// (<see cref="McpPortPolicy"/>); a domain reload passes the port it held before so the
+        /// URL clients already use stays valid.
         /// </param>
         public void Start(int? preferredPort = null)
         {
             if (this.running) return;
 
-            var startPort = preferredPort ?? McpSettings.instance.httpPort;
+            this.PreferredPort = McpPortPolicy.Resolve(McpSettings.instance, this.projectPath);
+            var startPort = preferredPort ?? this.PreferredPort;
 
             // Step 1: bind listener — throws on total failure, confirms actual port.
             this.boundPort = this.StartHttpListener(startPort);
@@ -230,18 +245,29 @@ namespace UnityMCP.Editor.Core
                 };
                 this.listenerThread.Start();
 
+                // The only place the bound URL reaches the user, and an MCP client cannot be
+                // configured without it, so it stays out of the detailed-logs gate.
                 Debug.Log($"[McpHttpServer] HTTP server listening on http://127.0.0.1:{this.boundPort}/");
 
                 // Sweep first so a descriptor left by a killed Editor is not mistaken for a
                 // second live instance.
                 McpInstanceDescriptor.RemoveStale();
-                McpInstanceDescriptor.Write(
-                    this.projectPath,
-                    this.productName,
-                    this.unityVersion,
-                    this.boundPort,
-                    this.authToken,
-                    ProtocolVersion);
+                this.PublishDescriptor();
+
+                this.definitionsWatcher = new DefinedToolsWatcher(
+                    new[] { this.definitionsDir, this.sharedDefinitionsDir },
+                    () => this.GetToolCatalog(forceRefresh: true),
+                    this.dispatcher.LogError);
+
+                this.loopWaker.AlwaysOn = McpSettings.instance.keepEditorAwake;
+
+                if (this.PortMismatch)
+                {
+                    Debug.LogWarning(
+                        $"[McpHttpServer] Port {this.PreferredPort} was busy, so this Editor is on {this.boundPort}. " +
+                        "MCP clients configured for the usual URL will not reach it until the other process " +
+                        "releases the port or an explicit port is set in Preferences > Unity MCP.");
+                }
             }
             catch (Exception ex)
             {
@@ -280,6 +306,10 @@ namespace UnityMCP.Editor.Core
         {
             this.running = false;  // signals ListenerLoop to exit
             this.cancellationTokenSource?.Cancel();
+            this.loopWaker.AlwaysOn = false;
+
+            this.definitionsWatcher?.Dispose();
+            this.definitionsWatcher = null;
 
             if (withdrawDescriptor)
             {
@@ -309,12 +339,21 @@ namespace UnityMCP.Editor.Core
                 this.listenerThread = null;
             }
 
+            // Multi-frame work is driven by EditorApplication.update, which keeps ticking after
+            // the listener is gone. Cancelling releases the requests waiting on it, which no
+            // longer have a route to answer on.
+            FrameSequencer.CancelAll("Unity MCP server stopped.");
+
             // IMPORTANT: Stop() does NOT touch SessionState.
             // Reload path (OnBeforeAssemblyReload) must preserve WasRunning=true,
             // so it writes SessionState before calling Dispose() → Stop().
             // User-initiated stop callers are responsible for persisting WasRunning=false explicitly.
 
-            Debug.Log("[McpHttpServer] Server stopped");
+            if (DetailedLogs)
+            {
+                Debug.Log("[McpHttpServer] Server stopped");
+            }
+
             this.Stopped?.Invoke(this, EventArgs.Empty);
         }
 
@@ -327,25 +366,56 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         /// <remarks>
         /// Every per-port failure is swallowed so the scan continues. Catching only
-        /// <see cref="HttpListenerException"/> was not enough: the Editor runs on Mono, whose
+        /// <see cref="HttpListenerException"/> is not enough: the Editor runs on Mono, whose
         /// HttpListener is implemented over managed sockets, so a busy port surfaces as a
-        /// <see cref="SocketException"/> instead. That escaped the catch and aborted the whole
-        /// scan on its first candidate, which is why a second Editor — or the same Editor
-        /// rebinding after a domain reload while its previous socket was still in TIME_WAIT —
-        /// reported "only one usage of each socket address is normally permitted" and started
+        /// <see cref="SocketException"/> instead. One that escapes the catch aborts the whole
+        /// scan on its first candidate, and a second Editor — or the same Editor rebinding
+        /// after a domain reload while its previous socket is still in TIME_WAIT — then
+        /// reports "only one usage of each socket address is normally permitted" and starts
         /// no server at all, with nineteen free ports in the range.
         /// <para>
-        /// Only the 127.0.0.1 prefix is registered. The old code also added a `localhost`
-        /// prefix for the same port, which binds nothing extra — clients connect to the
-        /// loopback address — while giving the bind a second way to fail.
+        /// Only the 127.0.0.1 prefix is registered. Adding a `localhost` prefix for the same
+        /// port binds nothing extra — clients connect to the loopback address — while giving
+        /// the bind a second way to fail.
         /// </para>
-        /// </summary>
+        /// </remarks>
         private int StartHttpListener(int startPort)
         {
-            const int maxPort = 27199;
             var firstFailure = string.Empty;
 
-            for (var port = Math.Max(startPort, 1); port <= maxPort; port++)
+            // The port a project was on a moment ago is usually still in TIME_WAIT right after
+            // a domain reload; a short retry keeps the project on the URL its clients hold.
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                if (TryBind(startPort, out var bound, ref firstFailure))
+                {
+                    this.httpListener = bound;
+                    return startPort;
+                }
+
+                Thread.Sleep(200);
+            }
+
+            for (var port = McpPortPolicy.RangeStart; port <= McpPortPolicy.RangeEnd; port++)
+            {
+                if (port == startPort)
+                {
+                    continue;
+                }
+
+                if (TryBind(port, out var bound, ref firstFailure))
+                {
+                    this.httpListener = bound;
+                    return port;
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"No free port among {startPort} and {McpPortPolicy.RangeStart}-{McpPortPolicy.RangeEnd}. First failure was {firstFailure}");
+        }
+
+        private static bool TryBind(int port, out HttpListener bound, ref string firstFailure)
+        {
             {
                 HttpListener listener = null;
 
@@ -354,8 +424,8 @@ namespace UnityMCP.Editor.Core
                     listener = new HttpListener();
                     listener.Prefixes.Add($"http://127.0.0.1:{port}/");
                     listener.Start();
-                    this.httpListener = listener;
-                    return port;
+                    bound = listener;
+                    return true;
                 }
                 catch (Exception e)
                 {
@@ -372,13 +442,40 @@ namespace UnityMCP.Editor.Core
 
                     if (DetailedLogs)
                     {
-                        Debug.Log($"[McpHttpServer] Port {port} unavailable ({e.GetType().Name}), trying the next one");
+                        Debug.Log($"[McpHttpServer] Port {port} unavailable ({e.GetType().Name})");
                     }
+
+                    bound = null;
+                    return false;
                 }
             }
+        }
 
-            throw new InvalidOperationException(
-                $"No free port in {startPort}-{maxPort}. First failure was {firstFailure}");
+        private void PublishDescriptor()
+        {
+            McpInstanceDescriptor.Write(
+                this.projectPath,
+                this.productName,
+                this.unityVersion,
+                this.boundPort,
+                this.PreferredPort,
+                this.authToken,
+                ProtocolVersion,
+                McpStreamableHttpEndpoint.SupportedProtocolVersions);
+        }
+
+        /// <summary>
+        /// Replaces this project's token. Every client registered with the old one has to be
+        /// registered again (<c>isuzu-unity-cli doctor --fix</c>).
+        /// </summary>
+        public void RegenerateToken()
+        {
+            this.authToken = McpAuthToken.Regenerate(this.projectPath);
+
+            if (this.running)
+            {
+                this.PublishDescriptor();
+            }
         }
 
         private void ListenerLoop()
@@ -426,9 +523,9 @@ namespace UnityMCP.Editor.Core
             var request = context.Request;
             var response = context.Response;
 
-            // No Access-Control-Allow-Origin. v2 sent "*", which let any web page the user had
-            // open POST to /execute_code and run arbitrary C# in their Editor. Omitting the
-            // header makes the browser refuse to hand the response to page script, and the
+            // No Access-Control-Allow-Origin. Sending "*" would let any web page the user has
+            // open POST to /tools/execute_code and run arbitrary C# in their Editor. Omitting
+            // the header makes the browser refuse to hand the response to page script, and the
             // bearer token below blocks the request outright.
             if (request.HttpMethod == "OPTIONS")
             {
@@ -464,6 +561,12 @@ namespace UnityMCP.Editor.Core
                     this.dispatcher.Log($"[McpHttpServer] {method} {path}");
                 }
 
+                if (path == "/mcp")
+                {
+                    this.HandleMcp(request, response);
+                    return;
+                }
+
                 // Job and tool routes carry a name in the path, so they are matched before
                 // the exact-match switch below.
                 if (path.StartsWith("/jobs/", StringComparison.Ordinal))
@@ -492,56 +595,17 @@ namespace UnityMCP.Editor.Core
                         this.HandleToolCatalog(request, response);
                         break;
 
-                    case "/command" when method == "POST":
-                        this.HandleCommand(request, response);
-                        break;
-
-                    case "/resource" when method == "GET":
-                        this.HandleResource(request, response);
-                        break;
-
-                    // ── Built-in shortcuts ──
-                    case "/read_logs" when method == "POST":
-                        this.HandleBuiltinCommand(request, response, LogReader.ReadLogs, "/read_logs");
-                        break;
-
-                    case "/execute_code" when method == "POST":
-                        this.HandleBuiltinCommand(request, response, CodeExecutor.Execute, "/execute_code");
-                        break;
-
-                    case "/browse_hierarchy" when method == "POST":
-                        this.HandleBuiltinCommand(request, response, SceneHierarchy.Browse, "/browse_hierarchy");
-                        break;
-
-                    case "/capture_screenshot" when method == "POST":
-                        this.HandleCaptureScreenshot(request, response);
-                        break;
-
-                    case "/play_mode" when method == "POST":
-                        this.HandleBuiltinCommand(request, response, PlayModeControl.Control, "/play_mode");
-                        break;
-
-                    case "/inspect" when method == "POST":
-                        this.HandleBuiltinCommand(request, response, InspectorAccess.Access, "/inspect");
-                        break;
-
-                    // /compile/* is implemented as the compile_status and compile_request
-                    // tools, /test/* as test_run and test_results; /eval duplicated
-                    // /execute_code and is withdrawn. What is left is still unbuilt, and says
-                    // so with a pointer rather than a bare "not implemented".
-                    case "/hlsl/errors" when method == "GET":
-                        this.WriteEnvelope(
-                            response,
-                            501,
-                            null,
-                            errorCode: "not_implemented",
-                            errorMessage: $"{path} is not implemented. GET /tools lists what this Editor does offer.");
-                        break;
-
                     default:
                         this.WriteEnvelope(response, 404, null, errorCode: "handler_not_found", errorMessage: $"Unknown endpoint: {method} {path}");
                         break;
                 }
+            }
+            catch (ObjectDisposedException) when (!this.running)
+            {
+                // The listener closed under a request that was already in flight, which is what
+                // a domain reload looks like from here. Logging it would put an error in the
+                // console on every script compile, and console_read_logs would hand it to the
+                // agent as if the project had failed.
             }
             catch (Exception e)
             {
@@ -640,66 +704,6 @@ namespace UnityMCP.Editor.Core
             return difference == 0;
         }
 
-        private void HandleBuiltinCommand(
-            HttpListenerRequest request,
-            HttpListenerResponse response,
-            Func<JObject, JObject> handler,
-            string label)
-        {
-            if (!this.TryReadJsonBody(request, response, out var parameters))
-            {
-                return;
-            }
-
-            this.RunOnMainThread(response, label, () => handler(parameters));
-        }
-
-        /// <summary>
-        /// Runs <paramref name="work"/> on the Editor main thread and answers the request.
-        /// </summary>
-        /// <remarks>
-        /// Single path for every main-thread endpoint. v2 repeated this wait-and-timeout block
-        /// four times with slightly different error handling, which is how
-        /// <c>/capture_screenshot</c> ended up being the only one that reported its own error
-        /// codes. Three outcomes:
-        /// <list type="bullet">
-        /// <item>Finished inside the sync window: 200 with the result.</item>
-        /// <item>Threw: the handler's own code and status if it carries one, else 500.</item>
-        /// <item>Still running: 202 with a job id. Note that the work is <em>not</em>
-        /// cancelled — it keeps going and its outcome lands in the job.</item>
-        /// </list>
-        /// </remarks>
-        private void RunOnMainThread(HttpListenerResponse response, string label, Func<JObject> work)
-        {
-            var item = this.dispatcher.Submit(work);
-
-            if (!item.Wait(SyncWaitMs))
-            {
-                var jobId = this.jobs.Track(item, label);
-
-                this.WriteEnvelope(response, 202, new JObject
-                {
-                    ["state"] = "running",
-                    ["jobId"] = jobId,
-                    ["poll"] = $"/jobs/{jobId}",
-                    ["message"] =
-                        $"'{label}' is still running on the Editor main thread. " +
-                        $"Poll GET /jobs/{jobId} for the result. Do not retry this call — " +
-                        "the work is still in progress and retrying would run it twice.",
-                });
-
-                return;
-            }
-
-            if (item.Error != null)
-            {
-                this.WriteError(response, item.Error);
-                return;
-            }
-
-            this.WriteEnvelope(response, 200, item.Result);
-        }
-
         /// <summary>
         /// Writes an exception as an error envelope, preserving the code and HTTP status of
         /// exceptions that carry their own (so a missing window stays 400/window_not_found
@@ -709,10 +713,6 @@ namespace UnityMCP.Editor.Core
         {
             switch (error)
             {
-                case McpScreenshotException screenshot:
-                    this.WriteEnvelope(response, screenshot.HttpStatus, null, errorCode: screenshot.Code, errorMessage: screenshot.Message);
-                    break;
-
                 case McpToolException tool:
                     this.WriteEnvelope(response, tool.HttpStatus, null, errorCode: tool.Code, errorMessage: tool.Message);
                     break;
@@ -726,9 +726,7 @@ namespace UnityMCP.Editor.Core
         /// <summary>
         /// Returns the catalog of attribute-declared tools with their generated JSON Schemas.
         /// <para>
-        /// This payload is the entire tool surface. The TypeScript server registers MCP tools
-        /// from it rather than declaring them a second time, which is what stops the two
-        /// definitions drifting the way v2's did.
+        /// This payload is the entire tool surface; the CLI and the MCP endpoint both read it.
         /// </para>
         /// Pass <c>?refresh=1</c> to rediscover — needed only when assemblies were loaded
         /// after the catalog was first built.
@@ -738,7 +736,26 @@ namespace UnityMCP.Editor.Core
             var refresh = request.QueryString["refresh"];
             var catalog = this.GetToolCatalog(forceRefresh: refresh == "1" || refresh == "true");
 
-            var payload = catalog.ToJson();
+            var groups = McpToolGroups.Parse(request.QueryString["group"], out var unknownGroups);
+            if (unknownGroups.Count > 0)
+            {
+                this.WriteEnvelope(
+                    response,
+                    400,
+                    null,
+                    errorCode: "invalid_params",
+                    errorMessage: $"Unknown tool group '{unknownGroups[0]}'. Known: {string.Join(", ", McpToolGroups.Known)}.");
+                return;
+            }
+
+            var cached = catalog.CatalogEnvelopeUtf8(groups);
+            if (cached != null)
+            {
+                this.WriteRawBytes(response, 200, cached);
+                return;
+            }
+
+            var payload = new JObject { ["tools"] = new JRaw(catalog.ToolsArrayJson(groups, mcpShape: false)) };
 
             if (catalog.Errors.Count > 0)
             {
@@ -786,21 +803,147 @@ namespace UnityMCP.Editor.Core
                 return;
             }
 
-            if (!descriptor.MainThread)
-            {
-                try
-                {
-                    this.WriteEnvelope(response, 200, ToolInvoker.Invoke(descriptor, arguments));
-                }
-                catch (Exception e)
-                {
-                    this.WriteError(response, e);
-                }
+            var outcome = this.toolCalls.Run(descriptor, arguments);
 
+            switch (outcome.State)
+            {
+                case ToolCallOutcome.Kind.Completed:
+                    this.WriteEnvelope(response, 200, outcome.Result);
+                    break;
+
+                case ToolCallOutcome.Kind.Failed:
+                    this.WriteError(response, outcome.Error);
+                    break;
+
+                default:
+                    this.WriteEnvelope(response, 202, this.RunningEnvelope(name, outcome.JobId));
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// <c>/mcp</c>: copies the request into the socket-free endpoint and writes what it returns.
+        /// </summary>
+        private void HandleMcp(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in request.Headers.AllKeys)
+            {
+                if (key != null)
+                {
+                    headers[key] = request.Headers[key];
+                }
+            }
+
+            string body = null;
+            if (request.HasEntityBody)
+            {
+                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+                body = reader.ReadToEnd();
+            }
+
+            var result = this.mcpEndpoint.Handle(request.HttpMethod, headers, body, request.QueryString["group"]);
+
+            if (result.Allow != null)
+            {
+                response.AddHeader("Allow", result.Allow);
+            }
+
+            // Mono's HttpListener can hold the connection open waiting for a body on an empty
+            // reply, so empty replies close the connection outright.
+            if (!result.HasContent)
+            {
+                response.KeepAlive = false;
+            }
+
+            if (result.Segments != null)
+            {
+                this.WriteRawBytes(response, result.Status, result.Segments);
                 return;
             }
 
-            this.RunOnMainThread(response, name, () => ToolInvoker.Invoke(descriptor, arguments));
+            this.WriteRaw(response, result.Status, result.Body);
+        }
+
+        /// <summary>Writes pre-rendered UTF-8 segments as one JSON body without joining them first.</summary>
+        private void WriteRawBytes(HttpListenerResponse response, int statusCode, params byte[][] segments)
+        {
+            response.StatusCode = statusCode;
+            response.ContentType = "application/json; charset=utf-8";
+
+            long total = 0;
+            foreach (var segment in segments)
+            {
+                total += segment.Length;
+            }
+
+            response.ContentLength64 = total;
+            foreach (var segment in segments)
+            {
+                response.OutputStream.Write(segment, 0, segment.Length);
+            }
+
+            response.Close();
+        }
+
+        /// <summary>
+        /// The 202 body for a call that outlived the sync window. The work is not cancelled; its
+        /// outcome lands in the job, so the message tells the caller to poll rather than retry.
+        /// </summary>
+        private JObject RunningEnvelope(string label, string jobId)
+        {
+            var message =
+                $"'{label}' is still running on the Editor main thread. " +
+                $"Poll GET /jobs/{jobId} for the result. Do not retry this call — " +
+                "the work is still in progress and retrying would run it twice.";
+
+            var envelope = new JObject
+            {
+                ["state"] = "running",
+                ["jobId"] = jobId,
+                ["poll"] = $"/jobs/{jobId}",
+            };
+
+            var notice = this.RunningNotice();
+            if (notice != null)
+            {
+                message += " " + notice;
+                envelope["notice"] = notice;
+            }
+
+            envelope["message"] = message;
+            return envelope;
+        }
+
+        /// <summary>
+        /// What is keeping the main thread, for every answer that says a call is still running:
+        /// the front-most dialog when there is one, otherwise a long absence. Null when neither.
+        /// </summary>
+        public string RunningNotice()
+        {
+            var dialogs = EditorDialogs.List();
+            return MainThreadWatch.RunningNotice(dialogs.Length > 0 ? dialogs[0] : null, this.MainThreadStalledMs);
+        }
+
+        /// <summary>
+        /// A job as reported to callers. A running job carries the notice about what blocks it,
+        /// as <c>message</c> for a reader and as <c>notice</c> for a client that prints only that.
+        /// </summary>
+        public JObject JobDetail(McpJobRegistry.JobEntry entry)
+        {
+            var payload = entry.ToDetailJson();
+
+            if (entry.Status == "running")
+            {
+                var notice = this.RunningNotice();
+                if (notice != null)
+                {
+                    payload["message"] = notice;
+                    payload["notice"] = notice;
+                }
+            }
+
+            return payload;
         }
 
         /// <summary>
@@ -815,10 +958,60 @@ namespace UnityMCP.Editor.Core
                     return this.toolCatalog;
                 }
 
-                this.toolCatalog = ToolCatalog.Build();
+                this.toolCatalog = this.BuildCatalog();
                 this.toolCatalog.ReportErrors(this.dispatcher.LogError);
                 return this.toolCatalog;
             }
+        }
+
+        /// <summary>
+        /// Assembles the catalog this server serves over <c>/tools</c> and <c>tools/list</c>.
+        /// </summary>
+        private ToolCatalog BuildCatalog()
+        {
+            var loaded = DefinedToolSet.Empty;
+
+            var catalog = ToolCatalog.Build((attributeTools, errors) =>
+            {
+                loaded = DefinedTools.Load(
+                    new[] { this.definitionsDir, this.sharedDefinitionsDir }, errors, attributeTools);
+                return loaded.Descriptors;
+            });
+
+            // Registration refusals name the file too, but land in the catalog's list; folding
+            // them in keeps definitions_list the one place that says why a definition is absent.
+            this.definedTools = loaded.WithErrors(
+                catalog.Errors.Where(e => e.StartsWith("Defined tool", StringComparison.Ordinal)));
+
+            return catalog;
+        }
+
+        /// <summary>
+        /// What <c>definitions_list</c> reports: the definition directories, the tools loaded
+        /// from them, and every refusal.
+        /// </summary>
+        public JObject DescribeDefinedTools()
+        {
+            this.GetToolCatalog(forceRefresh: false);
+
+            DefinedToolSet set;
+            lock (this.catalogLock)
+            {
+                set = this.definedTools;
+            }
+
+            return new JObject
+            {
+                ["definitionsDir"] = this.definitionsDir,
+                ["sharedDefinitionsDir"] = this.sharedDefinitionsDir,
+                ["tools"] = new JArray(set.Entries.Select(e => (object)new JObject
+                {
+                    ["name"] = e.Name,
+                    ["kind"] = e.Kind,
+                    ["file"] = e.File,
+                }).ToArray()),
+                ["errors"] = new JArray(set.Errors.Cast<object>().ToArray()),
+            };
         }
 
         /// <summary>
@@ -846,7 +1039,7 @@ namespace UnityMCP.Editor.Core
                     return;
                 }
 
-                this.WriteEnvelope(response, 200, entry.ToDetailJson());
+                this.WriteEnvelope(response, 200, this.JobDetail(entry));
                 return;
             }
 
@@ -857,7 +1050,7 @@ namespace UnityMCP.Editor.Core
             }
 
             var cancelled = entry.Item.TryAbandon();
-            var payload = entry.ToDetailJson();
+            var payload = this.JobDetail(entry);
 
             // Distinguishing these two matters: "cancelled" means the work provably never ran,
             // "already_started" means the caller must assume its side effects happened.
@@ -870,19 +1063,6 @@ namespace UnityMCP.Editor.Core
         // ──────────────────────────────────────────────
         //  /capture_screenshot — specialised error handling
         // ──────────────────────────────────────────────
-
-        /// <summary>
-        /// Dedicated handler for /capture_screenshot that translates
-        /// <see cref="McpScreenshotException"/> into an error envelope with the
-        /// handler-supplied code and HTTP status (e.g. window_not_found=400,
-        /// unsupported_platform=501).
-        /// </summary>
-        private void HandleCaptureScreenshot(HttpListenerRequest request, HttpListenerResponse response)
-        {
-            // No longer special-cased: RunOnMainThread preserves McpScreenshotException's own
-            // code and status via WriteError.
-            this.HandleBuiltinCommand(request, response, ScreenshotCapture.Capture, "/capture_screenshot");
-        }
 
         // ──────────────────────────────────────────────
         //  Endpoint Handlers
@@ -901,63 +1081,10 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Builds the /health response payload (goes under the envelope's `result`).
-        /// Includes built-in HTTP shortcuts with per-action granularity plus any
-        /// registered IMcpCommandHandler entries (prefixed with "/command:").
         /// </summary>
         private JObject BuildHealthResponse()
         {
             var uptimeSec = (DateTime.Now - this.ConnectedSince).TotalSeconds;
-
-            var handlerArray = new JArray();
-
-            // 1. Built-in HTTP shortcuts with per-action granularity.
-            foreach (var entry in BuiltinHandlerEntries)
-            {
-                handlerArray.Add(new JObject
-                {
-                    ["name"] = entry.Name,
-                    ["idempotency"] = entry.Idem.ToString().ToLowerInvariant()
-                });
-            }
-
-            // 2. Registered IMcpCommandHandler plugins — "/command:<prefix>" or
-            //    "/command:<prefix>.<action>" when the handler declares per-action
-            //    overrides via IMcpCommandHandler.Actions.
-            foreach (var kv in this.commandHandlers)
-            {
-                var prefix = kv.Key;
-                var handler = kv.Value.Handler;
-                var actions = handler.Actions;
-
-                if (actions != null && actions.Count > 0)
-                {
-                    // Emit per-action entries — class-level Idempotency is ignored
-                    // because the handler opted into fine-grained declaration.
-                    foreach (var a in actions)
-                    {
-                        handlerArray.Add(new JObject
-                        {
-                            ["name"] = $"/command:{prefix}.{a.Action}",
-                            ["idempotency"] = a.Idempotency.ToString().ToLowerInvariant()
-                        });
-                    }
-                }
-                else
-                {
-                    // Fall back to the class-level Idempotency.
-                    handlerArray.Add(new JObject
-                    {
-                        ["name"] = $"/command:{prefix}",
-                        ["idempotency"] = handler.Idempotency.ToString().ToLowerInvariant()
-                    });
-                }
-            }
-
-            var resourceArray = new JArray();
-            foreach (var kv in this.resourceHandlers)
-            {
-                resourceArray.Add(kv.Value.Handler.ResourceUri);
-            }
 
             return new JObject
             {
@@ -965,8 +1092,10 @@ namespace UnityMCP.Editor.Core
                 ["project"] = this.productName,
                 ["unity"] = this.unityVersion,
                 ["port"] = this.boundPort,
+                ["preferredPort"] = this.PreferredPort,
+                ["portMismatch"] = this.PortMismatch,
+                ["mcpUrl"] = this.McpUrl,
                 ["clientId"] = this.ClientId,
-                // state is always "running" when the listener can respond (design §2.1)
                 ["state"] = "running",
                 ["uptimeSec"] = uptimeSec,
                 ["reqCount"] = Interlocked.Read(ref this.requestCount),
@@ -975,76 +1104,32 @@ namespace UnityMCP.Editor.Core
                 // queueDepth with a static reqCount is the signature of a wedged main thread.
                 ["queueDepth"] = this.dispatcher.PendingCount,
                 ["runningJobs"] = this.jobs.RunningCount,
-                ["handlers"] = handlerArray,
-                ["resources"] = resourceArray
+                ["toolCount"] = this.GetToolCatalog(forceRefresh: false).Tools.Count(),
+                // Where JSON tool definitions are read from; see definitions_list for what loaded.
+                ["definitionsDir"] = this.definitionsDir,
+                ["sharedDefinitionsDir"] = this.sharedDefinitionsDir,
+                // Whether calls that need the main thread are answered promptly while the Editor
+                // is unfocused, or wait for its background tick.
+                ["loopWaker"] = this.loopWaker.IsAvailable ? (this.loopWaker.AlwaysOn ? "always" : "on-demand") : "unavailable",
+                ["mainThread"] = this.MainThreadHealth(),
             };
         }
 
-        private void HandleCommand(HttpListenerRequest request, HttpListenerResponse response)
+        /// <summary>
+        /// Whether the main thread is keeping up with the work queued for it, and the dialog
+        /// holding it when there is one. Read entirely off the main thread, like the counters
+        /// above, so it is available exactly when the main thread is not.
+        /// </summary>
+        private JObject MainThreadHealth()
         {
-            if (!this.TryReadJsonBody(request, response, out var body))
+            var dialogs = EditorDialogs.List();
+
+            return new JObject
             {
-                return;
-            }
-
-            var commandType = body["command"]?.ToString();
-            var parameters = body["params"] as JObject ?? new JObject();
-
-            if (string.IsNullOrEmpty(commandType))
-            {
-                this.WriteEnvelope(response, 400, null, errorCode: "invalid_params", errorMessage: "Missing 'command' field");
-                return;
-            }
-
-            var parts = commandType.Split('.');
-            if (parts.Length < 2)
-            {
-                this.WriteEnvelope(response, 400, null, errorCode: "invalid_params", errorMessage: $"Invalid command format: {commandType}. Expected: 'prefix.action'");
-                return;
-            }
-
-            var prefix = parts[0];
-            var action = parts[1];
-
-            if (!this.commandHandlers.TryGetValue(prefix, out var registration))
-            {
-                this.WriteEnvelope(response, 404, null, errorCode: "handler_not_found", errorMessage: $"Unknown command prefix: {prefix}");
-                return;
-            }
-
-            if (!registration.Enabled)
-            {
-                this.WriteEnvelope(response, 409, null, errorCode: "handler_disabled", errorMessage: $"Command prefix '{prefix}' is disabled");
-                return;
-            }
-
-            this.RunOnMainThread(response, $"/command:{prefix}.{action}", () =>
-            {
-                var result = registration.Handler.Execute(action, parameters);
-                this.OnCommandExecuted(new CommandExecutedEventArgs(prefix, action, parameters, result));
-                return result;
-            });
-        }
-
-        private void HandleResource(HttpListenerRequest request, HttpListenerResponse response)
-        {
-            var resourceName = request.QueryString["name"];
-            if (string.IsNullOrEmpty(resourceName))
-            {
-                this.WriteEnvelope(response, 400, null, errorCode: "invalid_params", errorMessage: "Missing 'name' query parameter");
-                return;
-            }
-
-            var parameters = new JObject();
-            foreach (string key in request.QueryString)
-            {
-                if (key != "name")
-                    parameters[key] = request.QueryString[key];
-            }
-
-            // FetchResourceData may return a result with truncated/next already set by handlers;
-            // RunOnMainThread passes it through to WriteEnvelope untouched.
-            this.RunOnMainThread(response, $"/resource:{resourceName}", () => this.FetchResourceData(resourceName, parameters));
+                ["stalledMs"] = this.MainThreadStalledMs,
+                ["dialog"] = dialogs.Length > 0 ? dialogs[0].ToJson() : null,
+                ["dialogDetection"] = EditorDialogs.IsSupported ? "windows" : "unavailable",
+            };
         }
 
         // ──────────────────────────────────────────────
@@ -1082,8 +1167,9 @@ namespace UnityMCP.Editor.Core
                      && result["error"].Type == JTokenType.String
                      && result["result"] == null)
             {
-                // Legacy handler pattern: `{"error": "msg"}` returned from a handler.
-                // Promote to proper error envelope so status/HTTP code reflect the failure.
+                // A handler that reports failure as `{"error": "msg"}` instead of throwing.
+                // Promote it to a proper error envelope so status and HTTP code reflect the
+                // failure.
                 envelope = new JObject
                 {
                     ["status"] = "error",
@@ -1156,162 +1242,13 @@ namespace UnityMCP.Editor.Core
             response.Close();
         }
 
-        // Discovery is published through McpInstanceDescriptor. The UDP broadcaster it
-        // replaced could not tell a local Editor from one on another machine — a remote
-        // announce registered as a dead local instance and made every call fail with
-        // "target required" — and it could not carry the auth token.
+        // Discovery is published through McpInstanceDescriptor.
 
         // ──────────────────────────────────────────────
         //  Main Thread Queue
         // ──────────────────────────────────────────────
 
-        // Main-thread marshalling now lives in McpMainThreadDispatcher, which dequeues under
-        // the lock but runs outside it and supports abandoning work that has not started.
-
-        // ──────────────────────────────────────────────
-        //  Handler Registration
-        // ──────────────────────────────────────────────
-
-        /// <summary>Registers a command handler.</summary>
-        public void RegisterHandler(IMcpCommandHandler handler, bool enabled = true)
-        {
-            if (handler == null)
-            {
-                Debug.LogError("[McpHttpServer] Cannot register null handler");
-                return;
-            }
-
-            var commandPrefix = handler.CommandPrefix;
-            if (string.IsNullOrEmpty(commandPrefix))
-            {
-                Debug.LogError($"[McpHttpServer] Handler {handler.GetType().Name} has invalid command prefix");
-                return;
-            }
-
-            if (this.commandHandlers.ContainsKey(commandPrefix))
-            {
-                Debug.LogWarning($"[McpHttpServer] Replacing existing handler for '{commandPrefix}'");
-            }
-
-            if (McpSettings.instance.handlerEnabledStates.TryGetValue(commandPrefix, out var savedEnabled))
-            {
-                enabled = savedEnabled;
-            }
-
-            this.commandHandlers[commandPrefix] = new HandlerRegistration(handler, enabled);
-            Debug.Log($"[McpHttpServer] Registered command handler: {commandPrefix} (Enabled: {enabled})");
-
-            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
-        }
-
-        /// <summary>Enables or disables a command handler.</summary>
-        public bool SetHandlerEnabled(string commandPrefix, bool enabled)
-        {
-            if (!this.commandHandlers.TryGetValue(commandPrefix, out var registration))
-            {
-                Debug.LogWarning($"[McpHttpServer] Handler '{commandPrefix}' not found");
-                return false;
-            }
-
-            registration.Enabled = enabled;
-            McpSettings.instance.UpdateHandlerEnabledState(commandPrefix, enabled);
-            return true;
-        }
-
-        /// <summary>Gets all registered command handlers.</summary>
-        public IReadOnlyDictionary<string, HandlerRegistration> GetRegisteredHandlers()
-        {
-            return this.commandHandlers;
-        }
-
-        /// <summary>Registers a resource handler.</summary>
-        public bool RegisterResourceHandler(IMcpResourceHandler handler, bool enabled = true)
-        {
-            if (handler == null)
-            {
-                Debug.LogError("[McpHttpServer] Cannot register null resource handler");
-                return false;
-            }
-
-            var resourceName = handler.ResourceName;
-            if (string.IsNullOrEmpty(resourceName))
-            {
-                Debug.LogError($"[McpHttpServer] Handler {handler.GetType().Name} has invalid resource name");
-                return false;
-            }
-
-            if (this.resourceHandlers.ContainsKey(resourceName))
-            {
-                Debug.LogWarning($"[McpHttpServer] Replacing existing resource handler '{resourceName}'");
-                this.resourceHandlers.Remove(resourceName);
-            }
-
-            if (McpSettings.instance.resourceHandlerEnabledStates.TryGetValue(resourceName, out var savedEnabled))
-            {
-                enabled = savedEnabled;
-            }
-
-            this.resourceHandlers[resourceName] = new ResourceHandlerRegistration(handler, enabled);
-
-            if (!string.IsNullOrEmpty(handler.ResourceUri))
-            {
-                this.resourceUriMap[handler.ResourceUri] = handler;
-            }
-
-            Debug.Log($"[McpHttpServer] Registered resource handler: {resourceName} (Enabled: {enabled})");
-            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
-
-            return true;
-        }
-
-        /// <summary>Enables or disables a resource handler.</summary>
-        public bool SetResourceHandlerEnabled(string resourceName, bool enabled)
-        {
-            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
-            {
-                Debug.LogWarning($"[McpHttpServer] Resource handler '{resourceName}' not found");
-                return false;
-            }
-
-            registration.Enabled = enabled;
-            McpSettings.instance.UpdateResourceHandlerEnabledState(resourceName, enabled);
-            return true;
-        }
-
-        /// <summary>Gets all registered resource handlers.</summary>
-        public IReadOnlyDictionary<string, ResourceHandlerRegistration> GetRegisteredResourceHandlers()
-        {
-            return this.resourceHandlers;
-        }
-
-        // ──────────────────────────────────────────────
-        //  Resource Fetching
-        // ──────────────────────────────────────────────
-
-        private JObject FetchResourceData(string resourceName, JObject parameters)
-        {
-            if (!this.resourceHandlers.TryGetValue(resourceName, out var registration))
-            {
-                // Return an error payload — WriteEnvelope will detect the missing result and treat as error
-                throw new InvalidOperationException($"Resource not found: {resourceName}");
-            }
-
-            if (!registration.Enabled)
-            {
-                throw new InvalidOperationException($"Resource '{resourceName}' is disabled");
-            }
-
-            var result = registration.Handler.FetchResource(parameters);
-            this.OnResourceFetched(new ResourceFetchedEventArgs(resourceName, parameters, result));
-            return result;
-        }
-
-        // ──────────────────────────────────────────────
-        //  Events
-        // ──────────────────────────────────────────────
-
-        private void OnCommandExecuted(CommandExecutedEventArgs e) => this.CommandExecuted?.Invoke(this, e);
-        private void OnResourceFetched(ResourceFetchedEventArgs e) => this.ResourceFetched?.Invoke(this, e);
+        // Main-thread marshalling lives in McpMainThreadDispatcher.
 
         // ──────────────────────────────────────────────
         //  IDisposable
@@ -1324,75 +1261,13 @@ namespace UnityMCP.Editor.Core
         {
             this.Stop(withdrawDescriptor);
             EditorApplication.update -= this.dispatcher.Pump;
+            EditorApplication.update -= this.mainThread.MarkPumped;
+            this.loopWaker.Dispose();
 
             // Nothing will pump the queue after this point, so release anything still waiting
             // rather than letting those requests block for their full sync window.
             this.dispatcher.DrainAndFail("Unity MCP server shut down before this work started.");
             GC.SuppressFinalize(this);
-        }
-
-        // ──────────────────────────────────────────────
-        //  Inner Types
-        // ──────────────────────────────────────────────
-
-        public class HandlerRegistration
-        {
-            public IMcpCommandHandler Handler { get; }
-            public bool Enabled { get; set; }
-            public string Description => this.Handler.Description;
-            public string AssemblyName { get; }
-
-            public HandlerRegistration(IMcpCommandHandler handler, bool enabled = true)
-            {
-                this.Handler = handler;
-                this.Enabled = enabled;
-                this.AssemblyName = handler.GetType().Assembly.GetName().Name;
-            }
-        }
-
-        public class ResourceHandlerRegistration
-        {
-            public IMcpResourceHandler Handler { get; }
-            public bool Enabled { get; set; }
-            public string Description => this.Handler.Description;
-            public string AssemblyName { get; }
-
-            public ResourceHandlerRegistration(IMcpResourceHandler handler, bool enabled = true)
-            {
-                this.Handler = handler;
-                this.Enabled = enabled;
-                this.AssemblyName = handler.GetType().Assembly.GetName().Name;
-            }
-        }
-
-        public class CommandExecutedEventArgs : EventArgs
-        {
-            public string Prefix { get; }
-            public string Action { get; }
-            public JObject Parameters { get; }
-            public JObject Result { get; }
-
-            public CommandExecutedEventArgs(string prefix, string action, JObject parameters, JObject result)
-            {
-                this.Prefix = prefix;
-                this.Action = action;
-                this.Parameters = parameters;
-                this.Result = result;
-            }
-        }
-
-        public class ResourceFetchedEventArgs : EventArgs
-        {
-            public string ResourceName { get; }
-            public JObject Parameters { get; }
-            public JObject Result { get; }
-
-            public ResourceFetchedEventArgs(string resourceName, JObject parameters, JObject result)
-            {
-                this.ResourceName = resourceName;
-                this.Parameters = parameters;
-                this.Result = result;
-            }
         }
     }
 }

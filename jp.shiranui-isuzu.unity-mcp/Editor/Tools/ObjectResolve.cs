@@ -35,7 +35,16 @@ namespace UnityMCP.Editor.Tools
         /// <summary>
         /// Resolves a GameObject from a path, an instance id, or both.
         /// </summary>
-        public static GameObject Object(string path, long? instanceId, string argumentName = "object_path")
+        /// <param name="idArgumentName">
+        /// Wire name of the argument carrying <paramref name="instanceId"/>, named in the refusal
+        /// when neither was supplied. Null where the caller's tool offers no id for this object,
+        /// so the refusal does not send them to an argument that would address something else.
+        /// </param>
+        public static GameObject Object(
+            string path,
+            long? instanceId,
+            string argumentName = "object_path",
+            string idArgumentName = "instance_id")
         {
             if (instanceId.HasValue)
             {
@@ -56,7 +65,9 @@ namespace UnityMCP.Editor.Tools
             {
                 throw new McpToolException(
                     "invalid_params",
-                    $"Either '{argumentName}' or 'instance_id' is required.");
+                    string.IsNullOrEmpty(idArgumentName)
+                        ? $"'{argumentName}' is required."
+                        : $"Either '{argumentName}' or '{idArgumentName}' is required.");
             }
 
             var segments = path.Split('/').Where(s => s.Length > 0).ToArray();

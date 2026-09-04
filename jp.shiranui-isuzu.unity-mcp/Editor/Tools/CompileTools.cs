@@ -144,9 +144,12 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "compile_request",
-            "Ask the Editor to recompile scripts. Needed after editing a script file: " +
-            "AssetDatabase.Refresh alone does not reliably trigger a compile. Returns immediately; " +
-            "poll compile_status to find out whether it succeeded.",
+            "Ask the Editor to recompile scripts. Needed after editing a script file: a refresh " +
+            "alone does not reliably trigger a compile, so this runs a full asset refresh and then " +
+            "requests the compile. The refresh imports every asset changed on disk and runs every " +
+            "asset postprocessor, which on a large project takes minutes and can itself open a " +
+            "modal dialog. Returns immediately; poll compile_status to find out whether it " +
+            "succeeded.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Request()
         {

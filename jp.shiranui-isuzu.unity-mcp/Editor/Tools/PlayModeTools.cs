@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
@@ -10,10 +10,9 @@ namespace UnityMCP.Editor.Tools
     /// Play mode control, one tool per action.
     /// </summary>
     /// <remarks>
-    /// v2 exposed a single <c>/play_mode</c> endpoint taking an untyped <c>action</c> string,
-    /// which forced the whole endpoint to be classified Unsafe even though reading the status
-    /// has no side effects at all. Splitting it lets <see cref="Status"/> be Safe — and
-    /// therefore retryable — while the mutating actions stay Unsafe.
+    /// One tool per action rather than one taking an action name, so that <see cref="Status"/>
+    /// can be Safe, and therefore retryable, while the actions that change the play state stay
+    /// Unsafe. A single tool would have to take the stricter classification of the two.
     /// </remarks>
     internal static class PlayModeTools
     {
@@ -28,8 +27,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_play",
-            "Enter play mode. Takes effect on the next Editor frame and triggers a domain reload, " +
-            "so the MCP connection will briefly drop and reconnect.",
+            "Enter play mode. Takes effect on the next Editor frame. Unless Enter Play Mode " +
+            "Settings has Reload Domain turned off, this reloads the domain and the MCP connection " +
+            "briefly drops and reconnects.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Play()
         {
@@ -38,8 +38,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_stop",
-            "Leave play mode. Takes effect on the next Editor frame and triggers a domain reload, " +
-            "so the MCP connection will briefly drop and reconnect.",
+            "Leave play mode. Takes effect on the next Editor frame. Unless Enter Play Mode " +
+            "Settings has Reload Domain turned off, this reloads the domain and the MCP connection " +
+            "briefly drops and reconnects.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Stop()
         {
@@ -48,7 +49,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_pause",
-            "Pause play mode. Fails if the Editor is not currently playing.",
+            "Pause play mode. Outside play mode this does nothing and answers with an error field " +
+            "explaining why, rather than failing the call; read the reply instead of assuming it " +
+            "took effect.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Pause()
         {
@@ -57,7 +60,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_unpause",
-            "Resume a paused play mode. Fails if the Editor is not currently playing.",
+            "Resume a paused play mode. Outside play mode this does nothing and answers with an " +
+            "error field explaining why, rather than failing the call; read the reply instead of " +
+            "assuming it took effect.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Unpause()
         {
@@ -66,8 +71,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_step",
-            "Advance play mode by a single frame, pausing first if needed. " +
-            "Fails if the Editor is not currently playing.",
+            "Advance play mode by a single frame, pausing first if needed. Outside play mode this " +
+            "does nothing and answers with an error field explaining why, rather than failing the " +
+            "call; read the reply instead of assuming it took effect.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Step()
         {

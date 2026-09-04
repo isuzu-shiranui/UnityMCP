@@ -1,0 +1,10 @@
+#!/bin/sh
+# The manifest's platform_overrides has one darwin entry and no per-architecture key or
+# ${arch} variable, so this picks the arm64 or x64 build at launch. `uname -m` reports the
+# architecture of the shell that runs it, so an x64 Claude Desktop under Rosetta gets the
+# x64 binary, which is what it can load.
+dir=$(dirname "$0")
+case "$(uname -m)" in
+  arm64|aarch64) exec "$dir/isuzu-unity-cli-osx-arm64" "$@" ;;
+  *)             exec "$dir/isuzu-unity-cli-osx-x64" "$@" ;;
+esac

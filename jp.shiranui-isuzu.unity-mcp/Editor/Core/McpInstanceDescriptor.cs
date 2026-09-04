@@ -17,20 +17,18 @@ namespace UnityMCP.Editor.Core
     /// find it without guessing.
     /// </summary>
     /// <remarks>
-    /// Replaces v2's UDP broadcast. Broadcasting solved discovery but created two problems it
-    /// could not solve: an announce leaves via a network interface, so an Editor on another
-    /// machine was indistinguishable from a local one and got registered as a dead local
-    /// instance; and the announce interval put a 30-second floor on noticing a new Editor.
-    /// A file in a known directory has neither problem, and it can carry the auth token,
-    /// which a broadcast obviously cannot.
+    /// A file in a per-machine local directory rather than a network announce. That makes
+    /// every instance it reports an Editor on this machine, keeps a new Editor visible the
+    /// moment it publishes instead of at the next announce, and lets discovery carry the
+    /// auth token.
     /// <para>
     /// Modelled on the port/descriptor file used by Unity's own <c>com.unity.pipeline</c>.
     /// </para>
     /// </remarks>
     internal static class McpInstanceDescriptor
     {
-        /// <summary>Directory holding one descriptor per running Editor.</summary>
-        public static string DirectoryPath
+        /// <summary>Root of everything this package keeps on the machine.</summary>
+        public static string StateRoot
         {
             get
             {
@@ -44,9 +42,12 @@ namespace UnityMCP.Editor.Core
                         "share");
                 }
 
-                return Path.Combine(root, "UnityMCP", "instances");
+                return Path.Combine(root, "UnityMCP");
             }
         }
+
+        /// <summary>Directory holding one descriptor per running Editor.</summary>
+        public static string DirectoryPath => Path.Combine(StateRoot, "instances");
 
         /// <summary>
         /// Path of this project's descriptor. Keyed by project path so reopening the same
@@ -63,8 +64,10 @@ namespace UnityMCP.Editor.Core
             string projectName,
             string unityVersion,
             int port,
+            int preferredPort,
             string token,
-            string protocolVersion)
+            string protocolVersion,
+            string[] mcpProtocolVersions)
         {
             try
             {
@@ -76,13 +79,19 @@ namespace UnityMCP.Editor.Core
                     ["projectName"] = projectName,
                     ["unityVersion"] = unityVersion,
                     ["port"] = port,
+                    ["preferredPort"] = preferredPort,
+                    ["portMismatch"] = port != preferredPort,
                     ["token"] = token,
                     ["pid"] = Process.GetCurrentProcess().Id,
                     ["protocolVersion"] = protocolVersion,
                     ["endpoint"] = $"http://127.0.0.1:{port}",
+                    ["mcpUrl"] = $"http://127.0.0.1:{port}/mcp",
+                    ["mcpProtocolVersions"] = new JArray(mcpProtocolVersions ?? Array.Empty<string>()),
                 };
 
-                File.WriteAllText(PathFor(projectPath), payload.ToString(Formatting.Indented), new UTF8Encoding(false));
+                var path = PathFor(projectPath);
+                File.WriteAllText(path, payload.ToString(Formatting.Indented), new UTF8Encoding(false));
+                RestrictToOwner(path);
             }
             catch (Exception e)
             {
@@ -152,23 +161,32 @@ namespace UnityMCP.Editor.Core
             }
         }
 
-        /// <summary>Generates a token with enough entropy that guessing is not a concern.</summary>
-        public static string GenerateToken()
+        /// <summary>
+        /// Makes a credential file readable by its owner only. On Windows the user profile is
+        /// already private to the account, so only Unix permissions are touched.
+        /// </summary>
+        public static void RestrictToOwner(string path)
         {
-            var bytes = new byte[32];
-
-            using (var rng = RandomNumberGenerator.Create())
+            if (Path.DirectorySeparatorChar == '\\')
             {
-                rng.GetBytes(bytes);
+                return;
             }
 
-            var builder = new StringBuilder(bytes.Length * 2);
-            foreach (var b in bytes)
+            try
             {
-                builder.Append(b.ToString("x2"));
+                using var chmod = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "chmod",
+                    Arguments = $"600 \"{path}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                chmod?.WaitForExit(2000);
             }
-
-            return builder.ToString();
+            catch (Exception)
+            {
+                // A missing chmod leaves the file with the umask's default; nothing else to do.
+            }
         }
 
         private static bool IsProcessAlive(int pid)
@@ -202,7 +220,7 @@ namespace UnityMCP.Editor.Core
             }
         }
 
-        private static string HashProjectPath(string projectPath)
+        public static string HashProjectPath(string projectPath)
         {
             using var sha = SHA256.Create();
             var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(projectPath ?? string.Empty));

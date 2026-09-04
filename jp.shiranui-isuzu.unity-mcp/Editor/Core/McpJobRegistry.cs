@@ -16,9 +16,9 @@ namespace UnityMCP.Editor.Core
     /// A job is only created once the sync window expires, so fast calls — the overwhelming
     /// majority — allocate nothing here and still return their result inline.
     /// <para>
-    /// This is the piece that removes the v2 double-execution hazard. Previously a slow call
-    /// produced HTTP 504 while its side effect stayed queued; a client that retried ran the
-    /// work twice. Now a slow call produces a job id, which is not something a client retries.
+    /// A slow call answers with a job id rather than a timeout. A job id is not something a
+    /// client retries; a timeout is, and it leaves the side effect queued, so the retry runs
+    /// the work a second time.
     /// </para>
     /// </remarks>
     internal sealed class McpJobRegistry
@@ -158,12 +158,13 @@ namespace UnityMCP.Editor.Core
         internal sealed class JobEntry
         {
             private DateTime? completedUtc;
+            private McpMainThreadDispatcher.WorkItem item;
 
             public JobEntry(string id, string label, McpMainThreadDispatcher.WorkItem item)
             {
                 this.Id = id;
                 this.Label = label;
-                this.Item = item;
+                this.item = item;
                 this.CreatedUtc = DateTime.UtcNow;
             }
 
@@ -171,7 +172,26 @@ namespace UnityMCP.Editor.Core
 
             public string Label { get; }
 
-            public McpMainThreadDispatcher.WorkItem Item { get; }
+            /// <summary>
+            /// The item carrying the job's outcome. A tracked item that settles with a
+            /// <see cref="DeferredToolResult"/> has only started its work, so the job follows
+            /// the inner item instead of reporting the marker as a completed, empty result.
+            /// </summary>
+            public McpMainThreadDispatcher.WorkItem Item
+            {
+                get
+                {
+                    var current = this.item;
+
+                    while (current.IsCompleted && current.Error == null && current.Result is DeferredToolResult deferred)
+                    {
+                        current = deferred.Item;
+                    }
+
+                    this.item = current;
+                    return current;
+                }
+            }
 
             public DateTime CreatedUtc { get; }
 

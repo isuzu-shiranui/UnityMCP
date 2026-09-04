@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -51,7 +51,8 @@ namespace UnityMCP.Editor.Timeline
             "Create a Timeline asset, optionally adding a PlayableDirector to a GameObject to play " +
             "it. Use this before timeline_create_track: a track is only written into the file if the " +
             "timeline is already an asset, so tracks added to an unsaved timeline are lost at the " +
-            "next reload.",
+            "next reload. Writing the asset saves every unsaved asset in the project, not just this " +
+            "one, so any pending edit elsewhere is committed to disk by this call.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Create Timeline")]
         public static JObject Create(
@@ -209,7 +210,7 @@ namespace UnityMCP.Editor.Timeline
             if (!string.IsNullOrWhiteSpace(binding))
             {
                 var required = trackType.GetCustomAttribute<TrackBindingTypeAttribute>()?.type;
-                var go = ObjectResolve.Object(binding, null, "binding");
+                var go = ObjectResolve.Object(binding, null, "binding", null);
 
                 bindValue = ResolveBindingValue(required, go, name ?? trackType.Name);
             }
@@ -447,7 +448,7 @@ namespace UnityMCP.Editor.Timeline
                     $"{clip.asset?.GetType().Name ?? "clip with no asset"}.");
             }
 
-            var source = ObjectResolve.Object(sourcePath, null, "control_source");
+            var source = ObjectResolve.Object(sourcePath, null, "control_source", null);
 
             if (string.IsNullOrEmpty(control.sourceGameObject.exposedName.ToString()))
             {

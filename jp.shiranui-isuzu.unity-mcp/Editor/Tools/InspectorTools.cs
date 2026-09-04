@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
@@ -10,24 +10,24 @@ namespace UnityMCP.Editor.Tools
     /// Serialized property access, one tool per mode.
     /// </summary>
     /// <remarks>
-    /// v2's single <c>/inspect</c> endpoint took a <c>mode</c> string covering read, list and
-    /// write. Splitting them lets the two read modes be Safe while only the write is Unsafe,
-    /// and lets each carry just the parameters it actually uses instead of a union of all three.
+    /// One tool per mode rather than one tool taking a <c>mode</c> string. Split this way the
+    /// two read tools can be Safe while only the write is Unsafe, and each carries just the
+    /// parameters it uses instead of a union of all three.
     /// </remarks>
     internal static class InspectorTools
     {
         [McpTool(
             "inspect_read",
-            "Read one serialized property from a component. Identify the object by either " +
-            "instance_id or game_object_path.",
+            "Read one serialized property from a component, or from the GameObject itself when " +
+            "component_type is omitted. Identify the object by either instance_id or object_path.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Read(
             [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
             string propertyPath,
-            [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
+            [McpArg("instance_id", "Target object instance id; alternative to object_path.")]
             long? instanceId = null,
-            [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
-            string gameObjectPath = null,
+            [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
+            string objectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
@@ -37,21 +37,22 @@ namespace UnityMCP.Editor.Tools
                 ("mode", "read"),
                 ("propertyPath", propertyPath),
                 ("instanceId", instanceId),
-                ("gameObjectPath", gameObjectPath),
+                ("objectPath", objectPath),
                 ("componentType", componentType),
                 ("componentIndex", componentIndex)));
         }
 
         [McpTool(
             "inspect_list",
-            "List the serialized properties available on a component, so you can discover the " +
-            "property_path to pass to inspect_read or inspect_write.",
+            "List the serialized properties available on a component, or on the GameObject itself " +
+            "when component_type is omitted, so you can discover the property_path to pass to " +
+            "inspect_read or inspect_write.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject List(
-            [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
+            [McpArg("instance_id", "Target object instance id; alternative to object_path.")]
             long? instanceId = null,
-            [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
-            string gameObjectPath = null,
+            [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
+            string objectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
@@ -68,7 +69,7 @@ namespace UnityMCP.Editor.Tools
             return InspectorAccess.Access(ToolArgs.Of(
                 ("mode", "list"),
                 ("instanceId", instanceId),
-                ("gameObjectPath", gameObjectPath),
+                ("objectPath", objectPath),
                 ("componentType", componentType),
                 ("componentIndex", componentIndex),
                 ("offset", offset),
@@ -79,26 +80,28 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "inspect_write",
-            "Write one serialized property on a component. Use inspect_list first if you are " +
-            "unsure of the exact property_path.",
+            "Write one serialized property on a component, or on the GameObject itself when " +
+            "component_type is omitted. Use inspect_list first if you are unsure of the exact " +
+            "property_path. A property that holds a reference to another object, such as a sprite, " +
+            "a material or an event target, cannot be set here; assign those with execute_code.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Inspector Write",
             // 'value' is whatever JSON the property's type needs, which the schema can only call
             // "any". A scalar and a vector side by side say more than the sentence can.
             Examples = new[]
             {
-                @"{""game_object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalPosition.x"",""value"":2.5}",
-                @"{""game_object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalScale"",""value"":{""x"":2,""y"":2,""z"":2}}",
+                @"{""object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalPosition.x"",""value"":2.5}",
+                @"{""object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalScale"",""value"":{""x"":2,""y"":2,""z"":2}}",
             })]
         public static JObject Write(
             [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
             string propertyPath,
             [McpArg("value", "New value; its JSON type must match the property's type.")]
             JToken value,
-            [McpArg("instance_id", "Target object instance id; alternative to game_object_path.")]
+            [McpArg("instance_id", "Target object instance id; alternative to object_path.")]
             long? instanceId = null,
-            [McpArg("game_object_path", "Scene path of the target GameObject, e.g. Root/Child.")]
-            string gameObjectPath = null,
+            [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
+            string objectPath = null,
             [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
@@ -109,7 +112,7 @@ namespace UnityMCP.Editor.Tools
                 ("propertyPath", propertyPath),
                 ("value", value),
                 ("instanceId", instanceId),
-                ("gameObjectPath", gameObjectPath),
+                ("objectPath", objectPath),
                 ("componentType", componentType),
                 ("componentIndex", componentIndex)));
         }

@@ -14,16 +14,14 @@ namespace UnityMCP.Editor.Core
     /// Marshals work from HTTP worker threads onto the Editor main thread.
     /// </summary>
     /// <remarks>
-    /// Replaces the v2 pattern of an <c>Action</c> queue drained inside the lock, paired with
-    /// a bare <c>ManualResetEvent.WaitOne(10000)</c> at the call site. That had two defects
-    /// this type is built to remove:
+    /// Two properties the queue exists to hold:
     /// <list type="bullet">
-    /// <item>A timed-out request returned 504 but left its action queued, so the side effect
-    /// still landed later. A client that retried on the 504 executed the work twice. Here a
-    /// caller can <see cref="WorkItem.TryAbandon"/> an item, and the state machine guarantees
-    /// an abandoned item that has not started will never start.</item>
-    /// <item>The queue lock was held while running each action, so one slow action blocked
-    /// every other worker from even enqueuing. Here the lock covers only the dequeue.</item>
+    /// <item>A caller can <see cref="WorkItem.TryAbandon"/> an item, and the state machine
+    /// guarantees an abandoned item that has not started will never start. A request that
+    /// gives up while its action stays queued lands the side effect anyway, and a client that
+    /// retries produces it twice.</item>
+    /// <item>The lock covers only the dequeue, never the run. Held across the run, one slow
+    /// action blocks every other worker from even enqueuing.</item>
     /// </list>
     /// </remarks>
     internal sealed class McpMainThreadDispatcher
@@ -58,6 +56,18 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         private readonly ConcurrentQueue<(string Message, bool IsError)> pendingLogs = new();
 
+        /// <summary>
+        /// Raised after an item is queued, from the submitting thread. The server uses it to
+        /// wake the Editor main loop, which otherwise ticks about every 100 ms without focus.
+        /// </summary>
+        public Action WorkQueued { get; set; }
+
+        /// <summary>
+        /// Raised at the start of every <see cref="Pump"/>, on the main thread, whether or not
+        /// anything is queued. The server uses it to record when the main thread last ran.
+        /// </summary>
+        public Action Pumped { get; set; }
+
         /// <summary>Number of items waiting to start.</summary>
         public int PendingCount
         {
@@ -87,8 +97,23 @@ namespace UnityMCP.Editor.Core
                 this.queue.Enqueue(item);
             }
 
+            this.WorkQueued?.Invoke();
+
             return item;
         }
+
+        /// <summary>
+        /// Creates an item that belongs to no queue, for work whose result arrives from
+        /// somewhere other than the pump — a sequence spread over several Editor frames.
+        /// </summary>
+        /// <remarks>
+        /// It starts in the running state rather than pending, so
+        /// <see cref="WorkItem.TryAbandon"/> refuses it and a job built from it reports
+        /// <c>running</c>. Nothing else can start it, so a pending state would be a lie: there
+        /// is no queue entry to cancel. The producer settles it with
+        /// <see cref="WorkItem.Complete"/> or <see cref="WorkItem.Fail"/>.
+        /// </remarks>
+        public static WorkItem CreateDeferred() => WorkItem.CreateDeferred();
 
         /// <summary>
         /// Records a message to be written to the Unity console from the main thread.
@@ -114,6 +139,8 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         public void Pump()
         {
+            this.Pumped?.Invoke();
+
             while (this.pendingLogs.TryDequeue(out var entry))
             {
                 if (entry.IsError)
@@ -177,10 +204,20 @@ namespace UnityMCP.Editor.Core
             private readonly ManualResetEventSlim completed = new(false);
             private int state = StatePending;
 
+            /// <summary>Guards the outcome so a second <see cref="Complete"/> cannot overwrite it.</summary>
+            private int settled;
+
             public WorkItem(Func<JObject> work)
             {
                 this.work = work;
             }
+
+            private WorkItem()
+            {
+                this.state = StateRunning;
+            }
+
+            internal static WorkItem CreateDeferred() => new();
 
             /// <summary>Result of the work, valid once <see cref="IsCompleted"/> is true.</summary>
             public JObject Result { get; private set; }
@@ -216,6 +253,36 @@ namespace UnityMCP.Editor.Core
             public bool Wait(int timeoutMs)
             {
                 return this.completed.Wait(timeoutMs);
+            }
+
+            /// <summary>
+            /// Hands a deferred item its result and releases anyone waiting on it.
+            /// A second call, or one after <see cref="Fail"/>, is ignored.
+            /// </summary>
+            public void Complete(JObject result)
+            {
+                if (Interlocked.CompareExchange(ref this.settled, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                this.Result = result;
+                this.completed.Set();
+            }
+
+            /// <summary>
+            /// Fails a deferred item and releases anyone waiting on it.
+            /// A second call, or one after <see cref="Complete"/>, is ignored.
+            /// </summary>
+            public void Fail(Exception error)
+            {
+                if (Interlocked.CompareExchange(ref this.settled, 1, 0) != 0)
+                {
+                    return;
+                }
+
+                this.Error = error;
+                this.completed.Set();
             }
 
             /// <summary>Runs the work on the main thread. Called only by the pump.</summary>

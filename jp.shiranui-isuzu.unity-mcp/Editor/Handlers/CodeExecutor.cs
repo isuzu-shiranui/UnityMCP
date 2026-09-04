@@ -32,10 +32,10 @@ namespace UnityMCP.Editor.Handlers
         /// Assembly count when <see cref="cachedReferences"/> was built.
         /// </summary>
         /// <remarks>
-        /// v2 built the reference list once and never rebuilt it, so a snippet could not see
-        /// any assembly loaded after the first execution — including the ones this very method
-        /// creates. Rebuilding when the count moves costs about a tenth of a second on a new
-        /// snippet and makes "type exists but the compiler cannot see it" go away.
+        /// The list is rebuilt whenever the count moves. A list built once cannot see any
+        /// assembly loaded after the first execution — including the ones this very method
+        /// creates — and the snippet fails with "type exists but the compiler cannot see it".
+        /// Rebuilding costs about a tenth of a second on a new snippet.
         /// </remarks>
         private static int cachedReferenceAssemblyCount = -1;
 
@@ -44,14 +44,17 @@ namespace UnityMCP.Editor.Handlers
         /// </summary>
         /// <remarks>
         /// <c>Assembly.Load(byte[])</c> loads into the current domain and cannot be unloaded,
-        /// so v2 leaked one assembly per call — iterating on a snippet a dozen times left a
-        /// dozen behind. Caching does not make loading unloadable, but it stops the common
-        /// case (running the same code repeatedly) from growing the domain at all.
+        /// so every distinct snippet costs one assembly for the rest of the session. Caching
+        /// does not make loading unloadable, but it stops the common case — running the same
+        /// code repeatedly — from growing the domain at all.
         /// </remarks>
         private static readonly Dictionary<string, MethodInfo> CompiledCache = new(StringComparer.Ordinal);
 
         /// <summary>Distinct snippets after which the accumulated assemblies are worth mentioning.</summary>
         private const int DistinctSnippetWarningThreshold = 100;
+
+        /// <summary>First line of the <c>error</c> field when the snippet did not compile.</summary>
+        internal const string CompileErrorPrefix = "Compilation failed:";
 
         private static bool warnedAboutAssemblyGrowth;
 
@@ -104,7 +107,7 @@ namespace UnityMCP.Editor.Handlers
 
                     if (compiled == null)
                     {
-                        return new JObject { ["error"] = "Compilation failed:\n" + string.Join("\n", errors) };
+                        return new JObject { ["error"] = CompileErrorPrefix + "\n" + string.Join("\n", errors) };
                     }
 
                     method = compiled;
@@ -112,7 +115,7 @@ namespace UnityMCP.Editor.Handlers
                     WarnIfDomainGrowing();
                 }
 
-                return Run(method);
+                return Run(method, null);
             }
             catch (Exception e)
             {
@@ -150,9 +153,64 @@ namespace UnityMCP.Editor.Handlers
             return parameters["code"]?.ToString();
         }
 
-        private static string Wrap(string code)
+        /// <summary>
+        /// Compiles and runs a snippet that receives its arguments as <c>JObject args</c>.
+        /// </summary>
+        /// <remarks>
+        /// The arguments are passed to the method rather than written into the source: a value
+        /// interpolated into the code would change the hash, and every distinct argument set would
+        /// then load one more assembly the domain can never unload.
+        /// </remarks>
+        public static JObject Execute(string code, JObject args)
         {
-            var usings = string.Join("\n", DefaultUsings.Select(u => $"using {u};"));
+            if (string.IsNullOrEmpty(code))
+            {
+                return new JObject { ["error"] = "Code is empty" };
+            }
+
+            try
+            {
+                var wrappedCode = Wrap(code, withArgs: true);
+                var hash = Hash(wrappedCode);
+
+                if (!CompiledCache.TryGetValue(hash, out var method))
+                {
+                    var compiled = Compile(wrappedCode, out var errors);
+
+                    if (compiled == null)
+                    {
+                        return new JObject { ["error"] = CompileErrorPrefix + "\n" + string.Join("\n", errors) };
+                    }
+
+                    method = compiled;
+                    CompiledCache[hash] = method;
+                    WarnIfDomainGrowing();
+                }
+
+                return Run(method, new object[] { args ?? new JObject() });
+            }
+            catch (Exception e)
+            {
+                return new JObject { ["error"] = $"Error: {e.Message}" };
+            }
+        }
+
+        internal static string Wrap(string code) => Wrap(code, withArgs: false);
+
+        /// <summary>
+        /// The compilation unit around a snippet. With <paramref name="withArgs"/> the generated
+        /// method is <c>Execute(Newtonsoft.Json.Linq.JObject args)</c> and the Linq namespace is
+        /// imported so <c>args["x"].Value&lt;T&gt;()</c> resolves.
+        /// </summary>
+        /// <remarks>
+        /// The output for <c>withArgs: false</c> is the cache key of every snippet compiled so far
+        /// in a session, so its text must stay exactly what it is.
+        /// </remarks>
+        internal static string Wrap(string code, bool withArgs)
+        {
+            var namespaces = withArgs ? DefaultUsings.Concat(new[] { "Newtonsoft.Json.Linq" }) : DefaultUsings;
+            var usings = string.Join("\n", namespaces.Select(u => $"using {u};"));
+            var signature = withArgs ? "Execute(Newtonsoft.Json.Linq.JObject args)" : "Execute()";
 
             return $@"
 {usings}
@@ -161,7 +219,7 @@ namespace McpCodeExecution
 {{
     public static class Runner
     {{
-        public static object Execute()
+        public static object {signature}
         {{
             {code}
             return null;
@@ -244,7 +302,7 @@ namespace McpCodeExecution
             cachedReferenceAssemblyCount = assemblies.Length;
         }
 
-        private static JObject Run(MethodInfo method)
+        private static JObject Run(MethodInfo method, object[] parameters)
         {
             var capturedOutput = new StringBuilder();
             var executingThreadId = Thread.CurrentThread.ManagedThreadId;
@@ -265,7 +323,7 @@ namespace McpCodeExecution
             object returnValue;
             try
             {
-                returnValue = method.Invoke(null, null);
+                returnValue = method.Invoke(null, parameters);
             }
             catch (TargetInvocationException tie)
             {
@@ -301,10 +359,10 @@ namespace McpCodeExecution
         /// Serializes the snippet's return value.
         /// </summary>
         /// <remarks>
-        /// v2 called <c>ToString()</c>, so returning a list produced the string
-        /// "System.Collections.Generic.List`1[UnityEngine.GameObject]" — the caller learned the
-        /// type and nothing else. Structured serialization means a returned collection arrives
-        /// as an actual array.
+        /// Serialized structurally rather than through <c>ToString()</c>, so a returned
+        /// collection arrives as an actual array. <c>ToString()</c> on a list yields
+        /// "System.Collections.Generic.List`1[UnityEngine.GameObject]", which tells the caller
+        /// the type and nothing else.
         /// </remarks>
         private static (JToken Token, string Note) DescribeReturnValue(object returnValue)
         {

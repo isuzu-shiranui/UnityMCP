@@ -19,11 +19,19 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "capture_screenshot",
             "Capture the Game or Scene view, or an Editor panel, as an image. " +
-            "Panel capture (inspector, hierarchy, project, console, window:<title>) is Windows-only; " +
-            "game and scene work on every platform.",
+            "Every view whose name ends in _window, and inspector, hierarchy, project and console, is read " +
+            "off the screen and is Windows-only; game and scene render through the camera and work " +
+            "everywhere. A screen-read view returns whatever is drawn in that rectangle, so the call " +
+            "is refused when another application is in front of the Editor. It also focuses the " +
+            "window first, which raises a docked tab over whatever the person at the Editor was " +
+            "looking at.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject CaptureScreenshot(
-            [McpArg("view", "What to capture: game, scene, inspector, hierarchy, project, console, or window:<title>.")]
+            [McpArg("view", "What to capture. 'game' and 'scene' render through the camera. " +
+                            "'game_view_window' and 'scene_view_window' grab those windows off the " +
+                            "screen instead, which is the only way to get gizmos, overlays and the " +
+                            "toolbar. 'inspector', 'hierarchy', 'project', 'console' and " +
+                            "'window:<title>' are grabbed the same way.")]
             string view = "game",
             [McpArg("max_size", "Longest edge of the returned image, in pixels.")]
             int maxSize = 1024,
@@ -32,7 +40,9 @@ namespace UnityMCP.Editor.Tools
             [McpArg("height", "Exact capture height; overrides max_size.")]
             int? height = null,
             [McpArg("save_path", "Write the PNG here and return the path instead of the image. " +
-                                 "Use this when the picture is going to render_compare rather than to a human.")]
+                                 "Use this when the picture is going to render_compare rather than " +
+                                 "to a human. Any missing directories are created, and an existing " +
+                                 "file at this path is overwritten.")]
             string savePath = null)
         {
             return ScreenshotCapture.Capture(ToolArgs.Of(
@@ -46,8 +56,9 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "execute_code",
             "Compile and run a C# snippet inside the Editor and return its value. The snippet is " +
-            "placed in a method body, so use `return <expr>;` to surface a result. Full Editor API " +
-            "access, including destructive operations, so read before you write. " +
+            "placed in a method body, so use `return <expr>;` to surface a result and write type " +
+            "names in full: a using directive is a compile error there. Full Editor API access, " +
+            "including destructive operations, so read before you write. " +
             "Identical snippets are compiled once and reused.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject ExecuteCode(

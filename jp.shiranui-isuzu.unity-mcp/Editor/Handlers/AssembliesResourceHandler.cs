@@ -12,23 +12,8 @@ namespace UnityMCP.Editor.Resources
     /// <summary>
     /// Resource handler for assembly information in the Unity project.
     /// </summary>
-    internal sealed class AssembliesResourceHandler : IMcpResourceHandler
+    internal sealed class AssembliesResourceHandler
     {
-        /// <summary>
-        /// Gets the name of the resource this handler is responsible for.
-        /// </summary>
-        public string ResourceName => "assemblies";
-
-        /// <summary>
-        /// Gets a description of the resource handler.
-        /// </summary>
-        public string Description => "Provides information about assemblies loaded in the Unity project";
-
-        /// <summary>
-        /// Gets the URI for this resource.
-        /// </summary>
-        public string ResourceUri => "unity://assemblies";
-
         /// <summary>
         /// Fetches assembly information with the provided parameters.
         /// Supports limit, offset, and fields for pagination and field filtering.

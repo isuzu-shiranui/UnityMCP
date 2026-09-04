@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 
@@ -64,8 +64,11 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "build_player",
-            "Build a player. Takes minutes, so it returns a job id to poll rather than an answer. " +
-            "The scenes in the build settings are used unless a list is given.",
+            "Build a player. It takes minutes, far longer than a call waits, so in practice the " +
+            "answer is a job id to poll with job_status rather than the build report itself. The " +
+            "scenes in the build settings are used unless a list is given. The output directory is " +
+            "created if it does not exist, and it is outside the project, so output_path has to be " +
+            "stated rather than guessed.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject BuildPlayer(
             [McpArg("output_path", "Where to write the build, including the executable's file name.")]
@@ -174,8 +177,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "build_switch_target",
-            "Switch the active build target. Reimports assets for the new platform, so it takes a " +
-            "while and comes back as a job.",
+            "Switch the active build target. It reimports every asset for the new platform, so it " +
+            "takes long enough that the answer is normally a job id to poll with job_status. " +
+            "Switching back later costs another full reimport.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject SwitchTarget(
             [McpArg("platform", "Build target to switch to, e.g. StandaloneWindows64, Android, iOS, WebGL.")]

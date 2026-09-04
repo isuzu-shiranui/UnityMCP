@@ -10,11 +10,8 @@ namespace UnityMCP.Editor.Tools
     /// Unity console access.
     /// </summary>
     /// <remarks>
-    /// v2 shipped two overlapping ways to read console entries — <c>/read_logs</c> and
-    /// <c>console.getLogs</c> — differing only in paging vocabulary. Only the richer one is
-    /// promoted to a tool here; oversized, redundant tool sets are a leading cause of models
-    /// picking the wrong call. The <c>console.getLogs</c> command endpoint still exists for
-    /// clients that have not migrated.
+    /// One tool for reading entries, not several differing only in paging vocabulary.
+    /// Oversized, redundant tool sets are a leading cause of models picking the wrong call.
     /// <para>
     /// When the console reports nothing but you expect output, reach for
     /// <c>editor_log_tail</c> instead: it reads the log file directly and keeps working while
@@ -56,8 +53,9 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "console_get_count",
-            "Return how many error, warning, and info entries the console holds. " +
-            "Cheaper than reading entries when you only need to know whether something failed.",
+            "Return how many entries the console holds, split into errorCount, warningCount and " +
+            "logCount, with the total. Cheaper than reading entries when you only need to know " +
+            "whether something failed.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject GetCount()
         {

@@ -47,8 +47,8 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void SerializesCollectionsStructurally()
         {
-            // v2 called ToString() on the return value, so a list produced
-            // "System.Collections.Generic.List`1[System.String]" and the caller learned nothing.
+            // ToString() on the return value would give
+            // "System.Collections.Generic.List`1[System.String]" and tell the caller nothing.
             var result = Run("return new System.Collections.Generic.List<string> { \"a\", \"b\" };");
 
             Assert.That(result["error"], Is.Null, (string)result["error"]);
@@ -202,8 +202,8 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void SeesAssembliesLoadedAfterTheFirstCompilation()
         {
-            // v2 built its reference list once and never rebuilt it, so a snippet could not
-            // reference anything loaded later — including the assemblies it had just created.
+            // A reference list built once and never rebuilt cannot reach anything loaded
+            // later, including the assemblies an earlier snippet created.
             Run("return 1;");
 
             var result = Run("return typeof(McpCodeExecution.Runner) != null;");

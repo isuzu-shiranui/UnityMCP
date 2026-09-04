@@ -26,8 +26,10 @@ namespace UnityMCP.Editor.Tools
     {
         [McpTool(
             "asset_find",
-            "Search the project for assets. Combine a type filter with a folder to keep results " +
-            "small — an unfiltered search returns the entire project, which is rarely the question.",
+            "Search the project for assets. Combine a type filter with a folder to keep the search " +
+            "meaningful — an unfiltered search matches every asset in the project, which is rarely " +
+            "the question. The reply is capped at limit and carries the full match count in total, " +
+            "so a broad search is slow and uninformative rather than large.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Find(
             [McpArg("type", "Unity type to filter by, e.g. Material, Texture2D, MonoScript, Prefab.")]
@@ -105,7 +107,8 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "asset_info",
-            "Describe one asset: its type, GUID, importer, labels and what it depends on.",
+            "Describe one asset: its type, GUID, importer and labels. What it depends on is left " +
+            "out unless include_dependencies is set.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Info(
             [McpArg("path", "Project path of the asset, e.g. Assets/Art/Wood.mat.")]
@@ -138,7 +141,10 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "asset_create_folder",
-            "Create a folder, including any missing parents.",
+            "Create a folder under Assets, including any missing parents. Call this before writing " +
+            "an asset into a folder that may not exist yet: the tools that write assets refuse a " +
+            "path whose folder is missing rather than creating it. A folder that already exists is " +
+            "not an error; the reply says created false.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject CreateFolder(
             [McpArg("path", "Folder to create, e.g. Assets/Art/Materials.")]
@@ -232,10 +238,13 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "asset_delete",
-            "Move an asset to the OS trash. Recoverable from there, so this does not need confirming.",
+            "Move an asset to the OS trash, normally recoverable from there, so this does not ask " +
+            "for confirmation. A folder path is accepted and takes everything under it, so check " +
+            "what a path holds with asset_find before passing a directory.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Delete(
-            [McpArg("path", "Project path of the asset to remove.")]
+            [McpArg("path", "Project path of the asset to remove. A folder is accepted and removes " +
+                            "the whole tree beneath it.")]
             string path = null)
         {
             Require(path);

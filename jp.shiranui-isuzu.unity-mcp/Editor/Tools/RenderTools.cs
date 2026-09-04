@@ -24,16 +24,21 @@ namespace UnityMCP.Editor.Tools
             "Compare two captured images and report how they differ, in numbers. Use this instead of " +
             "looking at both pictures: capture with save_path, toggle the thing under test, capture " +
             "again, then compare. Absolute colours are post-tonemap and not worth trusting, so what " +
-            "this reports is change — how many pixels moved, by how much, and where.",
+            "this reports is change — how many pixels moved, by how much, and where. The bounding " +
+            "box and the per-cell grid are only present when at least one pixel changed. Both " +
+            "images have to be the same size.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Compare(
             [McpArg("before", "Path to the first PNG, from capture_screenshot's save_path.")]
             string before = null,
             [McpArg("after", "Path to the second PNG.")]
             string after = null,
-            [McpArg("threshold", "Per-channel difference, 0-255, below which a pixel counts as unchanged.")]
+            [McpArg("threshold", "Largest per-channel difference, 0-255, at or below which a pixel " +
+                                 "counts as unchanged. Only red, green and blue are compared; alpha " +
+                                 "is ignored.")]
             int threshold = 2,
-            [McpArg("grid", "Report the difference over a grid this many cells across, to localise it.")]
+            [McpArg("grid", "Report the difference over a grid this many cells across, to localise " +
+                            "it. Clamped to 1-32.")]
             int grid = 8)
         {
             var a = LoadPng(before, "before");
@@ -164,9 +169,11 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "render_pipeline_info",
-            "Report what is actually drawing: the render pipeline asset in force, colour space, HDR, " +
-            "MSAA, graphics API and quality level. Read this first when a shader behaves differently " +
-            "than expected — the quality level's pipeline override is a common surprise.",
+            "Report what is actually drawing: the render pipeline asset in force, colour space, MSAA " +
+            "sample count, graphics API, shadow and batching settings, and quality level. Read this " +
+            "first when a shader behaves differently than expected — the quality level's pipeline " +
+            "override is a common surprise. HDR is not a project-wide setting and is not reported " +
+            "here; render_camera_info gives it per camera.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject PipelineInfo()
         {
@@ -205,7 +212,9 @@ namespace UnityMCP.Editor.Tools
             "render_camera_info",
             "Report the cameras and their matrices. The view and projection matrices are here so a " +
             "value read off a screenshot can be checked against one computed on the CPU — screenshot " +
-            "colours are post-tonemap and cannot settle an argument on their own.",
+            "colours are post-tonemap and cannot settle an argument on their own. Every camera in " +
+            "the open scenes is reported, disabled ones included; read each entry's enabled field " +
+            "to tell which are drawing.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject CameraInfo(
             [McpArg("name", "Only report the camera with this name.")]
@@ -262,11 +271,15 @@ namespace UnityMCP.Editor.Tools
                 return (object)entry;
             }).ToArray());
 
+            // Measured rather than asserted: whether FindObjectsByType surfaces the Scene View's
+            // own cameras depends on their hide flags, which have moved between Unity versions.
+            var sceneViewCameras = SceneView.GetAllSceneCameras();
+
             return new JObject
             {
                 ["count"] = cameras.Length,
                 ["cameras"] = list,
-                ["sceneViewCameraIncluded"] = false,
+                ["sceneViewCameraIncluded"] = cameras.Any(c => Array.IndexOf(sceneViewCameras, c) >= 0),
             };
         }
 

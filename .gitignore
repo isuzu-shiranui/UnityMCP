@@ -8,6 +8,9 @@
 *.csproj
 *.sln
 *.user
+!isuzu-unity-cli/**/*.csproj
+!isuzu-unity-cli/*.sln
+isuzu-unity-cli/**/bin/
 
 # Node
 node_modules/
@@ -17,3 +20,9 @@ node_modules/
 .orchestra/
 *.stackdump
 *.log
+
+# Release staging written by scripts/build-mcpb.sh and the release workflow.
+dist/
+
+# Written by scripts/build-vpm.sh; the published listing is built during the Pages deploy.
+site/vpm.json

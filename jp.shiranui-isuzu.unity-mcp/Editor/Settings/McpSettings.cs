@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -10,17 +9,16 @@ namespace UnityMCP.Editor.Settings
     [FilePath("UserSettings/UnityMcpSettings.asset", FilePathAttribute.Location.PreferencesFolder)]
     public sealed class McpSettings : ScriptableSingleton<McpSettings>
     {
-        /// <summary>
-        /// Gets or sets the path to the client installation.
-        /// </summary>
+        /// <summary>Layout version of this asset, used to migrate values saved by older packages.</summary>
         [SerializeField]
-        public string clientInstallationPath = string.Empty;
+        public int settingsVersion;
 
         /// <summary>
-        /// Gets or sets the HTTP port for the Unity HTTP server.
+        /// The HTTP port to bind. Zero means "derive a stable port from the project path", which
+        /// is what MCP client configuration relies on; a positive value overrides it.
         /// </summary>
         [SerializeField]
-        public int httpPort = 27182;
+        public int httpPort;
 
         /// <summary>
         /// Gets or sets whether to auto-start the server when Unity starts.
@@ -28,59 +26,54 @@ namespace UnityMCP.Editor.Settings
         [SerializeField]
         public bool autoStartOnLaunch = true;
 
-        // Removed in v3, all of them dead settings that only looked like controls:
-        //   portPersistenceEnabled — never read; port persistence was always on.
-        //   reloadRetryMaxMs       — documented as "read from /health", but /health never
-        //                            emitted it; the TS server reads MCP_RELOAD_RETRY_MAX_MS.
-        //   useUdpBroadcast        — the server started the broadcaster unconditionally, so
-        //                            turning it off did nothing. Discovery is now file-based.
-        //   udpBroadcastPort, broadcastIntervalSeconds — belonged to that broadcaster.
-
         /// <summary>
         /// Gets or sets how long (ms) a request waits for its main-thread work before the
         /// server hands back a job id instead. Clamped to a 250 ms floor by the server.
         /// </summary>
         /// <remarks>
-        /// Deliberately far below v2's fixed 10 s: work slower than this is better tracked
-        /// through a job the caller can poll than through a socket held open, and the old
-        /// behaviour of returning 504 while leaving the work queued made retries dangerous.
+        /// Work slower than this is better tracked through a job the caller can poll than
+        /// through a socket held open.
         /// </remarks>
         [SerializeField]
         public int syncWaitMs = 3000;
 
         /// <summary>
-        /// Gets or sets whether to store detailed logs.
+        /// Log every request and each start and stop step to the Unity console. Off by default:
+        /// these lines come back to the agent through <c>console_read_logs</c>, where they crowd
+        /// out the project's own output. Warnings and errors are logged either way.
         /// </summary>
         [SerializeField]
-        public bool detailedLogs = true;
+        public bool detailedLogs;
 
         /// <summary>
-        /// Gets or sets the dictionary of command handlers and their enabled states.
+        /// Keep the Editor main loop awake for the whole session, not only while a request is
+        /// waiting. Costs idle CPU; for hosts where a fully idle Editor stops accepting
+        /// connections at all.
         /// </summary>
         [SerializeField]
-        public Dictionary<string, bool> handlerEnabledStates = new Dictionary<string, bool>();
+        public bool keepEditorAwake;
 
         /// <summary>
-        /// Gets or sets the dictionary of resource handlers and their enabled states.
+        /// Which language the Preferences page draws itself in, as <see cref="McpUiLanguage"/>.
+        /// Zero follows the Editor. Only that page is translated.
         /// </summary>
         [SerializeField]
-        public Dictionary<string, bool> resourceHandlerEnabledStates = new Dictionary<string, bool>();
+        public int uiLanguage;
 
-        // ── Legacy compatibility properties ──
-        // These allow old code references to still compile during migration.
+        private const int CurrentSettingsVersion = 4;
 
-        /// <summary>
-        /// Legacy: returns "127.0.0.1". HTTP server always binds to localhost.
-        /// </summary>
-        public string host => "127.0.0.1";
-
-        /// <summary>
-        /// Legacy: maps to httpPort.
-        /// </summary>
-        public int port
+        private void OnEnable()
         {
-            get => this.httpPort;
-            set => this.httpPort = value;
+            // Before v4 this value was where the port scan started, not a pin, and every asset
+            // holds one. Carrying it over as a pin would put every upgraded project on the same
+            // port and none on its derived one. Not saved here: a ScriptableSingleton refuses to
+            // save while it is being loaded, and the change is applied again on every load until
+            // the next ordinary save persists it.
+            if (this.settingsVersion < CurrentSettingsVersion)
+            {
+                this.httpPort = 0;
+                this.settingsVersion = CurrentSettingsVersion;
+            }
         }
 
         /// <summary>
@@ -89,38 +82,6 @@ namespace UnityMCP.Editor.Settings
         public void Save()
         {
             this.Save(true);
-        }
-
-        public void UpdateHandlerEnabledState(string commandPrefix, bool enabled)
-        {
-            this.handlerEnabledStates[commandPrefix] = enabled;
-            this.Save();
-        }
-
-        public bool GetHandlerEnabledState(string commandPrefix)
-        {
-            return this.handlerEnabledStates.TryGetValue(commandPrefix, out var enabled) ? enabled : true;
-        }
-
-        public Dictionary<string, bool> GetAllHandlerEnabledStates()
-        {
-            return new Dictionary<string, bool>(this.handlerEnabledStates);
-        }
-
-        public void UpdateResourceHandlerEnabledState(string resourceName, bool enabled)
-        {
-            this.resourceHandlerEnabledStates[resourceName] = enabled;
-            this.Save();
-        }
-
-        public bool GetResourceHandlerEnabledState(string resourceName)
-        {
-            return this.resourceHandlerEnabledStates.TryGetValue(resourceName, out var enabled) ? enabled : true;
-        }
-
-        public Dictionary<string, bool> GetAllResourceHandlerEnabledStates()
-        {
-            return new Dictionary<string, bool>(this.resourceHandlerEnabledStates);
         }
     }
 }

@@ -1,8 +1,8 @@
 # Runs the package's EditMode tests in a real Unity Editor and records the result.
 #
-# The release workflow verifies TypeScript and publishes; nothing automated compiles a line of
-# C#. This is what makes the C# side releasable: run it, and it writes an attestation naming the
-# sources it ran against. The release then refuses to publish sources that were never tested.
+# No runner has a Unity licence, so nothing automated compiles the Editor assemblies. This is
+# what makes them releasable: run it, and it writes an attestation naming the sources it ran
+# against. CI and the release then refuse sources that no recorded run covers.
 #
 #   pwsh scripts/run-editmode-tests.ps1
 #   pwsh scripts/run-editmode-tests.ps1 -Unity 'C:\Program Files\Unity\Hub\Editor\6000.0.35f1\Editor\Unity.exe'
@@ -22,15 +22,12 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $package = 'jp.shiranui-isuzu.unity-mcp'
 
-# The version the attestation is made against, unless -Unity says otherwise.
+# The Editor generation used when -Unity is not given.
 #
-# Pinned rather than "whichever Editor is newest on this machine": a release gate whose meaning
-# depends on what happens to be installed is not a gate. The version used goes into the
-# attestation, so a reader can always see what the recorded run proves.
-#
-# Raising this is a deliberate act. Pointing the script at 6000.5 today does not compile: the
-# int instanceID APIs became obsolete-as-error there, and the package has not been migrated to
-# EntityId. That is worth fixing, and it is not what this script is for.
+# A fixed default rather than "whichever Editor is newest on this machine": a release gate whose
+# meaning depends on what happens to be installed is not a gate. -Unity runs the same tests on
+# another Editor; the version used goes into the attestation either way, so a reader can always
+# see what the recorded run proves.
 $PinnedUnityVersion = '6000.0'
 
 function Resolve-Unity {
@@ -78,13 +75,59 @@ if (-not (Test-Path (Join-Path $ProjectPath 'Packages'))) {
     if ($create.ExitCode -ne 0) { throw "createProject failed with exit code $($create.ExitCode)." }
 }
 
+$unityVersion = (Split-Path (Split-Path $unityExe -Parent) -Leaf)
+if ($unityVersion -eq 'Editor') {
+    $unityVersion = (Split-Path (Split-Path (Split-Path $unityExe -Parent) -Parent) -Leaf)
+}
+if (-not ($unityVersion -match '^\d')) {
+    $unityVersion = (Get-Item $unityExe).VersionInfo.ProductVersion
+}
+
+# Timeline and Recorder come from the Editor's own bundled package set: a version from another
+# Editor generation fails to compile inside that package (2022.3 lacks a ShowSelector overload
+# Recorder 5.0 uses; 6.5 treats the GetInstanceID call in Timeline 1.8.7 as an error), and the
+# resulting log looks like a defect in this package.
+#
+# Windows and Linux keep the set under Data\ beside the executable; macOS keeps it under
+# Unity.app/Contents/Resources, two levels above Contents/MacOS/Unity.
+$editorDir = Split-Path $unityExe
+$bundled = @(
+    (Join-Path $editorDir 'Data\Resources\PackageManager\Editor'),
+    (Join-Path (Split-Path $editorDir) 'Resources\PackageManager\Editor')
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $bundled) {
+    Write-Warning "No bundled package set found beside '$unityExe'; falling back to timeline 1.8.7 and recorder 5.0.0, which compile only on 6000.0."
+}
+
+function Resolve-Bundled([string] $name, [string] $fallback) {
+    if (-not $bundled) { return $fallback }
+    $hit = Get-ChildItem $bundled -Filter "$name-*.tgz" -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.BaseName.Substring($name.Length + 1) } |
+        Sort-Object { [version](($_ -split '-')[0]) } -Descending |
+        Select-Object -First 1
+    if ($hit) { return $hit }
+    Write-Warning "No $name-*.tgz under '$bundled'; falling back to $name $fallback."
+    return $fallback
+}
+$timelineVersion = Resolve-Bundled 'com.unity.timeline' '1.8.7'
+$recorderVersion = Resolve-Bundled 'com.unity.recorder' '5.0.0'
+
+if ($unityVersion -match '^(\d+)\.') {
+    $editorMajor = [int]$Matches[1]
+} else {
+    Write-Warning "Could not read an Editor version from '$unityExe' (got '$unityVersion'); assuming the 6000 generation for the test framework."
+    $editorMajor = 6000
+}
+$testFrameworkVersion = if ($editorMajor -lt 6000) { '1.1.33' } else { '1.4.6' }
+
 # Written every run: the manifest is what pulls in Newtonsoft and the test framework, and
 # `testables` is what makes Unity run tests that live inside a package at all.
-$manifest = @'
+$manifest = @"
 {
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1",
-    "com.unity.test-framework": "1.4.6",
+    "com.unity.test-framework": "$testFrameworkVersion",
     "com.unity.ide.visualstudio": "2.0.22",
     "com.unity.modules.imgui": "1.0.0",
     "com.unity.modules.jsonserialize": "1.0.0",
@@ -92,12 +135,12 @@ $manifest = @'
     "com.unity.modules.physics": "1.0.0",
     "com.unity.modules.animation": "1.0.0",
     "com.unity.modules.director": "1.0.0",
-    "com.unity.timeline": "1.8.7",
-    "com.unity.recorder": "5.0.0"
+    "com.unity.timeline": "$timelineVersion",
+    "com.unity.recorder": "$recorderVersion"
   },
   "testables": [ "jp.shiranui-isuzu.unity-mcp" ]
 }
-'@
+"@
 
 # UTF-8 without a BOM: Unity's JSON parser rejects a BOM outright, and the error it reports
 # names a character code rather than the file.
@@ -114,6 +157,11 @@ if (-not (Test-Path $link)) {
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────
+# Taken before the Editor starts and compared with the one taken after. An edit landing while
+# the tests run would otherwise be recorded as covered by a run that never compiled it.
+$hashBefore = (& dotnet run (Join-Path $PSScriptRoot 'source-hash.cs') -- $repo).Trim()
+if (-not $hashBefore) { throw 'Could not compute the source hash.' }
+
 $results = Join-Path $ProjectPath 'editmode-results.xml'
 $log = Join-Path $ProjectPath 'editmode.log'
 Remove-Item $results -ErrorAction SilentlyContinue
@@ -138,9 +186,10 @@ $summary = $xml.'test-run'
 $total = [int]$summary.total
 $passed = [int]$summary.passed
 $failed = [int]$summary.failed
+$skipped = [int]$summary.skipped
 
 Write-Host ''
-Write-Host ("total={0} passed={1} failed={2} skipped={3}" -f $total, $passed, $failed, $summary.skipped)
+Write-Host ("total={0} passed={1} failed={2} skipped={3}" -f $total, $passed, $failed, $skipped)
 
 if ($failed -ne 0 -or $run.ExitCode -ne 0) {
     Select-Xml -Xml $xml -XPath "//test-case[@result='Failed']" | ForEach-Object {
@@ -152,22 +201,25 @@ if ($failed -ne 0 -or $run.ExitCode -ne 0) {
 }
 
 # ── record it ─────────────────────────────────────────────────────────────────
-$unityVersion = (Split-Path (Split-Path $unityExe -Parent) -Leaf)
-if ($unityVersion -eq 'Editor') {
-    $unityVersion = (Split-Path (Split-Path (Split-Path $unityExe -Parent) -Parent) -Leaf)
-}
-if (-not ($unityVersion -match '^\d')) {
-    $unityVersion = (Get-Item $unityExe).VersionInfo.ProductVersion
-}
-
-$hash = (& node (Join-Path $PSScriptRoot 'source-hash.js') $repo).Trim()
+# $repo is absolute on purpose: `dotnet run` sets the working directory to the folder holding
+# the .cs file, so a relative root would be resolved against scripts/.
+$hash = (& dotnet run (Join-Path $PSScriptRoot 'source-hash.cs') -- $repo).Trim()
 if (-not $hash) { throw 'Could not compute the source hash.' }
+
+if ($hash -ne $hashBefore) {
+    throw ("The Editor sources changed while the tests were running " +
+           "($($hashBefore.Substring(0, 16))... -> $($hash.Substring(0, 16))...). " +
+           'No attestation written: the run did not compile the sources now on disk. Re-run it.')
+}
 
 $attestation = [ordered]@{
     sourceHash   = $hash
     total        = $total
     passed       = $passed
     failed       = $failed
+    # The gate requires passed + failed + skipped == total: NUnit counts inconclusive and
+    # not-run cases in total without listing them under failed.
+    skipped      = $skipped
     # From the executable, not the results file: the Unity version is not among the properties
     # NUnit writes, and reading it from there produced an empty object rather than an error.
     unityVersion = $unityVersion

@@ -58,9 +58,12 @@ namespace UnityMCP.Editor.Timeline
             string objectPath = null,
             [McpArg("instance_id", "Address the director's GameObject by instance id instead.")]
             long? instanceId = null,
-            [McpArg("include_clips", "Include each track's clips, with their start and duration.")]
+            [McpArg("include_clips", "Include each track's clips, with their start and duration. " +
+                                     "Control tracks keep their clips either way, because the " +
+                                     "nesting is read from them.")]
             bool includeClips = true,
-            [McpArg("track", "Only report the top-level track whose name contains this text.")]
+            [McpArg("track", "Report only the tracks whose name contains this text, ignoring case. " +
+                             "Tracks inside groups are matched too, so this can return several.")]
             string track = null,
             [McpArg("nest_depth", "How many Control-track layers to follow into child timelines. " +
                                   "0 stops at this timeline; the default follows one layer.")]
@@ -98,7 +101,11 @@ namespace UnityMCP.Editor.Timeline
             "Move a Timeline director to a time (or frame) and evaluate it in the Editor, without " +
             "entering Play Mode. This is how you look at one moment: evaluate, then capture_screenshot " +
             "the result and render_compare it against another. Give either 'time' in seconds or " +
-            "'frame'; frame uses the timeline's frame rate.",
+            "'frame'; frame uses the timeline's frame rate. Evaluating writes the animated values " +
+            "onto the bound scene objects and leaves them there, which dirties the scene and is not " +
+            "undoable; it also rebuilds the playable graph when needed and repaints every Scene " +
+            "View. Called during Play Mode it leaves the director paused, and nothing here resumes " +
+            "it.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Evaluate(
             [McpArg("object_path", "Hierarchy path of the GameObject with the PlayableDirector.")]

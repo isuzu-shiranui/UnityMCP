@@ -8,10 +8,14 @@ namespace UnityMCP.Editor.Core
     /// <para>
     /// <see cref="Code"/> and <see cref="HttpStatus"/> flow straight into the response
     /// envelope, so the model receives an error it can correct rather than a stack trace.
-    /// This mirrors the existing <c>McpScreenshotException</c> pattern.
+    /// </para>
+    /// <para>
+    /// Not sealed: <c>ToolInvoker</c> turns every other exception into <c>tool_failed</c> with a
+    /// 500, and a 500 on a Safe tool is retried for the whole budget. A handler that wants its
+    /// own code to reach the caller has to derive from this.
     /// </para>
     /// </summary>
-    internal sealed class McpToolException : Exception
+    internal class McpToolException : Exception
     {
         /// <summary>Machine-readable error code, e.g. <c>invalid_params</c>.</summary>
         public string Code { get; }

@@ -20,24 +20,21 @@ namespace UnityMCP.Editor.Handlers
                 var tagFilter = parameters["tag"]?.ToString();
                 var maxDepth = parameters["maxDepth"]?.Value<int>() ?? 5;
                 var activeOnly = parameters["activeOnly"]?.Value<bool>() ?? false;
+                var missingScriptsOnly = parameters["missingScripts"]?.Value<bool>() ?? false;
                 var sceneIndex = parameters["sceneIndex"]?.Value<int?>();
 
-                // Context economy parameters (R5.1):
-                //   limit  — cap total nodes returned (alias of legacy `maxNodes`).
-                //            `limit > 0` → cap; `<=0` → unlimited. maxNodes remains
-                //            a compatibility alias for callers on older clients.
-                //   offset — skip N nodes from the flattened traversal.
-                //   fields — comma-separated allowlist applied to projected keys.
-                var legacyMaxNodes = parameters["maxNodes"]?.Value<int>() ?? 0;
-                var limitParam = parameters["limit"]?.Value<int?>();
-                var limit = limitParam ?? legacyMaxNodes;
+                // A limit of zero or less means every node, which is what an omitted limit
+                // becomes; offset skips that many nodes of the flattened traversal, and fields
+                // is an allowlist applied to the projected keys.
+                var limit = parameters["limit"]?.Value<int?>() ?? 0;
                 var offset = Math.Max(0, parameters["offset"]?.Value<int>() ?? 0);
                 var fieldsFilter = ListResponseBuilder.ParseFieldsParam(parameters["fields"]?.ToString());
 
                 var hasFilter = !string.IsNullOrEmpty(nameFilter)
                     || !string.IsNullOrEmpty(componentFilter)
                     || !string.IsNullOrEmpty(tagFilter)
-                    || activeOnly;
+                    || activeOnly
+                    || missingScriptsOnly;
 
                 var sceneCount = SceneManager.sceneCount;
                 if (sceneIndex.HasValue)
@@ -46,7 +43,7 @@ namespace UnityMCP.Editor.Handlers
                     {
                         return new JObject
                         {
-                            ["error"] = $"sceneIndex {sceneIndex.Value} out of range (0..{sceneCount - 1})"
+                            ["error"] = $"scene_index {sceneIndex.Value} out of range (0..{sceneCount - 1})"
                         };
                     }
                 }
@@ -70,7 +67,7 @@ namespace UnityMCP.Editor.Handlers
                         if (hasFilter)
                         {
                             var tree = BuildTreeNode(root.transform, 0, maxDepth);
-                            MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly);
+                            MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
                             CollectFilteredFlat(tree, si, -1, flat);
                         }
                         else
@@ -152,7 +149,7 @@ namespace UnityMCP.Editor.Handlers
             List<FlatNode> flat)
         {
             // Only include nodes that are matched themselves or are ancestors
-            // of a matched node (same semantics as the old BuildFilteredOutput).
+            // of a matched node.
             if (!node.Matched && !node.AncestorOfMatch) return;
 
             var myIndex = flat.Count;
@@ -187,7 +184,8 @@ namespace UnityMCP.Editor.Handlers
                 ["active"] = go.activeSelf,
                 ["tag"] = go.tag,
                 ["layer"] = LayerMask.LayerToName(go.layer),
-                ["components"] = GetComponentNames(go)
+                ["components"] = GetComponentNames(go),
+                ["missingScripts"] = MissingScriptCount(go),
             };
         }
 
@@ -200,15 +198,27 @@ namespace UnityMCP.Editor.Handlers
             var items = page["items"] as JArray;
             if (items == null) return new JArray();
 
-            // Project paged items to (flatIndex, JObject) pairs.
-            var windowStart = offset;
-            var windowEnd = Math.Min(offset + items.Count, total);
-
-            // Map flatIndex → its JObject within the page window.
-            var pageByFlatIndex = new Dictionary<int, JObject>(items.Count);
+            // Newtonsoft copies a token that already belongs to a container when it is added
+            // to a second one, so the page items must be detached from `page["items"]` before
+            // they are assembled into scene trees. Assembling them while they are still
+            // parented puts copies into the response, and the `children` writes below then
+            // land on the originals nobody reads, which flattens the whole tree.
+            var paged = new JObject[items.Count];
             for (var i = 0; i < items.Count; i++)
             {
-                pageByFlatIndex[windowStart + i] = (JObject)items[i];
+                paged[i] = (JObject)items[i];
+            }
+            items.RemoveAll();
+
+            // Project paged items to (flatIndex, JObject) pairs.
+            var windowStart = offset;
+            var windowEnd = Math.Min(offset + paged.Length, total);
+
+            // Map flatIndex → its JObject within the page window.
+            var pageByFlatIndex = new Dictionary<int, JObject>(paged.Length);
+            for (var i = 0; i < paged.Length; i++)
+            {
+                pageByFlatIndex[windowStart + i] = paged[i];
             }
 
             // Group paged nodes by sceneIndex.
@@ -298,17 +308,39 @@ namespace UnityMCP.Editor.Handlers
             return node;
         }
 
+        /// <summary>What a component whose script Unity cannot resolve is called in a reply.</summary>
+        internal const string MissingScript = "<missing script>";
+
+        private static int MissingScriptCount(GameObject go)
+        {
+            var missing = 0;
+
+            foreach (var comp in go.GetComponents<Component>())
+            {
+                if (comp == null)
+                {
+                    missing++;
+                }
+            }
+
+            return missing;
+        }
+
         private static void MarkMatches(
             TreeNode node,
             string nameFilter,
             string componentFilter,
             string tagFilter,
-            bool activeOnly)
+            bool activeOnly,
+            bool missingScriptsOnly)
         {
             var go = node.Go;
             var matches = true;
 
             if (activeOnly && !go.activeSelf)
+                matches = false;
+
+            if (matches && missingScriptsOnly && MissingScriptCount(go) == 0)
                 matches = false;
 
             if (matches && !string.IsNullOrEmpty(nameFilter))
@@ -342,7 +374,7 @@ namespace UnityMCP.Editor.Handlers
 
             foreach (var child in node.Children)
             {
-                MarkMatches(child, nameFilter, componentFilter, tagFilter, activeOnly);
+                MarkMatches(child, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
             }
 
             foreach (var child in node.Children)
@@ -360,7 +392,11 @@ namespace UnityMCP.Editor.Handlers
             var arr = new JArray();
             foreach (var comp in go.GetComponents<Component>())
             {
-                arr.Add(comp != null ? comp.GetType().Name : "null");
+                // A component that reads as null is a MonoBehaviour whose script Unity cannot
+                // resolve: the class was renamed, or the package that declared it was removed.
+                // Naming it is the difference between an agent explaining a broken avatar and
+                // reporting a null it cannot account for.
+                arr.Add(comp != null ? comp.GetType().Name : MissingScript);
             }
             return arr;
         }

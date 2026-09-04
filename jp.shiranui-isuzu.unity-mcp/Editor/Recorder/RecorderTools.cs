@@ -40,7 +40,9 @@ namespace UnityMCP.Editor.Recorder
             "Add a Recorder track and clip to a Timeline, so playing the director records it. Set " +
             "the output type and format (movie mp4/webm/mov, or image png/jpeg/exr), the input " +
             "source (game view, a camera, or a render texture), the resolution and the output path. " +
-            "The frame rate is not set here — the Recorder takes it from the timeline.",
+            "The frame rate is not set here — the Recorder takes it from the timeline. Adding the " +
+            "track saves every unsaved asset in the project, not just this timeline, so any pending " +
+            "edit elsewhere is committed to disk by this call.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Add Recorder Track",
             // Several arguments constrain each other — camera_tag only means anything with

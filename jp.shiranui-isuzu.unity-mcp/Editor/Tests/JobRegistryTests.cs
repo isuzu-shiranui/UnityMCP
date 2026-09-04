@@ -149,6 +149,46 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void JobFollowsADeferredResultToTheInnerItem()
+        {
+            // A queued tool that outlives the window is tracked by its queue item. When that
+            // item settles with a DeferredToolResult, the work has only started; the job must
+            // stay running until the inner item settles and then carry the inner result.
+            var inner = McpMainThreadDispatcher.CreateDeferred();
+            var outer = this.dispatcher.Submit(() => new DeferredToolResult(inner));
+            var id = this.registry.Track(outer, "/input_replay");
+
+            this.dispatcher.Pump();
+
+            Assert.That(outer.IsCompleted, Is.True);
+            Assert.That(this.registry.TryGet(id, out var entry), Is.True);
+            Assert.That(entry.Status, Is.EqualTo("running"), "The marker must not read as a finished job.");
+            Assert.That(this.registry.RunningCount, Is.EqualTo(1));
+            Assert.That(entry.ToDetailJson()["result"], Is.Null);
+
+            inner.Complete(new JObject { ["frames"] = 12 });
+
+            Assert.That(entry.Status, Is.EqualTo("completed"));
+            Assert.That(entry.ToDetailJson()["result"]["frames"].Value<int>(), Is.EqualTo(12));
+            Assert.That(this.registry.RunningCount, Is.Zero);
+        }
+
+        [Test]
+        public void JobFollowsAFailedInnerItem()
+        {
+            var inner = McpMainThreadDispatcher.CreateDeferred();
+            var outer = this.dispatcher.Submit(() => new DeferredToolResult(inner));
+            var id = this.registry.Track(outer, "/input_replay");
+            this.dispatcher.Pump();
+
+            inner.Fail(new McpToolException("cancelled", "Server stopped.", 409));
+
+            this.registry.TryGet(id, out var entry);
+            Assert.That(entry.Status, Is.EqualTo("failed"));
+            Assert.That(entry.ToDetailJson()["error"].Value<string>(), Is.EqualTo("Server stopped."));
+        }
+
+        [Test]
         public void RunningJobsAreNeverEvicted()
         {
             // Losing the handle to work that is still going to mutate the project is worse

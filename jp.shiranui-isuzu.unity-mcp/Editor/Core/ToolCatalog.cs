@@ -14,20 +14,18 @@ namespace UnityMCP.Editor.Core
     /// Discovers <see cref="McpToolAttribute"/> methods across the loaded assemblies and
     /// derives each tool's JSON Schema from its method signature.
     /// <para>
-    /// This replaces the v2 pairing of <c>IMcpCommandHandler</c> (C#, untyped
-    /// <c>JObject</c> parameters, dispatch by internal <c>switch</c>) with a hand-written
-    /// zod schema on the TypeScript side. Those two definitions drifted apart in practice
-    /// — the v2 TS resource handlers routed to an endpoint the Editor never registered,
-    /// and the TS README advertised seven tools that had no implementation. Generating the
-    /// schema from the signature removes the second definition entirely, so there is
-    /// nothing left to drift.
+    /// Deriving the schema is what keeps a tool defined in one place. A schema written by
+    /// hand on the client is a second definition of the same tool and is free to drift from
+    /// the method it describes — advertising a tool nothing implements, or routing to an
+    /// endpoint the Editor never registered — and neither failure shows up until a call is
+    /// made.
     /// </para>
     /// </summary>
     internal sealed class ToolCatalog
     {
         /// <summary>
-        /// MCP tool-name grammar. Dots are not permitted, so the v2 <c>prefix.action</c>
-        /// convention has to be spelled <c>prefix_action</c> here.
+        /// MCP tool-name grammar. Dots are not permitted, so a <c>prefix.action</c> name
+        /// has to be spelled <c>prefix_action</c> here.
         /// </summary>
         private static readonly Regex NamePattern = new(@"^[a-z][a-z0-9_]{0,63}$", RegexOptions.Compiled);
 
@@ -43,6 +41,23 @@ namespace UnityMCP.Editor.Core
         };
 
         private readonly Dictionary<string, McpToolDescriptor> tools = new(StringComparer.Ordinal);
+
+        /// <summary>Whether <paramref name="name"/> satisfies the MCP tool-name grammar.</summary>
+        internal static bool IsValidName(string name)
+        {
+            return !string.IsNullOrEmpty(name) && NamePattern.IsMatch(name);
+        }
+
+        /// <summary>Whether the invoker injects an argument of this name itself.</summary>
+        internal static bool IsReservedParameterName(string name)
+        {
+            return ReservedParameterNames.Contains(name);
+        }
+
+        // Rendered responses, keyed by shape and group set. A catalog never changes after it is
+        // built (a refresh builds a new one), so nothing here ever has to be invalidated.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> renderedUtf8 =
+            new(StringComparer.Ordinal);
 
         /// <summary>All discovered tools, ordered by name.</summary>
         public IEnumerable<McpToolDescriptor> Tools => this.tools.Values.OrderBy(t => t.Name, StringComparer.Ordinal);
@@ -60,7 +75,26 @@ namespace UnityMCP.Editor.Core
         /// <summary>
         /// Scans the current AppDomain and builds the catalog.
         /// </summary>
-        public static ToolCatalog Build()
+        /// <param name="extra">
+        /// Tools that have no backing method, registered after the discovered ones so an
+        /// attribute tool always wins a name collision.
+        /// </param>
+        public static ToolCatalog Build(IReadOnlyList<McpToolDescriptor> extra = null)
+        {
+            return Build(extra == null ? null : (Func<ToolCatalog, List<string>, IReadOnlyList<McpToolDescriptor>>)((_, __) => extra));
+        }
+
+        /// <summary>
+        /// Scans the current AppDomain and builds the catalog, asking <paramref name="defined"/>
+        /// for the method-less tools once the attribute tools are registered.
+        /// </summary>
+        /// <param name="defined">
+        /// Receives the catalog holding only the attribute tools, and the shared error list, and
+        /// returns the descriptors to add. Definitions that chain or shadow attribute tools need
+        /// to see them before they can be validated, and scanning the AppDomain twice to give them
+        /// a finished catalog would double the cost of every rebuild.
+        /// </param>
+        public static ToolCatalog Build(Func<ToolCatalog, List<string>, IReadOnlyList<McpToolDescriptor>> defined)
         {
             var errors = new List<string>();
             var types = new List<Type>();
@@ -87,7 +121,7 @@ namespace UnityMCP.Editor.Core
                 }
             }
 
-            return BuildFromTypes(types.Where(t => !IsTestFixtureType(t)), errors);
+            return BuildFromTypes(types.Where(t => !IsTestFixtureType(t)), errors, defined);
         }
 
         /// <summary>
@@ -124,7 +158,26 @@ namespace UnityMCP.Editor.Core
         /// <c>/tools</c> catalog whenever the test assembly is loaded.
         /// </para>
         /// </summary>
-        public static ToolCatalog BuildFromTypes(IEnumerable<Type> types, List<string> errors = null)
+        public static ToolCatalog BuildFromTypes(
+            IEnumerable<Type> types,
+            List<string> errors = null,
+            IReadOnlyList<McpToolDescriptor> extra = null)
+        {
+            return BuildFromTypes(
+                types,
+                errors,
+                extra == null ? null : (Func<ToolCatalog, List<string>, IReadOnlyList<McpToolDescriptor>>)((_, __) => extra));
+        }
+
+        /// <summary>
+        /// <see cref="BuildFromTypes(IEnumerable{Type}, List{string}, IReadOnlyList{McpToolDescriptor})"/>
+        /// with the method-less tools produced against the attribute tools; see
+        /// <see cref="Build(Func{ToolCatalog, List{string}, IReadOnlyList{McpToolDescriptor}})"/>.
+        /// </summary>
+        public static ToolCatalog BuildFromTypes(
+            IEnumerable<Type> types,
+            List<string> errors,
+            Func<ToolCatalog, List<string>, IReadOnlyList<McpToolDescriptor>> defined)
         {
             var catalog = new ToolCatalog();
             errors ??= new List<string>();
@@ -157,6 +210,16 @@ namespace UnityMCP.Editor.Core
                 }
             }
 
+            var extra = defined?.Invoke(catalog, errors);
+
+            if (extra != null)
+            {
+                foreach (var descriptor in extra)
+                {
+                    catalog.TryRegisterDefined(descriptor, errors);
+                }
+            }
+
             catalog.Errors = errors;
             return catalog;
         }
@@ -172,12 +235,82 @@ namespace UnityMCP.Editor.Core
         /// consumes this at startup and registers MCP tools from it, so this payload is
         /// the entire tool surface.
         /// </summary>
-        public JObject ToJson()
+        public JObject ToJson(IReadOnlyList<string> groups = null)
         {
             return new JObject
             {
-                ["tools"] = new JArray(this.Tools.Select(t => t.ToCatalogEntry()).Cast<object>().ToArray()),
+                ["tools"] = new JArray(this.Select(groups).Select(t => t.ToCatalogEntry()).Cast<object>().ToArray()),
             };
+        }
+
+        /// <summary>
+        /// The <c>tools</c> array of <see cref="ToJson"/> as text, from each descriptor's cached
+        /// rendering. What <c>GET /tools</c> and <c>tools/list</c> write, since building the tree
+        /// only to serialise it again is most of what those requests would otherwise cost.
+        /// </summary>
+        public string ToolsArrayJson(IReadOnlyList<string> groups, bool mcpShape)
+        {
+            var buffer = new System.Text.StringBuilder(8192);
+            buffer.Append('[');
+
+            var first = true;
+            foreach (var descriptor in this.Select(groups))
+            {
+                if (!first)
+                {
+                    buffer.Append(',');
+                }
+
+                first = false;
+                buffer.Append(mcpShape ? descriptor.McpEntryJson : descriptor.CatalogEntryJson);
+            }
+
+            buffer.Append(']');
+            return buffer.ToString();
+        }
+
+        /// <summary>
+        /// <see cref="ToolsArrayJson"/> as UTF-8, cached per group set, so a request for the
+        /// list allocates nothing after the first one for that set.
+        /// </summary>
+        public byte[] ToolsArrayUtf8(IReadOnlyList<string> groups, bool mcpShape)
+        {
+            var key = (mcpShape ? "mcp|" : "rest|") + GroupKey(groups);
+            return this.renderedUtf8.GetOrAdd(key, _ => System.Text.Encoding.UTF8.GetBytes(this.ToolsArrayJson(groups, mcpShape)));
+        }
+
+        /// <summary>
+        /// The whole <c>GET /tools</c> success envelope as UTF-8, or null when discovery reported
+        /// errors, which the envelope has to carry and which are not worth caching for.
+        /// </summary>
+        public byte[] CatalogEnvelopeUtf8(IReadOnlyList<string> groups)
+        {
+            if (this.Errors.Count > 0)
+            {
+                return null;
+            }
+
+            var key = "envelope|" + GroupKey(groups);
+            return this.renderedUtf8.GetOrAdd(key, _ =>
+            {
+                var array = this.ToolsArrayJson(groups, mcpShape: false);
+                return System.Text.Encoding.UTF8.GetBytes("{\"status\":\"success\",\"result\":{\"tools\":" + array + "}}");
+            });
+        }
+
+        private static string GroupKey(IReadOnlyList<string> groups)
+        {
+            return groups == null || groups.Count == 0
+                ? "*"
+                : string.Join(",", groups.OrderBy(g => g, StringComparer.Ordinal));
+        }
+
+        /// <summary>The tools in the given groups, or every tool when the list is null or empty.</summary>
+        public IEnumerable<McpToolDescriptor> Select(IReadOnlyList<string> groups)
+        {
+            return groups == null || groups.Count == 0
+                ? this.Tools
+                : this.Tools.Where(t => groups.Contains(t.Group));
         }
 
         private static bool ShouldSkipAssembly(Assembly assembly)
@@ -214,14 +347,30 @@ namespace UnityMCP.Editor.Core
             if (this.tools.TryGetValue(attribute.Name, out var existing))
             {
                 errors.Add(
-                    $"Duplicate tool name '{attribute.Name}': {origin} collides with " +
-                    $"{existing.Method.DeclaringType?.FullName}.{existing.Method.Name}.");
+                    $"Duplicate tool name '{attribute.Name}': {origin} collides with {existing.Origin}.");
                 return;
             }
 
             if (method.IsGenericMethodDefinition)
             {
                 errors.Add($"[McpTool] '{attribute.Name}' on {origin} is generic; generic tool methods are not supported.");
+                return;
+            }
+
+            // Undo grouping calls Undo.IncrementCurrentGroup, which only the main thread may do.
+            if (!attribute.MainThread && !string.IsNullOrEmpty(attribute.UndoGroup))
+            {
+                errors.Add(
+                    $"[McpTool] '{attribute.Name}' on {origin} sets UndoGroup with MainThread = false; " +
+                    "Undo is main-thread only, so one of the two has to go.");
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(attribute.Group) && !McpToolGroups.IsKnown(attribute.Group))
+            {
+                errors.Add(
+                    $"[McpTool] '{attribute.Name}' on {origin} names unknown group '{attribute.Group}'. " +
+                    $"Known: {string.Join(", ", McpToolGroups.Known)}.");
                 return;
             }
 
@@ -244,7 +393,7 @@ namespace UnityMCP.Editor.Core
                 {
                     errors.Add(
                         $"[McpTool] '{attribute.Name}' on {origin} declares reserved parameter '{wireName}'. " +
-                        "confirm/dry_run/target are injected by the invoker.");
+                        "confirm and dry_run are added by the invoker to destructive tools, and target is the client's routing key.");
                     return;
                 }
 
@@ -284,18 +433,7 @@ namespace UnityMCP.Editor.Core
 
             if (attribute.Destructive)
             {
-                properties["confirm"] = new JObject
-                {
-                    ["type"] = "boolean",
-                    ["description"] = "Must be true to actually perform this destructive operation.",
-                    ["default"] = false,
-                };
-                properties["dry_run"] = new JObject
-                {
-                    ["type"] = "boolean",
-                    ["description"] = "Report what the operation would affect without performing it.",
-                    ["default"] = false,
-                };
+                AppendConfirmationProperties(properties);
             }
 
             var inputSchema = new JObject
@@ -320,6 +458,101 @@ namespace UnityMCP.Editor.Core
             }
 
             this.tools[attribute.Name] = new McpToolDescriptor(attribute, method, parameters, inputSchema);
+        }
+
+        /// <summary>
+        /// The two flags the invoker injects into every destructive tool's schema.
+        /// </summary>
+        internal static void AppendConfirmationProperties(JObject properties)
+        {
+            properties["confirm"] = new JObject
+            {
+                ["type"] = "boolean",
+                ["description"] = "Must be true to actually perform this destructive operation.",
+                ["default"] = false,
+            };
+            properties["dry_run"] = new JObject
+            {
+                ["type"] = "boolean",
+                ["description"] = "Report what the operation would affect without performing it.",
+                ["default"] = false,
+            };
+        }
+
+        /// <summary>
+        /// Registers a tool that carries its own body instead of a discovered method, under the
+        /// same rules an attribute tool has to pass.
+        /// </summary>
+        /// <remarks>
+        /// A tool loaded from outside the assembly is the one most likely to be malformed, and a
+        /// client cannot tell a tool that failed to register from one that was never written, so
+        /// every refusal names the tool and where it came from.
+        /// </remarks>
+        private void TryRegisterDefined(McpToolDescriptor descriptor, List<string> errors)
+        {
+            var origin = descriptor.Origin;
+
+            if (string.IsNullOrEmpty(descriptor.Name) || !NamePattern.IsMatch(descriptor.Name))
+            {
+                errors.Add(
+                    $"Defined tool from {origin} has invalid name '{descriptor.Name}'. " +
+                    "Names must match ^[a-z][a-z0-9_]{0,63}$ (dots are not valid in MCP tool names).");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(descriptor.Description))
+            {
+                errors.Add($"Defined tool '{descriptor.Name}' from {origin} has an empty description.");
+                return;
+            }
+
+            if (this.tools.TryGetValue(descriptor.Name, out var existing))
+            {
+                errors.Add(
+                    $"Defined tool '{descriptor.Name}' from {origin} collides with {existing.Origin}; " +
+                    "the earlier registration wins.");
+                return;
+            }
+
+            if (descriptor.InputSchema?["properties"] is JObject properties)
+            {
+                foreach (var property in properties)
+                {
+                    // confirm and dry_run are the invoker's own flags, which a destructive tool
+                    // publishes precisely because the invoker reads them.
+                    if (descriptor.Destructive && (property.Key == "confirm" || property.Key == "dry_run"))
+                    {
+                        continue;
+                    }
+
+                    if (ReservedParameterNames.Contains(property.Key))
+                    {
+                        errors.Add(
+                            $"Defined tool '{descriptor.Name}' from {origin} declares reserved parameter " +
+                            $"'{property.Key}'. confirm and dry_run are added by the invoker to destructive tools, and target is the client's routing key.");
+                        return;
+                    }
+                }
+            }
+
+            if (!McpToolGroups.IsKnown(descriptor.Group))
+            {
+                errors.Add(
+                    $"Defined tool '{descriptor.Name}' from {origin} names unknown group '{descriptor.Group}'. " +
+                    $"Known: {string.Join(", ", McpToolGroups.Known)}.");
+                return;
+            }
+
+            // Undo grouping calls Undo.IncrementCurrentGroup, which only the main thread may do.
+            if (!descriptor.MainThread && !string.IsNullOrEmpty(descriptor.UndoGroup))
+            {
+                errors.Add(
+                    $"Defined tool '{descriptor.Name}' from {origin} sets UndoGroup with MainThread = false; " +
+                    "Undo is main-thread only, so one of the two has to go.");
+                return;
+            }
+
+            this.tools[descriptor.Name] = descriptor;
         }
 
         /// <summary>
@@ -445,9 +678,26 @@ namespace UnityMCP.Editor.Core
                 }
             }
 
-            if (typeof(JToken).IsAssignableFrom(underlying))
+            if (underlying == typeof(JObject))
             {
                 return new JObject { ["type"] = "object" };
+            }
+
+            if (underlying == typeof(JArray))
+            {
+                return new JObject { ["type"] = "array" };
+            }
+
+            // JToken and JValue accept any JSON value, and inspect_write's own examples pass a
+            // number. Declaring "object" for them makes a schema-validating client refuse the
+            // call before it reaches the Editor. The types are listed rather than omitted
+            // because a client that requires the key would otherwise have nothing to read.
+            if (typeof(JToken).IsAssignableFrom(underlying))
+            {
+                return new JObject
+                {
+                    ["type"] = new JArray("string", "number", "integer", "boolean", "object", "array", "null"),
+                };
             }
 
             // Anything else is passed through as a JSON object and deserialized by
