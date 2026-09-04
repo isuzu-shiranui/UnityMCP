@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Commands;
@@ -44,7 +45,17 @@ public sealed class ProgramTests
         var (context, output, _) = Context();
 
         Assert.Equal(0, await Program.Run(["--version"], context));
-        Assert.Equal("4.0.0" + Environment.NewLine, output.ToString());
+
+        // Read from the assembly rather than written here as a literal. A literal has to be
+        // edited on every release, and the edit that gets forgotten fails the build over the
+        // test's own staleness rather than over anything the CLI did. What is left to assert is
+        // the part with logic in it: the build metadata after '+' is stripped.
+        var informational = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+
+        Assert.Equal(informational.Split('+')[0] + Environment.NewLine, output.ToString());
+        Assert.DoesNotContain("+", output.ToString());
+        Assert.Matches(@"^\d+\.\d+\.\d+", output.ToString());
     }
 
     [Fact]
