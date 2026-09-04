@@ -311,6 +311,21 @@ jobs:
             console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented and counted in docs/tools.md, docs/en/tools.md and both READMEs');
           "
 
+      # The install scripts are fetched and piped into a shell, so their first byte is parsed
+      # rather than displayed. A UTF-8 BOM there makes PowerShell read the leading param block as
+      # an assignment and refuse the whole script, which breaks the install line the READMEs and
+      # the guide print while the file still looks correct in every editor.
+      - name: Install scripts have no byte order mark
+        run: |
+          STATUS=0
+          for f in install.ps1 install.sh; do
+            if [ "$(head -c 3 "$f" | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
+              echo "$f starts with a UTF-8 BOM; it is piped into a shell and will fail to parse"
+              STATUS=1
+            fi
+          done
+          exit $STATUS
+
       # The endpoint is the whole contract between the CLI and the Editor. A client configured
       # by hand against the wrong path gets a connection that opens and then answers nothing.
       - name: Endpoint documented
