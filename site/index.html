@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Unity MCP のはじめかた</title>
-<meta name="description" content="Unity Editor と Claude をつなぐ Unity MCP の導入手順です。アバターを作りたいだけの人は、コマンドを一行も打たずに導入できます。">
+<meta name="description" content="Unity Editor と AI エージェントをつなぐ Unity MCP の導入手順です。コマンドを一行も打たずに入れる方法と、コマンドラインから使う方法の 2 通りを載せています。">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -18,194 +18,194 @@
 
   <header class="hero">
     <h1>Unity MCP のはじめかた</h1>
-    <p class="tagline">Unity Editor を Claude につなぐパッケージです。話しかけるだけで、シーンの中を見たり、オブジェクトを追加したり、Console に出たエラーを読んだりできます。</p>
-    <p class="headline">アバターを作りたいだけの人は、コマンドを一行も打たずに導入できます。ターミナルを開く必要はありません。</p>
+    <p class="tagline">Unity Editor を AI エージェントにつなぐパッケージです。話しかけると、シーンの中を見たり、オブジェクトを追加したり、Console に出たエラーを読んだりします。Claude Code、Claude Desktop、Cursor、Codex、Gemini CLI、VS Code から使えます。</p>
+    <p class="headline">コマンドを一行も打たずに入れる方法があります。ターミナルを開く必要はありません。</p>
+
+    <figure class="hero-shot">
+      <img src="img/preferences-ja.png" alt="Preferences の Unity MCP のページのスクリーンショット。セットアップの一番上の行が、チェック印つきで「ポート 27400 で待ち受けています」になっている。">
+      <figcaption>ここが目指す画面です。セットアップの一番上が <span class="live">✓</span> になれば、Unity 側は待ち受けています。</figcaption>
+    </figure>
   </header>
 
-  <section class="prereq" aria-labelledby="prereq-title">
-    <h2 id="prereq-title">必要なもの</h2>
-    <ul>
-      <li>Unity Editor 2022.3 以降</li>
-      <li>Git（<a href="https://git-scm.com/download/win">git-scm.com</a> から入れます）。手順 1 で Unity がパッケージを取ってくるのに使います。入れていないと Package Manager が「No 'git' executable was found」と出して止まります。インストーラーの設定は既定のままで構いません。VCC または ALCOM をお使いの場合は、次の節の方法で入れられるので Git は要りません</li>
-      <li>Claude Desktop（コマンドを打たない手順で使います）。Windows と macOS 向けに配布されています。Linux をお使いの場合は B の手順を選んでください</li>
-      <li>使っている間は、対象のプロジェクトを Unity Editor で開いたままにしておくこと</li>
-    </ul>
-  </section>
-
-  <section class="prereq" aria-labelledby="vpm-title">
-    <h2 id="vpm-title">VCC・ALCOM をお使いの場合</h2>
-    <p>VRChat Creator Companion（VCC）または ALCOM でプロジェクトを管理しているなら、VPM リポジトリから入れられます。<strong>この方法に Git は要りません。</strong>VCC と ALCOM はパッケージを zip でダウンロードするので、Unity の Package Manager のように Git を呼び出さないためです。</p>
-    <p>次のリンクを押すと VCC または ALCOM が開き、リポジトリを追加してよいか確認する画面が出ます。VCC は 2.1.0 以降が必要です。</p>
-    <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Unity MCP のリポジトリを追加する</a></p>
-    <p>リンクを押しても何も起きない場合は、URL を貼り付けて追加します。VCC では Settings ページの Packages タブにある Add Repository ボタン、ALCOM では「パッケージ&amp;テンプレート」の「VPMリポジトリ」ページにある「VPMリポジトリを追加」ボタンです。</p>
-    <span class="code-label">リポジトリの URL</span>
-    <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
-    <p>リポジトリを追加すると、プロジェクトのパッケージ一覧に Unity MCP が並びます。そこで追加してください。</p>
-    <p class="aside">この方法で入れた場合は、下の手順 A と手順 B の 1 番目を飛ばして、2 番目から読んでください。</p>
-  </section>
-
-  <nav class="chooser" aria-label="手順の選択">
-    <a class="card card-a" href="#avatar">
-      <span class="card-kicker">A</span>
-      <h2>アバターを作りたいだけの人</h2>
-      <p>Unity と Claude Desktop だけで終わります。コマンドは一行も打ちません。</p>
-      <span class="card-go">この手順を見る</span>
-    </a>
-    <a class="card card-b" href="#dev">
-      <span class="card-kicker">B</span>
-      <h2>開発もする人</h2>
-      <p>コマンドラインのツールを入れて、Claude Code から使います。</p>
-      <span class="card-go">この手順を見る</span>
-    </a>
-  </nav>
-
-  <section class="route route-a" id="avatar" aria-labelledby="avatar-title">
-    <h2 id="avatar-title">A. アバターを作りたいだけの人</h2>
-    <p class="route-note">全部で 5 手順です。<strong>この手順にコマンドは出てきません。</strong></p>
-
-    <ol class="steps">
-
-      <li>
-        <h3>Unity にパッケージを入れます</h3>
-        <p>Unity Editor のメニューから Window &gt; Package Manager を開きます。左上の + ボタンを押して Add package from git URL を選び、次の URL を貼り付けて Add を押します。</p>
-        <span class="code-label">貼り付ける URL</span>
-        <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
-        <figure class="shot">
-          <img src="img/package-manager.png" alt="Unity の Package Manager の一覧に Unity MCP パッケージが追加された状態のスクリーンショット。">
-          <figcaption>追加が終わると、Package Manager の一覧に Unity MCP が並びます。</figcaption>
-        </figure>
-        <p class="aside">上の「VCC・ALCOM をお使いの場合」の方法で入れたなら、この手順は要りません。次の手順へ進んでください。</p>
-      </li>
-
-      <li>
-        <h3>動いていることを確かめます</h3>
-        <p>Unity Editor の Preferences を開き、左の一覧から Unity MCP を選びます。Windows では Edit メニューの中にあります。Setup の一番上の行が「✓ ポート … で待ち受けています」になっていれば、Unity 側の準備は終わりです。</p>
-        <figure class="shot">
-          <img src="img/preferences-ja.png" alt="Preferences の Unity MCP のページのスクリーンショット。セットアップの一番上の行が「✓ ポート 27400 で待ち受けています」になっている。">
-          <figcaption>セットアップの一番上が ✓ になっていれば、Unity 側は待ち受けています。2 行目の CLI は、手順 A では要りません。</figcaption>
-        </figure>
-        <p class="aside">サーバーはプロジェクトを開いたときに自動で起動します。自分で開始する操作は要りません。</p>
-      </li>
-
-      <li>
-        <h3>拡張機能をダウンロードします</h3>
-        <p><a href="https://github.com/isuzu-shiranui/UnityMCP/releases">GitHub の Releases ページ</a>を開き、<code>isuzu-unity-cli.mcpb</code> というファイルをダウンロードします。</p>
-        <!-- TODO: replace after the first release -->
-        <figure class="shot">
-          <div class="placeholder" role="img" aria-label="Releases ページの Assets の一覧に isuzu-unity-cli.mcpb が並んでいる画面。最初のリリース後に実際のスクリーンショットへ差し替えます。">
-            <span class="placeholder-label">スクリーンショットは最初のリリース後に載せます</span>
-          </div>
-          <figcaption>Releases ページの Assets という一覧に <code>isuzu-unity-cli.mcpb</code> が並びます。その名前をクリックするとダウンロードが始まります。</figcaption>
-        </figure>
-      </li>
-
-      <li>
-        <h3>ダブルクリックして Claude Desktop に入れます</h3>
-        <p>ダウンロードしたファイルをダブルクリックすると、Claude Desktop が拡張機能の導入画面を出します。Unity project name の欄は、Unity を 1 つだけ開いているなら空欄のままで構いません。</p>
-        <!-- TODO: replace after the first release -->
-        <figure class="shot">
-          <div class="placeholder" role="img" aria-label="Claude Desktop が拡張機能を導入するときに出す確認画面。Unity project name の入力欄が含まれます。最初のリリース後に実際のスクリーンショットへ差し替えます。">
-            <span class="placeholder-label">スクリーンショットは最初のリリース後に載せます</span>
-          </div>
-          <figcaption>Claude Desktop が導入の確認画面を出し、Unity project name の入力欄が表示されます。空欄のまま進められます。</figcaption>
-        </figure>
-        <p class="aside">この拡張機能は自己署名です。Claude Desktop は導入時に、署名されていない拡張機能である旨の警告をログに書きます。動作には影響しません。ファイルをウィンドウにドラッグしても、Settings &gt; Extensions &gt; Advanced settings &gt; Install Extension から選んでも、結果は同じです。</p>
-        <p class="aside">ダブルクリックしても画面がすぐ閉じてしまう場合は、Microsoft Store 版の Claude Desktop で知られている症状です。ファイルの拡張子を <code>.zip</code> に変えて展開してください。同じ画面の Install Unpacked Extension で、そのフォルダーを選びます。</p>
-      </li>
-
-      <li>
-        <h3>話しかけます</h3>
-        <p>対象のプロジェクトを Unity Editor で開いたまま、Claude Desktop に用件を書きます。Unity Editor を閉じていると何も動きません。</p>
-        <!-- TODO: replace after the first release -->
-        <figure class="shot">
-          <div class="placeholder" role="img" aria-label="Claude Desktop で Unity のシーンについて質問し、答えが返ってきている会話の画面。最初のリリース後に実際のスクリーンショットへ差し替えます。">
-            <span class="placeholder-label">スクリーンショットは最初のリリース後に載せます</span>
-          </div>
-          <figcaption>Unity のシーンについて尋ねると、Claude が Unity Editor のツールを呼び出して答えます。</figcaption>
-        </figure>
-      </li>
-
-    </ol>
-  </section>
-
-  <section class="route route-b" id="dev" aria-labelledby="dev-title">
-    <h2 id="dev-title">B. 開発もする人</h2>
-    <p class="route-note">コマンドラインのツール <code>isuzu-unity-cli</code> を入れて、Claude Code から使います。配布している実行ファイルはネイティブなので、Node.js も .NET ランタイムも要りません。</p>
-
-    <ol class="steps">
-
-      <li>
-        <h3>Unity にパッケージを入れます</h3>
-        <p>手順 A の 1 番目と同じです。Window &gt; Package Manager を開き、Add package from git URL に次の URL を貼り付けます。</p>
-        <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
-        <p class="aside">上の「VCC・ALCOM をお使いの場合」の方法で入れたなら、この手順は要りません。</p>
-      </li>
-
-      <li>
-        <h3>コマンドラインのツールを入れます</h3>
-        <p>ターミナルで次の 1 行を実行します。</p>
-        <span class="code-label">Windows（PowerShell）</span>
-        <pre><code>irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 | iex</code></pre>
-        <span class="code-label">macOS / Linux</span>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh</code></pre>
-        <p class="aside">.NET SDK が入っている場合は <code>dotnet tool install -g IsuzuUnityCli</code> でも入ります。<a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases</a> から実行ファイルを直接ダウンロードすることもできます。Editor の Preferences &gt; Unity MCP にある Install CLI ボタンは、ターミナルを開いてこのインストールスクリプトを実行します。</p>
-      </li>
-
-      <li>
-        <h3>エージェント向けのスキルを入れます</h3>
-        <p>Claude Code と Codex 向けのスキルを導入します。</p>
-        <pre><code>isuzu-unity-cli setup</code></pre>
-      </li>
-
-      <li>
-        <h3>Claude Code に登録します</h3>
-        <p><strong>次の 1 行で、接続先の URL とトークンの登録まで終わります。</strong>トークンを自分で扱う必要はありません。</p>
-        <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
-        <p class="aside"><code>--agent</code> には <code>claude-code</code>、<code>claude-desktop</code>、<code>codex</code>、<code>cursor</code>、<code>gemini</code>、<code>vscode</code> を指定できます。実行するには Unity Editor が起動している必要があります。全コマンドは <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/cli.md">CLI リファレンス</a>、クライアントごとの設定は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">MCP クライアントの接続</a> にあります。</p>
-      </li>
-
-    </ol>
-  </section>
-
-  <section class="can-do" aria-labelledby="can-do-title">
-    <h2 id="can-do-title">つながると何ができるか</h2>
-    <ul>
-      <li>シーンの階層を読み、目的の GameObject を探します。</li>
-      <li>GameObject を作り、コンポーネントを追加し、位置や回転や大きさを変えます。</li>
-      <li>Inspector に出ているシリアライズプロパティを読み書きします。</li>
-      <li>Console のエラーと警告を読みます。<code>Editor.log</code> を直接読むこともできます。</li>
-      <li>Game ビューや Scene ビューのスクリーンショットを撮ります。</li>
-      <li>マテリアルの現在の値を読み、変更します。</li>
-      <li>Play Mode を開始したり停止したりします。</li>
-    </ul>
-    <p>Unity Editor は最大で 88 個のツールを公開します。Timeline と Recorder のツールは、それぞれのパッケージが入っているプロジェクトにだけ現れます。どちらも入っていないプロジェクトが公開するのは 75 個のツールです。一覧は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/tools.md">ツール一覧</a> にあります。</p>
-  </section>
-
-  <section class="trouble" aria-labelledby="trouble-title">
-    <h2 id="trouble-title">困ったとき</h2>
-    <div class="trouble-list">
-
-      <div class="trouble-item">
-        <h3>Unity Editor が開いていない</h3>
-        <p>ツールはすべて起動中の Unity Editor に対して動くので、Editor を閉じていると何も返ってきません。プロジェクトを開き直し、Preferences &gt; Unity MCP の Status が Listening になっていることを確かめてください。</p>
-      </div>
-
-      <div class="trouble-item">
-        <h3>複数のプロジェクトを開いている</h3>
-        <p>Unity Editor を複数起動していると、どのプロジェクトにつなぐかが決まりません。Claude Desktop の拡張機能の設定にあるプロジェクト名の欄に、Unity Editor のタイトルバーに出ている名前を入れてください。Player Settings の Product Name でも通ります。どちらの名前でも複数の Editor に当たってしまう場合は、他の Editor を閉じるのが確実です。</p>
-        <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">クライアントごとの設定を読む</a>
-      </div>
-
-      <div class="trouble-item">
-        <h3>ツールが出てこない</h3>
-        <p>パッケージの追加や削除でツールが増減しても、その通知はクライアントに送られません。Claude Desktop や Claude Code を接続し直してください。</p>
-        <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/troubleshooting.md">トラブルシューティングを読む</a>
-      </div>
-
+  <section class="band">
+    <h2 class="band-label">必要なもの</h2>
+    <div class="band-body">
+      <ul class="prereq">
+        <li>Unity Editor 2022.3 以降。</li>
+        <li>Git（<a href="https://git-scm.com/download/win">git-scm.com</a> から入れます）。手順 1 で Unity がパッケージを取ってくるのに使います。入れていないと Package Manager が「No 'git' executable was found」と出して止まります。インストーラーの設定は既定のままで構いません。VCC または ALCOM をお使いの場合は、次の節の方法で入れられるので Git は要りません。</li>
+        <li>手順 A では Claude Desktop を使います。拡張機能の形式が Claude Desktop のものだからです。Windows と macOS 向けに配布されています。Linux をお使いの場合は手順 B を選んでください。</li>
+        <li>使っている間は、対象のプロジェクトを Unity Editor で開いたままにしておくこと。</li>
+      </ul>
     </div>
   </section>
 
-  <footer>
+  <section class="band" id="vpm" aria-labelledby="vpm-title">
+    <h2 class="band-label" id="vpm-title">VCC・ALCOM</h2>
+    <div class="band-body">
+      <p>VRChat Creator Companion（VCC）または ALCOM でプロジェクトを管理しているなら、VPM リポジトリから入れられます。この方法に Git は要りません。VCC と ALCOM はパッケージを zip でダウンロードするので、Unity の Package Manager のように Git を呼び出さないためです。</p>
+
+      <p>次のリンクを押すと VCC または ALCOM が開き、リポジトリを追加してよいか確認する画面が出ます。VCC は 2.1.0 以降が必要です。</p>
+
+      <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Unity MCP のリポジトリを追加する</a></p>
+
+      <p class="code-label">リンクが働かないときは、この URL を貼り付けて追加します</p>
+      <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
+
+      <p class="aside">貼り付ける場所は、VCC では Settings ページの Packages タブにある Add Repository ボタンです。ALCOM では「パッケージ&amp;テンプレート」の「VPMリポジトリ」ページにある「VPMリポジトリを追加」ボタンです。追加すると、プロジェクトのパッケージ一覧に Unity MCP が並びます。この方法で入れた場合は、下の手順 A と手順 B の 1 番目を飛ばして、2 番目から読んでください。</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">入れ方</h2>
+    <div class="band-body">
+      <ul class="chooser">
+        <li>
+          <a href="#no-cli">
+            <span class="mark">A</span>
+            <span>
+              <strong>コマンドを使わずに入れる</strong>
+              <span class="why">必要なのは Unity と Claude Desktop の 2 つです。コマンドは一行も打ちません。</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a href="#cli">
+            <span class="mark">B</span>
+            <span>
+              <strong>コマンドラインから使う</strong>
+              <span class="why">コマンドラインのツールを入れて、Claude Code や Cursor、Codex などから使います。</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" id="no-cli" aria-labelledby="no-cli-title">
+    <h2 class="band-label" id="no-cli-title">A. コマンドを<br>使わずに入れる</h2>
+    <div class="band-body">
+      <p>全部で 5 手順です。この手順にコマンドは出てきません。</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Unity にパッケージを入れます</h3>
+          <p>Unity Editor のメニューから Window &gt; Package Manager を開きます。左上の + ボタンを押して Add package from git URL を選び、次の URL を貼り付けて Add を押します。</p>
+          <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+          <figure class="shot">
+            <img src="img/package-manager.png" alt="Unity の Package Manager の一覧に Unity MCP が追加され、選択された状態のスクリーンショット。">
+            <figcaption>追加が終わると、Package Manager の一覧に Unity MCP が並びます。</figcaption>
+          </figure>
+          <p class="aside">上の「VCC・ALCOM」の方法で入れたなら、この手順は要りません。次へ進んでください。</p>
+        </li>
+
+        <li>
+          <h3>動いていることを確かめます</h3>
+          <p>Unity Editor の Preferences を開き、左の一覧から Unity MCP を選びます。Windows では Edit メニューの中にあります。セットアップの一番上の行が「✓ ポート … で待ち受けています」になっていれば、Unity 側の準備は終わりです。</p>
+          <p class="aside">サーバーはプロジェクトを開いたときに自動で起動します。自分で開始する操作は要りません。2 行目の CLI は、この手順では要りません。</p>
+        </li>
+
+        <li>
+          <h3>拡張機能をダウンロードします</h3>
+          <p>GitHub の <a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases ページ</a>を開き、<code>isuzu-unity-cli.mcpb</code> というファイルをダウンロードします。</p>
+          <figure class="shot">
+            <img src="img/releases-assets.png" alt="GitHub の Releases ページの Assets 一覧のスクリーンショット。isuzu-unity-cli.mcpb を含む 11 個のファイルが並んでいる。">
+            <figcaption>Releases ページの Assets という一覧に <code>isuzu-unity-cli.mcpb</code> が並びます。その名前をクリックするとダウンロードが始まります。</figcaption>
+          </figure>
+        </li>
+
+        <li>
+          <h3>ダブルクリックして Claude Desktop に入れます</h3>
+          <p>ダウンロードしたファイルをダブルクリックすると、Claude Desktop が拡張機能の導入画面を出します。Unity project name の欄は、Unity を 1 つだけ開いているなら空欄のままで構いません。</p>
+          <p class="aside">この拡張機能は自己署名です。Claude Desktop は導入時に、署名されていない拡張機能である旨の警告をログに書きます。動作には影響しません。ファイルをウィンドウにドラッグしても、Settings &gt; Extensions &gt; Advanced settings &gt; Install Extension から選んでも、結果は同じです。</p>
+          <p class="aside">ダブルクリックしても画面がすぐ閉じてしまう場合は、Microsoft Store 版の Claude Desktop で知られている症状です。ファイルの拡張子を <code>.zip</code> に変えて展開してください。同じ画面の Install Unpacked Extension で、そのフォルダーを選びます。</p>
+        </li>
+
+        <li>
+          <h3>話しかけます</h3>
+          <p>対象のプロジェクトを Unity Editor で開いたまま、Claude Desktop に用件を書きます。Unity Editor を閉じていると何も動きません。</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band" id="cli" aria-labelledby="cli-title">
+    <h2 class="band-label" id="cli-title">B. コマンド<br>ラインから使う</h2>
+    <div class="band-body">
+      <p>コマンドラインのツール <code>isuzu-unity-cli</code> を入れます。配布している実行ファイルはネイティブなので、Node.js も .NET ランタイムも要りません。</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Unity にパッケージを入れます</h3>
+          <p>手順 A の 1 番目と同じです。Window &gt; Package Manager を開き、Add package from git URL に次の URL を貼り付けます。</p>
+          <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+          <p class="aside">上の「VCC・ALCOM」の方法で入れたなら、この手順は要りません。</p>
+        </li>
+
+        <li>
+          <h3>コマンドラインのツールを入れます</h3>
+          <p>ターミナルで次の 1 行を実行します。</p>
+          <p class="code-label">Windows（PowerShell）</p>
+          <pre><code>irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 | iex</code></pre>
+          <p class="code-label">macOS / Linux</p>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh</code></pre>
+          <p class="aside">.NET SDK が入っている場合は <code>dotnet tool install -g IsuzuUnityCli</code> でも入ります。<a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases</a> から実行ファイルを直接ダウンロードすることもできます。Editor の Preferences &gt; Unity MCP にある「インストール」ボタンからも入ります。</p>
+        </li>
+
+        <li>
+          <h3>エージェント向けのスキルを入れます</h3>
+          <p>Claude Code と Codex 向けのスキルを導入します。</p>
+          <pre><code>isuzu-unity-cli setup</code></pre>
+        </li>
+
+        <li>
+          <h3>クライアントに登録します</h3>
+          <p>次の 1 行で、接続先の URL とトークンの登録まで終わります。トークンを自分で扱う必要はありません。</p>
+          <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
+          <p class="aside"><code>--agent</code> には <code>claude-code</code>、<code>claude-desktop</code>、<code>codex</code>、<code>cursor</code>、<code>gemini</code>、<code>vscode</code> を指定できます。実行するには Unity Editor が起動している必要があります。全コマンドは <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/cli.md">CLI リファレンス</a>、クライアントごとの設定は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">MCP クライアントの接続</a> にあります。</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">できること</h2>
+    <div class="band-body">
+      <ul class="can-do">
+        <li>シーンの階層を読み、目的の GameObject を探します。</li>
+        <li>GameObject を作り、コンポーネントを追加し、位置や回転や大きさを変えます。</li>
+        <li>Inspector に出ているシリアライズプロパティを読み書きします。</li>
+        <li>Console のエラーと警告を読みます。Editor.log を直接読むこともできます。</li>
+        <li>Game ビューや Scene ビューのスクリーンショットを撮ります。</li>
+        <li>マテリアルの現在の値を読み、変更します。</li>
+        <li>Play Mode を開始したり停止したりします。</li>
+      </ul>
+      <p>Unity Editor は最大で 88 個のツールを公開します。Timeline と Recorder のツールは、それぞれのパッケージが入っているプロジェクトにだけ現れます。どちらも入っていないプロジェクトが公開するのは 75 個のツールです。一覧は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/tools.md">ツール一覧</a> にあります。</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">困ったとき</h2>
+    <div class="band-body">
+      <ul class="trouble-list">
+        <li class="trouble-item">
+          <h3>Unity Editor が開いていない</h3>
+          <p>ツールはすべて起動中の Unity Editor に対して動くので、Editor を閉じていると何も返ってきません。プロジェクトを開き直し、Preferences &gt; Unity MCP のセットアップの一番上が ✓ になっていることを確かめてください。</p>
+        </li>
+        <li class="trouble-item">
+          <h3>複数のプロジェクトを開いている</h3>
+          <p>Unity Editor を複数起動していると、どのプロジェクトにつなぐかが決まりません。Claude Desktop の拡張機能の設定にあるプロジェクト名の欄に、Unity Editor のタイトルバーに出ている名前を入れてください。Player Settings の Product Name でも通ります。どちらの名前でも複数の Editor に当たってしまう場合は、他の Editor を閉じるのが確実です。</p>
+          <a class="more" href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">クライアントごとの設定を読む</a>
+        </li>
+        <li class="trouble-item">
+          <h3>ツールが出てこない</h3>
+          <p>パッケージの追加や削除でツールが増減しても、その通知はクライアントに送られません。使っているクライアントを接続し直してください。</p>
+          <a class="more" href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/troubleshooting.md">トラブルシューティングを読む</a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
     <ul>
       <li><a href="https://github.com/isuzu-shiranui/UnityMCP">リポジトリ</a></li>
       <li><a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/README.md">README</a></li>
