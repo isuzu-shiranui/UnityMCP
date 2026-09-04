@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 
 using UnityEditor;
 using UnityEngine;
@@ -438,10 +439,22 @@ namespace UnityMCP.Editor.Settings
             {
                 if (Application.platform == RuntimePlatform.WindowsEditor)
                 {
+                    // Security software refuses to create a process whose command line downloads
+                    // and runs a script in one expression, and the refusal arrives as an access
+                    // denied from Process.Start rather than anything the terminal could show.
+                    // Fetching the script here and handing the terminal a path avoids that shape,
+                    // and leaves the script on disk to read when an install fails.
+                    var script = Path.Combine(Path.GetTempPath(), "isuzu-unity-cli-install.ps1");
+
+                    using (var client = new System.Net.WebClient())
+                    {
+                        client.DownloadFile(IsuzuCliLocator.InstallScriptUrlWindows, script);
+                    }
+
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = "powershell.exe",
-                        Arguments = $"-NoExit -ExecutionPolicy Bypass -Command \"irm {IsuzuCliLocator.InstallScriptUrlWindows} | iex\"",
+                        Arguments = $"-NoExit -ExecutionPolicy Bypass -File \"{script}\"",
                         UseShellExecute = true,
                     });
                 }

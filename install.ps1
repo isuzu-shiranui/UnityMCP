@@ -1,4 +1,4 @@
-﻿#requires -version 5.1
+#requires -version 5.1
 <#
 .SYNOPSIS
   Installs isuzu-unity-cli from GitHub Releases (isuzu-shiranui/UnityMCP).
