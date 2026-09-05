@@ -32,7 +32,8 @@
   cost the whole file: for Claude Code that is the login, all of the project keys, every tool
   grant and the prompt history, none of it reconstructable. The new content is written beside it
   and renamed over it, which is atomic on Windows and on POSIX, and the file it replaces is kept
-  as `.isuzu-bak`.
+  as `.isuzu-bak`. Codex's TOML was written the same unsafe way and goes through the same path
+  now.
 - Two configs killed the process instead of being reported. A string holding a lone surrogate is
   legal JSON and cannot be encoded as UTF-8; duplicate keys are legal JSON too, and `JsonNode`
   accepts them and throws only when the dictionary is built on the first lookup, deep inside a

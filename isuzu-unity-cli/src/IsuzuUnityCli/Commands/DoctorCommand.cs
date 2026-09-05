@@ -555,7 +555,7 @@ public static class DoctorCommand
         {
             var existing = File.Exists(report.ConfigPath) ? File.ReadAllText(report.ConfigPath, Encoding.UTF8) : "";
             var updated = TomlConfigEditor.Upsert(existing, McpServerEntry.TomlTableName(), McpServerEntry.TomlBody(descriptor));
-            File.WriteAllText(report.ConfigPath, updated, new UTF8Encoding(false));
+            JsonConfigEditor.WriteText(report.ConfigPath, updated);
             return;
         }
 

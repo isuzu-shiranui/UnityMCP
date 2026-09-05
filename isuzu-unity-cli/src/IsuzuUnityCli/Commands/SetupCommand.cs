@@ -158,8 +158,7 @@ public static class SetupCommand
                     Directory.CreateDirectory(directory);
                 }
 
-                File.WriteAllText(configPath, updated, new UTF8Encoding(false));
-                JsonConfigEditor.RestrictToOwner(configPath);
+                JsonConfigEditor.WriteText(configPath, updated);
             }
             else
             {
