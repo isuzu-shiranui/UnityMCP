@@ -17,6 +17,9 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- The READMEs and the client guide say where Claude Code has to be started. The server is
+  filed under the Unity project'''s own path, which is what lets one machine hold several Unity
+  projects at once, and a session started anywhere else does not see it. Nothing said so.
 - The version badge in both READMEs still read 4.0.0.
 - `setup --mcp --agent claude-code` registered the server where Claude Code never looks, on
   Windows. Claude Code keys its `projects` map with forward slashes; `Path.GetFullPath` returns

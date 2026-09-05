@@ -98,6 +98,8 @@ claude mcp add --transport http isuzu-unity http://127.0.0.1:<port>/mcp --header
 isuzu-unity-cli setup --mcp --agent claude-code
 ```
 
+Claude Code はサーバーを Unity プロジェクトのパスの下に登録します。Unity プロジェクトのフォルダーで起動してください。別の場所で起動すると見えません。
+
 `--agent` は `claude-code` / `claude-desktop` / `codex` / `cursor` / `gemini` / `vscode` から選べます。
 
 Claude Desktop には拡張機能バンドルもあります。[Releases](https://github.com/isuzu-shiranui/UnityMCP/releases) の `isuzu-unity-cli.mcpb` をダブルクリックすると入ります。
