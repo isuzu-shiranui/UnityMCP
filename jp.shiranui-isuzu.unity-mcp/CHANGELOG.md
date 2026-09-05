@@ -26,6 +26,16 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- The guard that keeps a backup beside an unreadable config now holds for Codex's TOML as well.
+  Reading a file's bytes says nothing about whether they parse, and a config that does not parse
+  is exactly the one whose copy is the only way back.
+- A config edit that failed keeps the backup it would have needed. The sweep of leftover files ran
+  whatever happened to the edits before it, so a write that could not complete took the copy that
+  could have restored it.
+- A config reached through a symbolic link stays a link. Renaming over one replaces it with a
+  plain file and leaves whatever it pointed at untouched, so a config kept in a dotfiles
+  repository was detached by the edit — a regression from 4.0.3, which wrote through it.
+
 - A capture fetched through `job_status` is an image, not a wall of base64. Answered inline the
   PNG sits at the top of the reply; through a job it sits under `result`, because that reply is
   the job's detail rather than the tool's own, and the conversion looked only at the top. The
