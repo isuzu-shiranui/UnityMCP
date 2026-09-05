@@ -26,6 +26,22 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- A capture fetched through `job_status` is an image, not a wall of base64. Answered inline the
+  PNG sits at the top of the reply; through a job it sits under `result`, because that reply is
+  the job's detail rather than the tool's own, and the conversion looked only at the top. The
+  same screenshot arrived as an image when the Editor was idle and as text when it was busy.
+- `uninstall` leaves the backup beside a config it cannot read. A config that fails to parse
+  reads as "no entry to remove", so the run took away the one copy that could restore it — other
+  servers and settings included — and reported success. Not existing and not being readable are
+  different answers now.
+- The temporary file a write uses is named per process and per call, and is removed when the
+  rename does not happen. A fixed name is one two concurrent writers race for, where the loser
+  renames the winner's content over the config; a temporary left behind is a second copy of every
+  secret in the config, under a name nothing looks for.
+- A backup that could not be deleted is reported rather than swallowed, and a config an agent
+  keeps its per-project entries in is swept for one whether or not any Editor is running. With no
+  Editor known, the file whose location needs no discovering was the one never looked at.
+
 - The per-repository `.mcp.json` and the project-scoped configs are swept for a leftover backup
   too. The sweep was hooked into the helper the other configs go through, and those two do not.
 - A backup left by an interrupted run is found by the next one. Discarding it only on the success

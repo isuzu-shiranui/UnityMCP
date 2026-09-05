@@ -308,7 +308,12 @@ namespace UnityMCP.Editor.Core
         /// </remarks>
         private static JArray ResultContent(JObject result)
         {
-            var image = result?["image"];
+            // A capture answered inline carries the PNG at the top; fetched through job_status it
+            // sits under "result", because that reply is the job's detail rather than the tool's
+            // own. Looking only at the top meant the same screenshot came back as an image when
+            // the Editor was idle and as a wall of base64 when it was busy.
+            var carrier = result?["result"] as JObject ?? result;
+            var image = carrier?["image"];
 
             if (image == null || image.Type != JTokenType.String)
             {
@@ -316,7 +321,15 @@ namespace UnityMCP.Editor.Core
             }
 
             var describing = (JObject)result.DeepClone();
-            describing.Remove("image");
+
+            if (describing["result"] is JObject nested)
+            {
+                nested.Remove("image");
+            }
+            else
+            {
+                describing.Remove("image");
+            }
 
             return new JArray
             {
