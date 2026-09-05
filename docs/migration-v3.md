@@ -12,7 +12,7 @@ v4 は破壊的変更を含みます。
 | `target` パラメーターで Editor を選ぶ | プロジェクトごとに URL が 1 つ（`target` は廃止） |
 | `unity_list_clients` | `isuzu-unity-cli projects` |
 | スキル `isuzu-unity-mcp` | スキル `isuzu-unity-cli`（`setup` が古いフォルダーを削除します） |
-| Preferences の npm インストーラーウィンドウ | Preferences の「Install CLI」ボタン |
+| Preferences の npm インストーラーウィンドウ | CLI が無い間に出る Preferences の「インストール」ボタン |
 
 ## 手順
 

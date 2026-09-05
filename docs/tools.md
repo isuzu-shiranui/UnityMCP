@@ -180,5 +180,5 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
   アセットは OS のゴミ箱へ移動し、フォルダーを渡した場合は配下すべてが移動します。GameObject は Undo で戻せます。ただし未保存シーンへの上書きは拒否します。これだけは Undo でも戻せないためです。
 - `gameobject_set_transform` は RectTransform も動かしますが、書き込むのは `localPosition` です。そのため `m_AnchoredPosition` の値は 1 回分遅れて追いつきます。書き込んだ直後に `inspect_read` で読み直すと、実際には動いているのに古い値が返ります。読み直して確かめるなら `reflect_read` を使うか、1 呼び出し置いてください。
 - `inspect_write` は、他のオブジェクトへの参照を持つプロパティを書けません。スプライト、マテリアル、イベントの呼び出し先などが該当します。これらは `execute_code` で代入してください。
-- `execute_code` のコードはメソッドの本体に置かれるので、using ディレクティブを書くとコンパイルエラーになります。型名は `UnityEngine.GameObject` のように完全な形で書いてください。
+- `execute_code` のコードはメソッドの本体に置かれるので、using ディレクティブを書くとコンパイルエラーになります。`System`、`System.Collections`、`System.Collections.Generic`、`System.Linq`、`System.Threading.Tasks`、`UnityEngine`、`UnityEditor` は最初から取り込まれています。それ以外の型は `UnityEngine.Rendering.Volume` のように完全な形で書いてください。
 - `execute_code` は Undo の対象になりません。オーサリングは専用ツールを使ってください。

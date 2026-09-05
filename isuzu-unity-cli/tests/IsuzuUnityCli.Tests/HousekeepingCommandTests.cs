@@ -60,7 +60,7 @@ public sealed class HousekeepingCommandTests
         Assert.Equal(0, await Program.Run(["setup", "--agent", "claude-code", "--mcp"], context));
 
         var config = JsonConfigEditor.Read(home.At(".claude.json"));
-        var entry = JsonConfigEditor.Find(config, ["projects", project, "mcpServers", "isuzu-unity"]);
+        var entry = JsonConfigEditor.Find(config, ["projects", McpServerEntry.ClaudeCodeProjectKey(project), "mcpServers", "isuzu-unity"]);
 
         Assert.Equal("http", entry!["type"]!.GetValue<string>());
         Assert.Equal("http://127.0.0.1:27186/mcp", entry["url"]!.GetValue<string>());
@@ -191,7 +191,7 @@ public sealed class HousekeepingCommandTests
 
         var entry = JsonConfigEditor.Find(
             JsonConfigEditor.Read(home.At(".claude.json")),
-            ["projects", project, "mcpServers", "isuzu-unity"]);
+            ["projects", McpServerEntry.ClaudeCodeProjectKey(project), "mcpServers", "isuzu-unity"]);
 
         Assert.Equal("Bearer " + rotated.Token, entry!["headers"]!["Authorization"]!.GetValue<string>());
     }
@@ -282,7 +282,7 @@ public sealed class HousekeepingCommandTests
         Assert.Equal(0, await Program.Run(["uninstall", "--yes"], real));
 
         Assert.False(Directory.Exists(home.At(".claude", "skills", "isuzu-unity-cli")));
-        Assert.Null(JsonConfigEditor.Find(JsonConfigEditor.Read(home.At(".claude.json")), ["projects", project, "mcpServers", "isuzu-unity"]));
+        Assert.Null(JsonConfigEditor.Find(JsonConfigEditor.Read(home.At(".claude.json")), ["projects", McpServerEntry.ClaudeCodeProjectKey(project), "mcpServers", "isuzu-unity"]));
         Assert.Contains("The Unity package itself is removed through the Package Manager.", removals.ToString());
     }
 

@@ -27,6 +27,61 @@ public sealed class McpServerEntryTests
         };
     }
 
+    /// <summary>
+    /// Claude Code files a project under a forward-slash key on every platform. A Windows path
+    /// keyed verbatim lands somewhere it never reads, so setup reports success and the server
+    /// never appears.
+    /// </summary>
+    [Fact]
+    public void TheClaudeCodeProjectKeyUsesForwardSlashesOnWindowsPaths()
+    {
+        var agent = AgentCatalog.Find("claude-code")!;
+
+        var path = McpServerEntry.PathFor(agent, @"H:\Unity Projects\Game Unity6.5");
+
+        Assert.Equal("H:/Unity Projects/Game Unity6.5", path[1]);
+        Assert.DoesNotContain('\\', path[1]);
+    }
+
+    [Fact]
+    public void APathThatAlreadyUsesForwardSlashesIsLeftAlone()
+    {
+        var agent = AgentCatalog.Find("claude-code")!;
+
+        Assert.Equal("/home/u/Game", McpServerEntry.PathFor(agent, "/home/u/Game")[1]);
+        Assert.Null(McpServerEntry.SupersededClaudeCodePath(agent, "/home/u/Game"));
+    }
+
+    /// <summary>
+    /// An entry an earlier Windows build filed under the backslash key stays visible to doctor,
+    /// so setup has to take it away rather than leave two registrations for one project.
+    /// </summary>
+    [Fact]
+    public void AWindowsPathReportsTheOldKeyToCleanUp()
+    {
+        var agent = AgentCatalog.Find("claude-code")!;
+
+        var superseded = McpServerEntry.SupersededClaudeCodePath(agent, @"H:\Unity Projects\Game");
+
+        Assert.NotNull(superseded);
+        Assert.Equal(@"H:\Unity Projects\Game", superseded![1]);
+        Assert.NotEqual(superseded[1], McpServerEntry.PathFor(agent, @"H:\Unity Projects\Game")[1]);
+    }
+
+    [Fact]
+    public void OnlyClaudeCodeHasAnOldKeyToCleanUp()
+    {
+        foreach (var name in new[] { "cursor", "codex", "vscode", "gemini", "claude-desktop" })
+        {
+            var agent = AgentCatalog.Find(name);
+
+            if (agent != null)
+            {
+                Assert.Null(McpServerEntry.SupersededClaudeCodePath(agent, @"H:\Unity Projects\Game"));
+            }
+        }
+    }
+
     [Fact]
     public void ClaudeCodeGetsATypedHttpEntryKeyedByProject()
     {
@@ -34,7 +89,9 @@ public sealed class McpServerEntryTests
         var agent = AgentCatalog.Find("claude-code")!;
         var root = Path.Combine(Path.GetTempPath(), "UnityMCP 65 Test");
 
-        Assert.Equal(new[] { "projects", root, "mcpServers", "isuzu-unity" }, McpServerEntry.PathFor(agent, root));
+        Assert.Equal(
+            new[] { "projects", root.Replace('\\', '/'), "mcpServers", "isuzu-unity" },
+            McpServerEntry.PathFor(agent, root));
 
         var entry = McpServerEntry.For(agent, Descriptor(), "exe");
 

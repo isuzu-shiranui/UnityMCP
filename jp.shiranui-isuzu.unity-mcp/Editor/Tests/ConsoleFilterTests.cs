@@ -129,6 +129,79 @@ namespace UnityMCP.Editor.Tests
             Assert.That(filtered["note"]?.Value<string>(), Does.Contain("Console window is filtering"));
         }
 
+        [Test]
+        public void TheReadToolSaysHowManyEntriesTheWindowIsHiding()
+        {
+            var getCount = Method("GetCount");
+            var setFlag = Method("SetConsoleFlag");
+
+            if (getCount == null || setFlag == null)
+            {
+                Assert.Ignore("UnityEditor.LogEntries does not expose the methods this covers on this Editor.");
+            }
+
+            UnityEngine.Debug.Log("ConsoleFilterTests: an entry the read tool should account for.");
+
+            var unfiltered = UnityMCP.Editor.Handlers.LogReader.ReadLogs(new JObject { ["limit"] = 5 });
+            Assert.That(unfiltered["hiddenByConsoleFilter"], Is.Null,
+                "nothing is hidden while the window shows everything");
+
+            JObject filtered;
+
+            try
+            {
+                setFlag.Invoke(null, new object[] { LogLevelLog, false });
+                filtered = UnityMCP.Editor.Handlers.LogReader.ReadLogs(new JObject { ["limit"] = 5 });
+            }
+            finally
+            {
+                setFlag.Invoke(null, new object[] { LogLevelLog, true });
+            }
+
+            Assert.That(filtered["hiddenByConsoleFilter"], Is.Not.Null,
+                "the read tool withholds entries under the same filter the count tool reports");
+            Assert.That(filtered["hiddenByConsoleFilter"].Value<int>(), Is.GreaterThan(0));
+            Assert.That(filtered["note"]?.Value<string>(), Does.Contain("Console window is filtering"));
+        }
+
+        /// <summary>
+        /// total came from the filtered GetCount while errors and warnings came from the
+        /// unfiltered GetCountsByType, so a filtered Console reported a total smaller than the
+        /// severities it reported alongside it.
+        /// </summary>
+        [Test]
+        public void TheReadToolsTotalIsNotContradictedByItsOwnSeverityCounts()
+        {
+            var setFlag = Method("SetConsoleFlag");
+
+            if (setFlag == null)
+            {
+                Assert.Ignore("UnityEditor.LogEntries does not expose the methods this covers on this Editor.");
+            }
+
+            UnityEngine.Debug.LogWarning("ConsoleFilterTests: a warning that survives the Log toggle.");
+
+            JObject filtered;
+
+            try
+            {
+                setFlag.Invoke(null, new object[] { LogLevelLog, false });
+                filtered = UnityMCP.Editor.Handlers.LogReader.ReadLogs(new JObject { ["limit"] = 5 });
+            }
+            finally
+            {
+                setFlag.Invoke(null, new object[] { LogLevelLog, true });
+            }
+
+            var total = filtered["total"].Value<int>();
+            var hidden = filtered["hiddenByConsoleFilter"]?.Value<int>() ?? 0;
+            var bySeverity = filtered["errors"].Value<int>() + filtered["warnings"].Value<int>();
+
+            Assert.That(total + hidden, Is.GreaterThanOrEqualTo(bySeverity),
+                "a reply that reports fewer entries in total than it reports by severity, and "
+                + "does not say the window is filtering, cannot be acted on");
+        }
+
         private static int SumByType(MethodInfo byType)
         {
             var counts = new object[] { 0, 0, 0 };

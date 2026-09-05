@@ -26,10 +26,38 @@ public static class McpServerEntry
     {
         return target.Name switch
         {
-            "claude-code" => ["projects", projectRoot, "mcpServers", AgentCatalog.ServerName],
+            "claude-code" => ["projects", ClaudeCodeProjectKey(projectRoot), "mcpServers", AgentCatalog.ServerName],
             "vscode" => ["servers", AgentCatalog.ServerName],
             _ => ["mcpServers", AgentCatalog.ServerName],
         };
+    }
+
+    /// <summary>
+    /// The key Claude Code files a project under.
+    /// </summary>
+    /// <remarks>
+    /// Claude Code writes forward slashes on every platform, and looks the project up by the key
+    /// it wrote. <c>Path.GetFullPath</c> hands back backslashes on Windows, and an entry filed
+    /// under that key is one Claude Code never reads: the write succeeds, the config gains a
+    /// project key holding nothing but this entry, and the server never appears.
+    /// </remarks>
+    public static string ClaudeCodeProjectKey(string projectRoot)
+    {
+        return projectRoot.Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// The key a Windows build wrote before <see cref="ClaudeCodeProjectKey"/> existed, or null
+    /// when there is no separate one to clean up.
+    /// </summary>
+    public static IReadOnlyList<string>? SupersededClaudeCodePath(AgentTarget target, string projectRoot)
+    {
+        if (target.Name != "claude-code" || !projectRoot.Contains('\\'))
+        {
+            return null;
+        }
+
+        return ["projects", projectRoot, "mcpServers", AgentCatalog.ServerName];
     }
 
     public static JsonNode For(AgentTarget target, InstanceDescriptor descriptor, string executablePath)

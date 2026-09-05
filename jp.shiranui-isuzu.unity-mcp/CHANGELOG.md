@@ -1,5 +1,37 @@
 # Changelog
 
+## [4.0.4] - 2026-09-05
+
+### Fixed
+- `console_read_logs` says when the Console window is withholding entries. 4.0.2 changed
+  `ConsoleCommandHandler`, which answers `console_get_count`, and its note said both console
+  tools were covered; `console_read_logs` reaches the Console through `LogReader`, which was
+  not changed. That reply also contradicted itself: `total` came from the filtered
+  `LogEntries.GetCount` while `errors` and `warnings` came from the unfiltered
+  `GetCountsByType`, so a Console with its Log toggle off could report a total smaller than the
+  severities printed beside it. The arithmetic and the wording now live in one place both paths
+  call, and a test covers the read path.
+- `animator_audit` takes `path`, not `asset_path`, and the agent skill said `asset_path`. The
+  unknown argument was dropped and the call failed with `invalid_params`, while every other
+  `animator_` example on the page worked, so the tool looked broken.
+- Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
+  publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
+  default. The READMEs and the tool tables already stated the condition correctly.
+- The version badge in both READMEs still read 4.0.0.
+- `setup --mcp --agent claude-code` registered the server where Claude Code never looks, on
+  Windows. Claude Code keys its `projects` map with forward slashes; `Path.GetFullPath` returns
+  backslashes, and the entry was filed under a key Claude Code had not written and does not
+  read. Setup reported success, `doctor` reported the dead entry as matching the running Editor,
+  and the server never appeared. The key is normalised now, `doctor` compares through the same
+  normalisation, and setup takes away the entry an earlier build left behind.
+- The READMEs said `[McpTool]` has four properties. It has eight, and `Group` is the only way to
+  put a tool in the group `tools/list` filters by.
+- The Preferences button is labelled Install, not "Install CLI", and it is drawn only while the
+  CLI is missing from PATH. Six documents said otherwise.
+- `execute_code` already imports `System`, `System.Collections`, `System.Collections.Generic`,
+  `System.Linq`, `System.Threading.Tasks`, `UnityEngine` and `UnityEditor`. The tool tables told
+  readers to write every type in full.
+
 ## [4.0.3] - 2026-09-05
 
 ### Fixed
@@ -21,8 +53,7 @@
 ## [4.0.2] - 2026-09-05
 
 ### Fixed
-- `console_read_logs` and `console_get_count` say when the Console window is withholding
-  entries. Unity's `LogEntries.GetCount` answers with that window's own filter applied: its
+- `console_get_count` says when the Console window is withholding entries. Unity's `LogEntries.GetCount` answers with that window's own filter applied: its
   Error, Warning and Log toggles and the text in its search box. A project with 25 entries
   reported 9 with the Log toggle off and 0 with anything typed in the search box, and neither
   answer said why. An agent checking whether something failed was told nothing had. The reply

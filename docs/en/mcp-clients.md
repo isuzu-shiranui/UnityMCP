@@ -18,7 +18,7 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project
 
 `--no-skill` skips the skill install. `--project <name>` targets a specific project. A running Editor is required.
 
-The Install CLI button on the Editor's Preferences > Unity MCP page opens a terminal and runs the install script. It installs the CLI itself. It does not register a client.
+While the CLI is not on PATH, the Editor's Preferences > Unity MCP page shows an Install button. It opens a terminal and runs the install script. It installs the CLI itself. It does not register a client, and it disappears once the CLI is found.
 
 ## Per-client configuration
 

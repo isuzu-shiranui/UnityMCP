@@ -166,6 +166,13 @@ public static class SetupCommand
                 var root = JsonConfigEditor.Read(configPath);
                 JsonConfigEditor.Upsert(root, McpServerEntry.PathFor(agent, projectRoot), McpServerEntry.For(agent, descriptor, context.ExecutablePath));
 
+                var superseded = McpServerEntry.SupersededClaudeCodePath(agent, projectRoot);
+
+                if (superseded != null)
+                {
+                    JsonConfigEditor.Remove(root, superseded);
+                }
+
                 if (agent.Name == "vscode")
                 {
                     McpServerEntry.EnsureTokenInput(root);

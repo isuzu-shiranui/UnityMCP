@@ -1,7 +1,7 @@
 # Unity MCP Integration Framework
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)
+![Version](https://img.shields.io/badge/version-4.0.4-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-10-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/instal
 dotnet tool install -g IsuzuUnityCli
 ```
 
-You can also download a binary directly from GitHub Releases. The file names are `isuzu-unity-cli-win-x64.exe`, `-osx-arm64`, `-osx-x64` and `-linux-x64`, and you can verify them against `SHA256SUMS`. Preferences > Unity MCP in the Editor has an "Install CLI" button as well.
+You can also download a binary directly from GitHub Releases. The file names are `isuzu-unity-cli-win-x64.exe`, `-osx-arm64`, `-osx-x64` and `-linux-x64`, and you can verify them against `SHA256SUMS`. Preferences > Unity MCP in the Editor offers an Install button while the CLI is not on PATH.
 
 Then install the agent skill for Claude Code and Codex:
 
@@ -153,7 +153,7 @@ internal static class MyTools
 
 The tool appears in `/tools` and can be called from both MCP clients and the CLI. The JSON Schema comes from the signature.
 
-`[McpTool]` has four properties.
+`[McpTool]` has eight properties.
 
 | Property | Default | Meaning |
 |---|---|---|
@@ -161,6 +161,10 @@ The tool appears in `/tools` and can be called from both MCP clients and the CLI
 | `MainThread` | `true` | Whether the Editor main thread is required. `false` keeps the tool answerable while the Editor is busy. Use it only for tools that touch no Unity API |
 | `Destructive` | `false` | When true, the call refuses to run without `confirm: true`. It also supports `dry_run` |
 | `UndoGroup` | `null` | When set, the whole call collapses into a single Undo step |
+| `Examples` | none | Calls published with the tool, which a model reads before choosing arguments |
+| `AlwaysLoad` | `false` | Keeps the tool in context instead of behind a tool search. Reserve it for the few tools nearly every session opens with |
+| `MaxResultSizeChars` | server default | Where a large reply is truncated. Raise it for tools whose useful part comes last |
+| `Group` | from the name prefix | The group `tools/list` filters by. Set it when the name prefix is not the group |
 
 Tool names must match `^[a-z][a-z0-9_]{0,63}$`. The description is the only cue the model has for choosing a tool. Say when to use it, not just what it does.
 
