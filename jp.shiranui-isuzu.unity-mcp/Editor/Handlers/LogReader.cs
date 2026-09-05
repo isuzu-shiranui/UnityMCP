@@ -163,6 +163,12 @@ namespace UnityMCP.Editor.Handlers
         // kScriptingError, not kError, and a compiler error sets kScriptCompileError, so testing
         // bit 0 alone classifies almost everything as a plain log while the count API, which
         // knows the full set, still reports errors.
+        //
+        // Bit 13 is kStickyLog, not an error bit: it marks an entry the Console keeps when the
+        // user clears it by hand, and Unity's own kErrorLogFlags leaves it out. The compilation
+        // pipeline sets it alongside kScriptingWarning for asmdef and versionDefines problems,
+        // so treating it as an error turned those warnings into errors. Bit 20 exists only in
+        // the managed ConsoleWindow.Mode, not in the native flags these are read from.
         private const int ErrorFlags =
             1           // kError
             | 2         // kAssert
@@ -170,9 +176,7 @@ namespace UnityMCP.Editor.Handlers
             | 64        // kAssetImportError
             | 256       // kScriptingError
             | 2048      // kScriptCompileError
-            | 8192      // kStickyError
             | 131072    // kScriptingException
-            | 1048576   // kGraphCompileError
             | 2097152;  // kScriptingAssertion
 
         private const int WarningFlags =
