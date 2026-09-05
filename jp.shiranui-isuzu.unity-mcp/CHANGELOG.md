@@ -3,6 +3,15 @@
 ## [4.0.4] - 2026-09-05
 
 ### Fixed
+- `console_read_logs` reported compilation warnings as errors. Its flag table called bit 13
+  `kStickyError`; there is no such flag. Bit 13 is `kStickyLog`, which marks an entry the
+  Console keeps when the user clears it by hand, and Unity leaves it out of its own
+  `kErrorLogFlags`. The compilation pipeline sets it beside `kScriptingWarning` for asmdef and
+  versionDefines problems, so those came back as errors, vanished under `type: "warning"`, and
+  were counted as warnings by the `warnings` field of the same reply. An agent checking whether
+  compilation failed was told it had. Bit 20 was listed from the managed `ConsoleWindow.Mode`
+  rather than the native flags these are read from, and is gone too. A test now compares the
+  whole set against the Editor'''s.
 - `console_read_logs` says when the Console window is withholding entries. 4.0.2 changed
   `ConsoleCommandHandler`, which answers `console_get_count`, and its note said both console
   tools were covered; `console_read_logs` reaches the Console through `LogReader`, which was
