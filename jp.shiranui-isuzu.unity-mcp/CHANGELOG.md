@@ -26,6 +26,9 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- A backup beside a config that has been emptied is left alone. A blank file parses as a blank
+  config, which is right when nothing was there and wrong when a write did not finish, and beside
+  a backup it is the second case.
 - The guard that keeps a backup beside an unreadable config now holds for Codex's TOML as well.
   Reading a file's bytes says nothing about whether they parse, and a config that does not parse
   is exactly the one whose copy is the only way back.

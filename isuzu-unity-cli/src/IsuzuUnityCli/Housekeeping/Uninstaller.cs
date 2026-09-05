@@ -298,15 +298,41 @@ public static class Uninstaller
             return;
         }
 
-        // A config that cannot be read is the one case where the copy beside it is the only way
+        // A config that cannot be used is the one case where the copy beside it is the only way
         // back, and it is also the case that reads as "no entry to remove" — so removing the copy
         // would take the config's other servers and settings with it and report success.
-        if (File.Exists(configPath) && !CanBeRead(configPath))
+        if (File.Exists(configPath) && !HoldsSomethingToRemoveFrom(configPath))
         {
             return;
         }
 
         plan.State.Add(backup);
+    }
+
+    /// <summary>
+    /// Whether the file is a config this command could act on, rather than one whose copy is the
+    /// only thing left.
+    /// </summary>
+    /// <remarks>
+    /// An empty file passes parsing — a blank config is a new config, which is right when nothing
+    /// was there and wrong when something was. Beside a backup it means a write did not finish,
+    /// so the copy is the way back and not litter.
+    /// </remarks>
+    private static bool HoldsSomethingToRemoveFrom(string configPath)
+    {
+        try
+        {
+            if (new FileInfo(configPath).Length == 0)
+            {
+                return false;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return CanBeRead(configPath);
     }
 
     private static bool CanBeRead(string configPath)
