@@ -32,7 +32,7 @@ namespace UnityMCP.Editor.Tests
                 ["view"] = "game",
                 ["width"] = 2,
                 ["height"] = 2,
-                ["image"] = "aGVsbG8=",
+                ["image"] = "iVBORw0KGgpyZXN0",
             };
 
             [McpTool("ep_refused", "Reports failure the handler way.", Idempotency = McpIdempotency.Safe, MainThread = false)]
@@ -48,7 +48,7 @@ namespace UnityMCP.Editor.Tests
                 {
                     ["view"] = "game",
                     ["width"] = 2,
-                    ["image"] = "aGVsbG8=",
+                    ["image"] = "iVBORw0KGgpyZXN0",
                 },
             };
 
@@ -96,13 +96,13 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(content.Count, Is.EqualTo(2));
             Assert.That(content[0]["type"].Value<string>(), Is.EqualTo("text"));
-            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("aGVsbG8="),
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("iVBORw0KGgpyZXN0"),
                 "the base64 belongs in the image part, not in the text beside it");
             Assert.That(content[0]["text"].Value<string>(), Does.Contain("width"),
                 "the caller still needs the size and the view");
 
             Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
-            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("aGVsbG8="));
+            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
             Assert.That(content[1]["mimeType"].Value<string>(), Is.EqualTo("image/png"));
 
             Assert.That(result["structuredContent"]["image"], Is.Not.Null,
@@ -171,11 +171,11 @@ namespace UnityMCP.Editor.Tests
             var content = (JArray)response.Body["result"]["content"];
 
             Assert.That(content.Count, Is.EqualTo(2));
-            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("aGVsbG8="));
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("iVBORw0KGgpyZXN0"));
             Assert.That(content[0]["text"].Value<string>(), Does.Contain("capture_screenshot"),
                 "the job's own fields stay with the caller");
             Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
-            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("aGVsbG8="));
+            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
         }
 
         private static IReadOnlyDictionary<string, string> Headers(params (string, string)[] pairs)

@@ -26,8 +26,16 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
-- A backup beside a config that has been emptied is left alone. A blank file parses as a blank
-  config, which is right when nothing was there and wrong when a write did not finish, and beside
+- Whether a backup may be discarded is one question now: does the config beside it still hold
+  anything. Five shapes had reached it as "nothing to remove" while the copy held everything — a
+  config that does not parse, a TOML that does not parse, a zero-byte file, whitespace or a byte
+  order mark, and an object with nothing in it. Emptiness is judged after parsing rather than by
+  size, and a TOML of only comments counts as empty too.
+- A reply's `image` is sent as a picture only when it holds one. The field name is not a promise:
+  a tool answering with an asset path had that path taken out of its text and delivered as image
+  data. The PNG signature settles it, and only the ten base64 characters it fixes on its own are
+  compared — the eleventh varies with what follows, so a longer prefix would reject real images.
+
   a backup it is the second case.
 - The guard that keeps a backup beside an unreadable config now holds for Codex's TOML as well.
   Reading a file's bytes says nothing about whether they parse, and a config that does not parse

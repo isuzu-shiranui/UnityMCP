@@ -308,47 +308,37 @@ public static class Uninstaller
 
         plan.State.Add(backup);
     }
-
     /// <summary>
-    /// Whether the file is a config this command could act on, rather than one whose copy is the
-    /// only thing left.
+    /// Whether the config beside a backup still holds anything, so the backup is a leftover
+    /// rather than the only copy of the user's settings.
     /// </summary>
     /// <remarks>
-    /// An empty file passes parsing — a blank config is a new config, which is right when nothing
-    /// was there and wrong when something was. Beside a backup it means a write did not finish,
-    /// so the copy is the way back and not litter.
+    /// Four shapes reached this as "nothing to remove" while the copy beside them held
+    /// everything: a config that does not parse, a TOML that does not parse, a zero-byte file,
+    /// and a file holding only whitespace or a byte order mark. They are one question — does the
+    /// config still have content — and asking it once is what stops a fifth shape turning up
+    /// later. Emptiness is judged after parsing rather than by size, because that is what "the
+    /// config is gone" actually means.
     /// </remarks>
     private static bool HoldsSomethingToRemoveFrom(string configPath)
     {
         try
         {
-            if (new FileInfo(configPath).Length == 0)
-            {
-                return false;
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-
-        return CanBeRead(configPath);
-    }
-
-    private static bool CanBeRead(string configPath)
-    {
-        try
-        {
             if (Path.GetExtension(configPath).Equals(".toml", StringComparison.OrdinalIgnoreCase))
             {
-                // Reading the bytes says nothing about whether they parse, and a config that does
-                // not parse is exactly the one whose copy is the only way back.
-                _ = TomlConfigEditor.Remove(File.ReadAllText(configPath, Encoding.UTF8), McpServerEntry.TomlTableName());
-                return true;
+                var toml = File.ReadAllText(configPath, Encoding.UTF8);
+
+                // Parses, and says something. There is no reader here to count tables with, so a
+                // file whose every line is blank or a comment is the empty case.
+                _ = TomlConfigEditor.Remove(toml, McpServerEntry.TomlTableName());
+
+                return toml
+                    .Split('\n')
+                    .Select(line => line.Trim().TrimStart('\uFEFF'))
+                    .Any(line => line.Length > 0 && !line.StartsWith('#'));
             }
 
-            _ = JsonConfigEditor.Read(configPath);
-            return true;
+            return JsonConfigEditor.Read(configPath).Count > 0;
         }
         catch (Exception e) when (e is JsonException or TomlEditException or IOException or UnauthorizedAccessException)
         {
