@@ -26,6 +26,18 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- Writing an agent's config no longer truncates it in place. `File.WriteAllText` overwrites the
+  real file, so it passed through every size from near zero on its way to the new content, in the
+  location the agent reads from, with no second copy anywhere on disk. Interrupting that window
+  cost the whole file: for Claude Code that is the login, all of the project keys, every tool
+  grant and the prompt history, none of it reconstructable. The new content is written beside it
+  and renamed over it, which is atomic on Windows and on POSIX, and the file it replaces is kept
+  as `.isuzu-bak`.
+- Two configs killed the process instead of being reported. A string holding a lone surrogate is
+  legal JSON and cannot be encoded as UTF-8; duplicate keys are legal JSON too, and `JsonNode`
+  accepts them and throws only when the dictionary is built on the first lookup, deep inside a
+  caller. Both now come back as `skipped <agent>: …` with the config untouched.
+
 - Play mode never started on an Editor without focus, which is the state an agent drives it in.
   `play_mode_play` answered that play mode would start on the next frame and scheduled the change
   with `EditorApplication.delayCall`. Nothing keeps an unfocused Editor ticking once the request
