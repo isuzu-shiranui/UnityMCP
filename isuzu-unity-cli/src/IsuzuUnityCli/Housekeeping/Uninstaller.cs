@@ -98,6 +98,10 @@ public static class Uninstaller
             {
                 var file = Path.Combine(root, ".mcp.json");
 
+                // This loop does not go through AddIfPresent, so the sweep for a leftover backup
+                // has to be repeated rather than inherited.
+                AddStrayBackup(plan, file);
+
                 if (ContainsJsonEntry(file, ["mcpServers", AgentCatalog.ServerName]))
                 {
                     plan.ConfigEntries.Add(new ConfigEntryRemoval

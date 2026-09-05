@@ -58,7 +58,7 @@ public static class DoctorCommand
         context.Out.WriteLine();
         context.Out.WriteLine("MCP entries");
         ReportEntries(agents, running, known, fix, context);
-        ReportLeftFromV3(agents, context);
+        ReportLeftFromV3(agents, running, context);
 
         context.Out.WriteLine();
         context.Out.WriteLine("On disk");
@@ -102,8 +102,17 @@ public static class DoctorCommand
     /// starts. Naming it here is the difference between a migration guide someone read once and
     /// an answer from the command that exists to say what is wrong.
     /// </remarks>
-    private static void ReportLeftFromV3(IReadOnlyList<AgentTarget> agents, CommandContext context)
+    private static void ReportLeftFromV3(
+        IReadOnlyList<AgentTarget> agents,
+        IReadOnlyList<InstanceDescriptor> running,
+        CommandContext context)
     {
+        var projectRoots = running
+            .Select(descriptor => ProjectMatcher.ProjectRootOf(descriptor.ProjectPath))
+            .Where(root => root.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         foreach (var agent in agents)
         {
             if (agent.SkillsDirectory is not null)
@@ -117,16 +126,29 @@ public static class DoctorCommand
                 }
             }
 
+            // A project-scoped agent has no single config, so its backups are looked for beside
+            // the config in each project an Editor has published, and Claude Code's own
+            // per-repository .mcp.json is looked at the same way.
+            var configs = new List<string>();
+
             if (agent.ConfigPath is not null)
             {
-                var backup = JsonConfigEditor.BackupFor(agent.ConfigPath);
+                configs.Add(agent.ConfigPath);
+            }
 
-                if (File.Exists(backup))
-                {
-                    context.Out.WriteLine($"  [left behind] {backup}");
-                    context.Out.WriteLine("    a copy of the config as it was before an edit, so it holds "
-                        + "whatever the config held, token included. uninstall takes it away");
-                }
+            if (agent.IsProjectScoped || agent.Name == "claude-code")
+            {
+                configs.AddRange(projectRoots.Select(agent.ConfigPathFor));
+            }
+
+            foreach (var backup in configs
+                .Select(JsonConfigEditor.BackupFor)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(File.Exists))
+            {
+                context.Out.WriteLine($"  [left behind] {backup}");
+                context.Out.WriteLine("    a copy of the config as it was before an edit, so it holds "
+                    + "whatever the config held, token included. uninstall takes it away");
             }
 
             if (agent.ConfigPath is null || agent.Format != ConfigFormat.Json || !File.Exists(agent.ConfigPath))
