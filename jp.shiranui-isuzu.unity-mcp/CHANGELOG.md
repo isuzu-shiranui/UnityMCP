@@ -26,6 +26,13 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- Play mode never started on an Editor without focus, which is the state an agent drives it in.
+  `play_mode_play` answered that play mode would start on the next frame and scheduled the change
+  with `EditorApplication.delayCall`. Nothing keeps an unfocused Editor ticking once the request
+  that woke it is answered — the loop waker watches the dispatcher queue and the frame sequencer,
+  and a delayCall is in neither — so the next frame did not come, and the call was a reported
+  success that did nothing. Play, stop, pause and unpause run through the frame sequencer now,
+  and each takes effect within four seconds on an unfocused Editor.
 - `uninstall` left the registration, and its bearer token, in `~/.claude.json` on a machine set
   up before 4.0.4. It looked for the entry only at the key this version writes, found nothing,
   listed nothing, and exited successfully. What stayed behind was a credential for an endpoint
