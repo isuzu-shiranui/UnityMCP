@@ -261,8 +261,13 @@ public static class DoctorCommand
             }
 
             // The key is the project root, so the Editor it belongs to is known exactly.
+            // Compared through the same normalisation setup writes with, or a Windows key never
+            // matches the Editor it belongs to and every entry reads as an orphan.
             var descriptor = running.FirstOrDefault(d =>
-                string.Equals(ProjectMatcher.ProjectRootOf(d.ProjectPath), pair.Key, StringComparison.OrdinalIgnoreCase));
+                string.Equals(
+                    McpServerEntry.ClaudeCodeProjectKey(ProjectMatcher.ProjectRootOf(d.ProjectPath)),
+                    McpServerEntry.ClaudeCodeProjectKey(pair.Key),
+                    StringComparison.OrdinalIgnoreCase));
 
             reports.Add(Judge(agent, agent.ConfigPath!, ["projects", pair.Key, "mcpServers", AgentCatalog.ServerName], pair.Key, value, descriptor, running, placeholder: false));
         }

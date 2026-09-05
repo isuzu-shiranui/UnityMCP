@@ -283,9 +283,9 @@ namespace UnityMCP.Editor.Handlers
             {
                 var counts = new object[] { 0, 0, 0 };
                 GetCountsByTypeMethod.Invoke(null, counts);
-                var everything = (int)counts[0] + (int)counts[1] + (int)counts[2];
 
-                return everything > visible ? everything - visible : 0;
+                return ConsoleFilterNotice.Hidden(
+                    visible, (int)counts[0], (int)counts[1], (int)counts[2]);
             }
             catch (Exception)
             {
@@ -297,9 +297,7 @@ namespace UnityMCP.Editor.Handlers
         /// <summary>The sentence a caller needs to see when rows are being withheld.</summary>
         private static string FilteringNotice(int hidden)
         {
-            return $"The Console window is filtering: {hidden} more entries exist than are " +
-                   "reported here. Its Error, Warning and Log toggles and its search box apply " +
-                   "to this call. Turn the toggles on and clear the search box to see them all.";
+            return ConsoleFilterNotice.Text(hidden);
         }
 
         /// <summary>

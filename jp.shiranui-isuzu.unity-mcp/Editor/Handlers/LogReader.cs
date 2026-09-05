@@ -127,7 +127,7 @@ namespace UnityMCP.Editor.Handlers
                         item => item,
                         fieldsFilter);
 
-                    return new JObject
+                    var result = new JObject
                     {
                         ["logs"] = page["items"],
                         ["total"] = totalCount,
@@ -136,6 +136,17 @@ namespace UnityMCP.Editor.Handlers
                         ["truncated"] = page["truncated"],
                         ["next"] = page["next"]
                     };
+
+                    var hidden = ConsoleFilterNotice.Hidden(
+                        totalCount, errorCount, warningCount, logCount);
+
+                    if (hidden > 0)
+                    {
+                        result["hiddenByConsoleFilter"] = hidden;
+                        result["note"] = ConsoleFilterNotice.Text(hidden);
+                    }
+
+                    return result;
                 }
                 finally
                 {

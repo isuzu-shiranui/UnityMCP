@@ -1,7 +1,7 @@
 # Unity MCP 統合フレームワーク
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-![Version](https://img.shields.io/badge/version-4.0.0-brightgreen)
+![Version](https://img.shields.io/badge/version-4.0.4-brightgreen)
 ![Unity](https://img.shields.io/badge/Unity-2022.3%E2%80%93Unity6-black.svg)
 ![.NET](https://img.shields.io/badge/.NET-10-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/instal
 dotnet tool install -g IsuzuUnityCli
 ```
 
-GitHub Releases から実行ファイルを直接ダウンロードすることもできます。ファイル名は `isuzu-unity-cli-win-x64.exe` / `-osx-arm64` / `-osx-x64` / `-linux-x64` で、`SHA256SUMS` で検証できます。Editor の Preferences > Unity MCP ページにある「Install CLI」ボタンからも入ります。
+GitHub Releases から実行ファイルを直接ダウンロードすることもできます。ファイル名は `isuzu-unity-cli-win-x64.exe` / `-osx-arm64` / `-osx-x64` / `-linux-x64` で、`SHA256SUMS` で検証できます。CLI が PATH に無い間は、Editor の Preferences > Unity MCP ページに「インストール」ボタンが出ます。
 
 インストールできたら、Claude Code / Codex 向けのスキルを導入します。
 
@@ -151,7 +151,7 @@ internal static class MyTools
 
 これだけで `/tools` に現れ、MCP クライアントと CLI の両方から呼べます。JSON Schema はシグネチャから生成されます。
 
-`[McpTool]` の属性は 4 つあります。
+`[McpTool]` の属性は 8 つあります。
 
 | プロパティ | 既定値 | 意味 |
 |---|---|---|
@@ -159,6 +159,10 @@ internal static class MyTools
 | `MainThread` | `true` | Editor メインスレッドが必要か。`false` なら Editor が固まっていても応答できる（Unity API を触らないツール限定） |
 | `Destructive` | `false` | `true` なら `confirm: true` が無いと実行せず、`dry_run` に対応 |
 | `UndoGroup` | `null` | 設定すると呼び出し 1 回が Undo 1 操作にまとまる |
+| `Examples` | なし | ツールと一緒に公開する呼び出し例。モデルが引数を決める前に読みます |
+| `AlwaysLoad` | `false` | ツール検索を経ずに常に文脈へ載せます。ほぼ毎回のセッションが最初に使うツールにだけ付けてください |
+| `MaxResultSizeChars` | サーバー既定 | 大きな応答を切る位置。役に立つ部分が末尾に来るツールでは上げてください |
+| `Group` | 名前の接頭辞から | `tools/list` が絞り込みに使うグループ。接頭辞とグループが一致しないときに指定します |
 
 ツール名は `^[a-z][a-z0-9_]{0,63}$` です。説明文は、モデルがそのツールを選ぶ唯一の手がかりになります。何をするかだけでなく、どういうときに使うかを書いてください。
 

@@ -12,7 +12,7 @@ v4 contains breaking changes.
 | `target` parameter to select an Editor | one URL per project (`target` is gone) |
 | `unity_list_clients` | `isuzu-unity-cli projects` |
 | skill `isuzu-unity-mcp` | skill `isuzu-unity-cli` (`setup` removes the old folder) |
-| Preferences npm installer window | Preferences "Install CLI" button |
+| Preferences npm installer window | Preferences Install button, shown while the CLI is missing |
 
 ## Steps
 

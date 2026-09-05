@@ -160,7 +160,7 @@ twenty-layer controller has hundreds of them.
 | Tool | Purpose |
 |---|---|
 | `animator_inspect --object_path /Avatar --layer 0` | Parameters, layers, and one layer's states and transitions |
-| `animator_audit --asset_path Assets/Anim/Body.controller` | Unreferenced parameters, states with no motion, states unreachable from the default, empty layers, duplicate layer names, transitions with neither a condition nor an exit time, and Write Defaults mixed within a layer |
+| `animator_audit --path Assets/Anim/Body.controller` | Unreferenced parameters, states with no motion, states unreachable from the default, empty layers, duplicate layer names, transitions with neither a condition nor an exit time, and Write Defaults mixed within a layer |
 | `animator_add_layer` / `animator_remove_layer` | Removing a layer destroys its sub-assets |
 | `animator_add_state` / `animator_remove_state` / `animator_set_state` | One undo step each |
 | `animator_add_transition` / `animator_remove_transition` | Conditions are passed as JSON |

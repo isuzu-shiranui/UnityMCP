@@ -18,7 +18,7 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project
 
 `--no-skill` はスキルの導入をスキップします。`--project <name>` で対象プロジェクトを指定します。Editor が起動している必要があります。
 
-Editor の Preferences > Unity MCP ページには「Install CLI」ボタンがあります。このボタンはターミナルを開いて、インストールスクリプトを実行します。CLI 自体を入れるためのボタンです。クライアントの登録までは行いません。
+CLI が PATH に無い間、Editor の Preferences > Unity MCP ページに「インストール」ボタンが出ます。このボタンはターミナルを開いて、インストールスクリプトを実行します。CLI 自体を入れるためのボタンです。クライアントの登録までは行いません。CLI が見つかると、この行は見つかった旨の表示に変わります。
 
 ## クライアントごとの設定
 
