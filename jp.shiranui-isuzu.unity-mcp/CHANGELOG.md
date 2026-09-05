@@ -26,6 +26,38 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- `uninstall` left the registration, and its bearer token, in `~/.claude.json` on a machine set
+  up before 4.0.4. It looked for the entry only at the key this version writes, found nothing,
+  listed nothing, and exited successfully. What stayed behind was a credential for an endpoint
+  that runs arbitrary C# in the Editor.
+- `doctor` called that same un-migrated entry healthy. Normalising both sides of the comparison
+  fixed the lookup and, as a side effect, made a key Claude Code cannot read match the running
+  Editor, so the one entry that needed moving was reported as the good one. It is now named as
+  filed where Claude Code does not read it, and `doctor --fix` moves it and takes the old key
+  away, which also fixes `upgrade`, since that ends by running `doctor --fix`.
+- A tool result of the form `{"error": "message"}` reached MCP clients as a success. The REST
+  path promoted it to a 400; the MCP path, which is what every MCP client speaks, wrapped it as
+  a completed call and never set `isError`. `capture_screenshot` with no scene view,
+  `console_read_logs` when the reflection is unavailable and every failure `console_get_count`
+  and `console_clear` report this way were all delivered as though they had worked. Both
+  transports read the convention through one method now.
+- `capture_screenshot` answered a bad `save_path` with a 500 when capturing a panel and with a
+  handled error when capturing a camera. The panel path had no `catch`, so the IO exception
+  escaped as an internal error on a tool declared `Safe`, which is the one shape a client
+  retries. Writing the file now fails with `save_path_unusable` and a 400 on both paths.
+- A test walks every `readonly` field holding a reflected Unity member and fails when one no
+  longer resolves. There are 45 of them, reaching APIs Unity does not make public, and nothing
+  in the compiler checks their names. Running it across the version matrix is what turns a
+  Unity rename into a failing test rather than a tool that answers wrongly.
+- Tool descriptions a model reads before choosing arguments: `execute_code` said to write every
+  type in full when seven namespaces are already imported, `animator_add_layer` explained a
+  default of 0 that belongs to Unity rather than to the tool, which creates the layer at 1, and
+  `scene_open` stated its refusal over unsaved changes without the additive exception its own
+  sibling `scene_create` documents.
+- Both guide pages implied the Recorder tools need only the Recorder package. They need Timeline
+  as well. The 4.0.1 note described the install-button fix as though it applied everywhere; only
+  the Windows branch downloads the script first.
+
 - The READMEs and the client guide say where Claude Code has to be started. The server is
   filed under the Unity project'''s own path, which is what lets one machine hold several Unity
   projects at once, and a session started anywhere else does not see it. Nothing said so.
@@ -91,7 +123,8 @@ it. What remained was the same filter set by hand, by the person at the Editor.
   Windows Defender records it as `Trojan:Win32/Commando.A!ml` against the command line, not
   against any file. The
   button fetches the script and hands the terminal a path instead, which also leaves the script
-  on disk to read when an install fails.
+  on disk to read when an install fails. That is the Windows branch; macOS and Linux still
+  pipe the script into the shell, where nothing refuses it.
 
 Neither path had been exercised against a real release before 4.0.0 existed. The CLI binary is
 unchanged from 4.0.0.

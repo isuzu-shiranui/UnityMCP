@@ -51,15 +51,30 @@ namespace UnityMCP.Editor.Handlers
                 return result;
             }
 
-            var full = System.IO.Path.GetFullPath(savePath);
-            var directory = System.IO.Path.GetDirectoryName(full);
+            string full;
 
-            if (!string.IsNullOrEmpty(directory))
+            try
             {
-                System.IO.Directory.CreateDirectory(directory);
-            }
+                full = System.IO.Path.GetFullPath(savePath);
+                var directory = System.IO.Path.GetDirectoryName(full);
 
-            System.IO.File.WriteAllBytes(full, pngBytes);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    System.IO.Directory.CreateDirectory(directory);
+                }
+
+                System.IO.File.WriteAllBytes(full, pngBytes);
+            }
+            catch (Exception e) when (e is System.IO.IOException
+                                          or UnauthorizedAccessException
+                                          or NotSupportedException
+                                          or ArgumentException)
+            {
+                throw new McpScreenshotException(
+                    "save_path_unusable",
+                    $"save_path '{savePath}' cannot be written: {e.Message}",
+                    400);
+            }
 
             result["path"] = full.Replace('\\', '/');
             result["note"] = "Written to disk rather than returned inline. Pass this path to render_compare.";

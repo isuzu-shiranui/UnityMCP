@@ -239,6 +239,13 @@ namespace UnityMCP.Editor.Core
             switch (outcome.State)
             {
                 case ToolCallOutcome.Kind.Completed:
+                    var reported = HandlerErrorResult.Message(outcome.Result);
+
+                    if (reported != null)
+                    {
+                        return EndpointResponse.Json(200, RpcResult(id, ToolError($"Error [invalid_params]: {reported}")));
+                    }
+
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
                         ["content"] = TextContent(outcome.Result.ToString(Formatting.None)),

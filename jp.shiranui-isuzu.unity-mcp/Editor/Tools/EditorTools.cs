@@ -56,8 +56,10 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "execute_code",
             "Compile and run a C# snippet inside the Editor and return its value. The snippet is " +
-            "placed in a method body, so use `return <expr>;` to surface a result and write type " +
-            "names in full: a using directive is a compile error there. Full Editor API access, " +
+            "placed in a method body, so use `return <expr>;` to surface a result; a using directive " +
+            "is a compile error there. System, System.Collections, System.Collections.Generic, " +
+            "System.Linq, System.Threading.Tasks, UnityEngine and UnityEditor are already " +
+            "imported, so write only other types in full. Full Editor API access, " +
             "including destructive operations, so read before you write. " +
             "Identical snippets are compiled once and reused.",
             Idempotency = McpIdempotency.Unsafe)]
