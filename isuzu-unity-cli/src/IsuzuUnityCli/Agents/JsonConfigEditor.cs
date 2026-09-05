@@ -177,7 +177,11 @@ public static class JsonConfigEditor
     /// to be wrong.
     /// </para>
     /// </remarks>
-    public static void Write(string path, JsonObject root)
+    /// <summary>
+    /// Replaces a config's text without the old one ever ceasing to exist. Used for the formats
+    /// this class does not parse.
+    /// </summary>
+    public static void WriteText(string path, string text)
     {
         var directory = Path.GetDirectoryName(path);
 
@@ -186,8 +190,6 @@ public static class JsonConfigEditor
             Directory.CreateDirectory(directory);
         }
 
-        // Serialised first, so a config that cannot be written back fails with the file untouched.
-        var text = Serialize(root);
         var temporary = path + ".isuzu-tmp";
 
         File.WriteAllText(temporary, text, new UTF8Encoding(false));
@@ -208,6 +210,19 @@ public static class JsonConfigEditor
 
         File.Move(temporary, path, overwrite: true);
         RestrictToOwner(path);
+    }
+
+    public static void Write(string path, JsonObject root)
+    {
+        var directory = Path.GetDirectoryName(path);
+
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        // Serialised first, so a config that cannot be written back fails with the file untouched.
+        WriteText(path, Serialize(root));
     }
 
     /// <summary>

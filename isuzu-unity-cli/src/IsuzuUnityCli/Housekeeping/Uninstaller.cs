@@ -206,7 +206,7 @@ public static class Uninstaller
                 return false;
             }
 
-            File.WriteAllText(entry.ConfigPath, updated, new UTF8Encoding(false));
+            JsonConfigEditor.WriteText(entry.ConfigPath, updated);
             return true;
         }
 
