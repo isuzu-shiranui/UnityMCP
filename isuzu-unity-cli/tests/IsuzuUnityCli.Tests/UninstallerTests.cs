@@ -230,4 +230,25 @@ public class UninstallerTests
         Assert.NotEmpty(failed);
         Assert.True(File.Exists(backup), "the edit failed, so the copy beside it is the way back");
     }
+
+    /// <summary>
+    /// An empty file parses as a blank config, which is right when nothing was there and wrong
+    /// when a write did not finish. Beside a backup it is the second case, and the copy is the
+    /// only way back.
+    /// </summary>
+    [Fact]
+    public void ABackupBesideAnEmptiedConfigIsLeftAlone()
+    {
+        using var home = new TempHome();
+        var agent = AgentCatalog.Find("cursor")!;
+        var config = agent.ConfigPath!;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, string.Empty);
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), """{ "mcpServers": { "other": {} } }""");
+
+        var plan = Uninstaller.Plan([agent], [], includeSkills: false);
+
+        Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
+    }
 }
