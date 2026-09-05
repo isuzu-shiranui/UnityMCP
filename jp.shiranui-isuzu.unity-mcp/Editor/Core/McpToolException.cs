@@ -12,9 +12,16 @@ namespace UnityMCP.Editor.Core
     internal static class HandlerErrorResult
     {
         /// <summary>The message a handler reported this way, or null when the result is not one.</summary>
+        /// <remarks>
+        /// A payload carrying <c>status</c> is reporting on something else's outcome rather than
+        /// failing itself. <c>job_status</c> answers with the job's own detail, and a failed job's
+        /// detail carries the failure message under <c>error</c>: read as a handler's failure it
+        /// turns a successful fetch into a failed call and throws away the status, the id and the
+        /// label the caller asked for.
+        /// </remarks>
         public static string Message(Newtonsoft.Json.Linq.JObject result)
         {
-            if (result == null || result["result"] != null)
+            if (result == null || result["result"] != null || result["status"] != null)
             {
                 return null;
             }

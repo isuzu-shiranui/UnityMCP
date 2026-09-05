@@ -228,9 +228,28 @@ namespace UnityMCP.Editor.Core
                         return "cancelled";
                     }
 
-                    return this.Item.Error != null ? "failed" : "completed";
+                    if (this.Item.Error != null)
+                    {
+                        return "failed";
+                    }
+
+                    return this.HandlerFailure != null ? "failed" : "completed";
                 }
             }
+
+            /// <summary>
+            /// The message a handler reported by returning it, rather than by throwing.
+            /// </summary>
+            /// <remarks>
+            /// A tool answered inline is read for this, so the same failure has to read the same
+            /// way when the main thread was busy enough to make it a job. Without it a snippet
+            /// that fails to compile is a failure when Roslyn is warm and a success when it is
+            /// cold.
+            /// </remarks>
+            private string HandlerFailure =>
+                this.Item.IsCompleted && this.Item.Error == null
+                    ? HandlerErrorResult.Message(this.Item.Result)
+                    : null;
 
             /// <summary>Summary form used by <c>GET /jobs</c>.</summary>
             public JObject ToJson()
@@ -257,10 +276,28 @@ namespace UnityMCP.Editor.Core
                 if (this.Item.Error != null)
                 {
                     payload["error"] = this.Item.Error.Message;
+
+                    if (this.Item.Error is McpToolException tool)
+                    {
+                        payload["errorCode"] = tool.Code;
+                        payload["httpStatus"] = tool.HttpStatus;
+                    }
+                    else
+                    {
+                        payload["errorCode"] = "internal_error";
+                        payload["httpStatus"] = 500;
+                    }
                 }
                 else if (this.Item.Result != null)
                 {
                     payload["result"] = this.Item.Result;
+
+                    if (this.HandlerFailure is { } reported)
+                    {
+                        payload["error"] = reported;
+                        payload["errorCode"] = "invalid_params";
+                        payload["httpStatus"] = 400;
+                    }
                 }
 
                 return payload;

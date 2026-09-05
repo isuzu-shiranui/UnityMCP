@@ -210,5 +210,80 @@ namespace UnityMCP.Editor.Tests
                 "A still-running job must survive eviction pressure.");
             Assert.That(entry.Status, Is.EqualTo("running"));
         }
+
+        /// <summary>
+        /// Answered inline, a McpToolException reaches the caller with its code and its status,
+        /// which is how a refusal is told apart from a fault. Through a job only the message used
+        /// to survive, so the same refusal read as a generic failure depending on how busy the
+        /// main thread had been.
+        /// </summary>
+        [Test]
+        public void AFailedJobKeepsTheCodeAndStatusItFailedWith()
+        {
+            var item = this.dispatcher.Submit(() =>
+                throw new McpToolException("window_occluded", "Another application is in front.", 409));
+            var id = this.registry.Track(item, "capture_screenshot");
+            this.dispatcher.Pump();
+
+            this.registry.TryGet(id, out var entry);
+            var detail = entry.ToDetailJson();
+
+            Assert.That(detail["status"].Value<string>(), Is.EqualTo("failed"));
+            Assert.That(detail["errorCode"].Value<string>(), Is.EqualTo("window_occluded"));
+            Assert.That(detail["httpStatus"].Value<int>(), Is.EqualTo(409));
+            Assert.That(detail["error"].Value<string>(), Does.Contain("in front"));
+        }
+
+        [Test]
+        public void AJobThatFailedWithSomethingElseIsAnInternalError()
+        {
+            var item = this.dispatcher.Submit(() => throw new InvalidOperationException("something gave way"));
+            var id = this.registry.Track(item, "whatever");
+            this.dispatcher.Pump();
+
+            this.registry.TryGet(id, out var entry);
+            var detail = entry.ToDetailJson();
+
+            Assert.That(detail["errorCode"].Value<string>(), Is.EqualTo("internal_error"));
+            Assert.That(detail["httpStatus"].Value<int>(), Is.EqualTo(500));
+        }
+
+        /// <summary>
+        /// A handler that reports failure by returning it has to read the same way whether the
+        /// call was answered inline or became a job, or the verdict depends on how warm Roslyn
+        /// happened to be.
+        /// </summary>
+        [Test]
+        public void AHandlerReportedFailureIsAFailedJob()
+        {
+            var item = this.dispatcher.Submit(
+                () => new JObject { ["error"] = "the snippet did not compile" });
+            var id = this.registry.Track(item, "execute_code");
+            this.dispatcher.Pump();
+
+            this.registry.TryGet(id, out var entry);
+            var detail = entry.ToDetailJson();
+
+            Assert.That(detail["status"].Value<string>(), Is.EqualTo("failed"),
+                "a job whose result reports a failure is a failed job");
+            Assert.That(detail["error"].Value<string>(), Does.Contain("did not compile"));
+            Assert.That(detail["errorCode"].Value<string>(), Is.EqualTo("invalid_params"));
+            Assert.That(detail["result"], Is.Not.Null, "the caller still gets what the tool returned");
+        }
+
+        [Test]
+        public void AnOrdinaryResultIsStillACompletedJob()
+        {
+            var item = this.dispatcher.Submit(
+                () => new JObject { ["errorCount"] = 0, ["warningCount"] = 2 });
+            var id = this.registry.Track(item, "console_get_count");
+            this.dispatcher.Pump();
+
+            this.registry.TryGet(id, out var entry);
+            var detail = entry.ToDetailJson();
+
+            Assert.That(detail["status"].Value<string>(), Is.EqualTo("completed"));
+            Assert.That(detail["error"], Is.Null);
+        }
     }
 }
