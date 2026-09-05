@@ -248,7 +248,7 @@ namespace UnityMCP.Editor.Core
 
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
-                        ["content"] = TextContent(outcome.Result.ToString(Formatting.None)),
+                        ["content"] = ResultContent(outcome.Result),
                         ["structuredContent"] = outcome.Result,
                     }));
 
@@ -293,6 +293,40 @@ namespace UnityMCP.Editor.Core
             {
                 ["isError"] = true,
                 ["content"] = TextContent(text),
+            };
+        }
+
+        /// <summary>
+        /// The MCP content for a result, with an image carried as an image rather than as text.
+        /// </summary>
+        /// <remarks>
+        /// A capture returns its PNG base64-encoded. Left inside the JSON it is a wall of text a
+        /// model cannot look at, and a small screenshot is large enough to crowd out everything
+        /// else in the reply. As image content the client renders it and the model sees the
+        /// picture, which is the whole point of asking for one. The base64 is taken out of the
+        /// structured copy for the same reason.
+        /// </remarks>
+        private static JArray ResultContent(JObject result)
+        {
+            var image = result?["image"];
+
+            if (image == null || image.Type != JTokenType.String)
+            {
+                return TextContent(result.ToString(Formatting.None));
+            }
+
+            var describing = (JObject)result.DeepClone();
+            describing.Remove("image");
+
+            return new JArray
+            {
+                new JObject { ["type"] = "text", ["text"] = describing.ToString(Formatting.None) },
+                new JObject
+                {
+                    ["type"] = "image",
+                    ["data"] = image.ToString(),
+                    ["mimeType"] = "image/png",
+                },
             };
         }
 

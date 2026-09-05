@@ -25,6 +25,18 @@ namespace UnityMCP.Editor.Tests
 
             [McpTool("ep_delete", "Deletes something.", Destructive = true, MainThread = false)]
             public static void Delete([McpArg("path", "Path")] string path) => _ = path;
+
+            [McpTool("ep_shot", "Returns a capture.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject Shot() => new JObject
+            {
+                ["view"] = "game",
+                ["width"] = 2,
+                ["height"] = 2,
+                ["image"] = "aGVsbG8=",
+            };
+
+            [McpTool("ep_refused", "Reports failure the handler way.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject Refused() => new JObject { ["error"] = "No active scene view found" };
         }
 
         private ToolCatalog catalog;
@@ -40,6 +52,58 @@ namespace UnityMCP.Editor.Tests
             this.jobs = new McpJobRegistry();
             var runner = new ToolCallRunner(this.dispatcher, this.jobs, () => 250);
             this.endpoint = new McpStreamableHttpEndpoint(() => this.catalog, runner.Run, () => "4.0.0-test");
+        }
+
+        /// <summary>
+        /// A capture's PNG has to travel as image content. Left in the JSON it is a wall of text
+        /// a model cannot look at, and one small screenshot fills a reply on its own.
+        /// </summary>
+        [Test]
+        public void ACaptureComesBackAsAnImageAndNotAsText()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject
+            {
+                ["name"] = "ep_shot",
+                ["arguments"] = new JObject(),
+            }));
+
+            var result = response.Body["result"];
+            var content = (JArray)result["content"];
+
+            Assert.That(content.Count, Is.EqualTo(2));
+            Assert.That(content[0]["type"].Value<string>(), Is.EqualTo("text"));
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("aGVsbG8="),
+                "the base64 belongs in the image part, not in the text beside it");
+            Assert.That(content[0]["text"].Value<string>(), Does.Contain("width"),
+                "the caller still needs the size and the view");
+
+            Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
+            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("aGVsbG8="));
+            Assert.That(content[1]["mimeType"].Value<string>(), Is.EqualTo("image/png"));
+
+            Assert.That(result["structuredContent"]["image"], Is.Not.Null,
+                "the structured copy keeps it for callers that read the field");
+        }
+
+        /// <summary>
+        /// The REST path answers a handler's {"error": …} with a 400. Over MCP it used to arrive
+        /// as a completed call, so a caller was told a failure had worked.
+        /// </summary>
+        [Test]
+        public void AHandlerReportedErrorIsNotDeliveredAsASuccess()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject
+            {
+                ["name"] = "ep_refused",
+                ["arguments"] = new JObject(),
+            }));
+
+            var result = response.Body["result"];
+
+            Assert.That(result["content"][0]["text"].Value<string>(),
+                Does.Contain("No active scene view found"));
+            Assert.That(result["structuredContent"], Is.Null,
+                "a failure carries no structured result");
         }
 
         private static IReadOnlyDictionary<string, string> Headers(params (string, string)[] pairs)
@@ -169,7 +233,7 @@ namespace UnityMCP.Editor.Tests
             var response = this.Post(Request(1, "tools/list"));
 
             var tools = ToolsOf(response);
-            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete" }));
+            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused" }));
 
             var echo = tools.Single(t => t["name"].Value<string>() == "ep_echo");
             Assert.That(echo["annotations"]["readOnlyHint"].Value<bool>(), Is.True);
