@@ -26,6 +26,8 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- The per-repository `.mcp.json` and the project-scoped configs are swept for a leftover backup
+  too. The sweep was hooked into the helper the other configs go through, and those two do not.
 - A backup left by an interrupted run is found by the next one. Discarding it only on the success
   path meant the run that found no entry to remove — which is exactly the run after one that was
   interrupted — walked past the file holding the token. It is listed in the uninstall plan and

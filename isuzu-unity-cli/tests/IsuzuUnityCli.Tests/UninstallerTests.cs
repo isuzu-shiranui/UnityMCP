@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using IsuzuUnityCli.Agents;
+using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Housekeeping;
 using IsuzuUnityCli.Tests.Fakes;
 
@@ -119,5 +120,34 @@ public class UninstallerTests
 
         Assert.False(File.Exists(backup), "the backup holds the token this command exists to remove");
         Assert.True(File.Exists(config), "the config it sat beside is not this command's to delete");
+    }
+
+    /// <summary>
+    /// Every config this tool writes gets a backup beside it, so every config it writes has to be
+    /// swept for one. Hooking the sweep into the shared helper missed the one caller that does not
+    /// use that helper, which is the per-repository .mcp.json.
+    /// </summary>
+    [Fact]
+    public void APerRepositoryConfigsBackupIsPlannedToo()
+    {
+        using var home = new TempHome();
+        var project = home.MakeDirectory("Game");
+        var config = Path.Combine(project, ".mcp.json");
+
+        File.WriteAllText(config, """{ "mcpServers": {} }""");
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), """{ "mcpServers": { "isuzu-unity": {} } }""");
+
+        var descriptor = new InstanceDescriptor
+        {
+            ProjectName = "Game",
+            ProjectPath = Path.Combine(project, "Assets"),
+            Port = 27180,
+            Token = "t",
+            Endpoint = "http://127.0.0.1:27180",
+            McpUrl = "http://127.0.0.1:27180/mcp",
+        };
+        var plan = Uninstaller.Plan([AgentCatalog.Find("claude-code")!], [descriptor], includeSkills: false);
+
+        Assert.Contains(JsonConfigEditor.BackupFor(config), plan.State);
     }
 }
