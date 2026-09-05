@@ -1,19 +1,22 @@
 {
   "name": "jp.shiranui-isuzu.unity-mcp",
   "displayName": "Unity MCP",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "author": "Shiranui_Isuzu",
   "unity": "2022.3",
-  "description": "A package that provides integration with the Model Context Protocol (MCP) for Unity.",
+  "description": "Drive the Unity Editor from an AI agent or the terminal. The Editor serves MCP itself, so there is no second process to run, and the isuzu-unity-cli command needs no Node or .NET runtime.",
   "license": "MIT",
-  "documentationUrl": "https://github.com/isuzu-shiranui/UnityMCP",
+  "documentationUrl": "https://unity-mcp.shiranui-isuzu.dev/en/",
   "changelogUrl": "https://github.com/isuzu-shiranui/UnityMCP/blob/main/jp.shiranui-isuzu.unity-mcp/CHANGELOG.md",
   "licensesUrl": "https://github.com/isuzu-shiranui/UnityMCP/blob/main/LICENSE",
   "keywords": [
     "unity",
     "mcp",
-    "claude",
-    "ai"
+    "model-context-protocol",
+    "editor",
+    "automation",
+    "ai-agent",
+    "cli"
   ],
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"

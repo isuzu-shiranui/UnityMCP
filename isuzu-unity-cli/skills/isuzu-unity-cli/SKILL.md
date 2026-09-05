@@ -112,6 +112,7 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `test_run --mode edit --assembly MyGame.Tests` | Start a test run; returns immediately |
 | `test_results` | Counts and failures; answers while the run holds the main thread |
 | `scene_browse_hierarchy --name Player --limit 20` | Hierarchy; also filters `component`, `tag`, `active_only`, `max_depth` |
+| `scene_browse_hierarchy --missing_scripts true` | Only objects carrying a component Unity cannot resolve, which is what a removed package leaves behind |
 | `inspect_list --object_path Player --component_type Transform` | Discover property paths |
 | `inspect_read --object_path Player --component_type Transform --property_path m_LocalPosition` | Read one property |
 | `inspect_write ... --json '{"property_path":"m_LocalScale","value":{"x":2,"y":2,"z":2}}'` | Write one property; a single Undo step |
@@ -119,6 +120,7 @@ cannot be unloaded, so a long session of one-off snippets grows the domain until
 | `play_mode_status` / `play_mode_play` / `play_mode_stop` | Play mode |
 | `menu_execute --menu_item "File/Save"` | Invoke a menu item |
 | `project_packages` / `project_assemblies` | Project metadata |
+| `definitions_list` | What JSON-defined tools loaded, and why one did not |
 
 ### Authoring
 
@@ -147,6 +149,28 @@ Two things to know before editing:
   inactive objects, and carries an index only when a sibling name repeats: `/Canvas/Button[1]/Text`.
 - A scene edit during Play Mode succeeds and is reverted when Play Mode stops. The response
   carries `playModeWarning` in that case. Asset edits made during Play Mode do survive.
+
+### Animator Controllers
+
+`animator_inspect` reads a controller by asset path, or through any component on a scene object
+that points at one, which is how a character with one controller per body layer is reached.
+Without a `layer` it reports the parameters and one line per layer and no states, because a
+twenty-layer controller has hundreds of them.
+
+| Tool | Purpose |
+|---|---|
+| `animator_inspect --object_path /Avatar --layer 0` | Parameters, layers, and one layer's states and transitions |
+| `animator_audit --asset_path Assets/Anim/Body.controller` | Unreferenced parameters, states with no motion, states unreachable from the default, empty layers, duplicate layer names, transitions with neither a condition nor an exit time, and Write Defaults mixed within a layer |
+| `animator_add_layer` / `animator_remove_layer` | Removing a layer destroys its sub-assets |
+| `animator_add_state` / `animator_remove_state` / `animator_set_state` | One undo step each |
+| `animator_add_transition` / `animator_remove_transition` | Conditions are passed as JSON |
+| `animator_add_parameter` / `animator_remove_parameter` | |
+| `animator_set_write_defaults` | Applies across a whole layer |
+
+A controller is a shared asset, so a write reaches every scene and character using it, and the
+`.controller` file is written before the call returns. Undo restores the controller in memory,
+not the file. Run `animator_audit` before editing: it names the states nothing can reach, which
+is usually what the person actually wanted fixed.
 
 ### Rendering and shader debugging
 
@@ -271,6 +295,18 @@ isuzu-unity-cli call input_replay --name look --then_capture scene
 
 Pass the capture to `render_compare`, or wrap all three calls as one `sequence` defined tool.
 
+Without a recording to replay, `input_pointer` and `input_key` send the events directly:
+
+```bash
+isuzu-unity-cli call input_pointer --view scene_view_window --action drag --json '{"from":[200,200],"to":[400,200],"button":1}'
+isuzu-unity-cli call input_key --view inspector --key A --character a
+```
+
+A right-drag is FPS Look and Alt+left-drag is Orbit. A drag is spread over `steps` frames by
+default, which matters: anything that reacts to time passing does not reproduce when the whole
+drag arrives in one frame. Coordinates are points, not pixels; divide a screenshot pixel by the
+`pixelsPerPoint` in the reply.
+
 ### Turning a repeated read into a named tool
 
 A `probe` defined tool turns a reflection path into a one-word call. One JSON file under `%LOCALAPPDATA%\UnityMCP\tools\<projectHash>\`:
@@ -301,6 +337,20 @@ isuzu-unity-cli jobs                         # what is queued or running
 
 `health`, `jobs` and `editor_log_tail` are answered off the main thread, so they keep working
 when nothing else does.
+
+Most often the Editor is not wedged but waiting: a modal dialog holds the main thread inside its
+own message loop until someone answers it. `health` reports it under `mainThread` as `stalledMs`
+with the dialog's title, message and buttons, and a job that is waiting for one says so.
+
+```bash
+isuzu-unity-cli call editor_dialog_list      # title, message, buttons
+isuzu-unity-cli call editor_dialog_press --button "Cancel" --confirm true
+```
+
+Read the dialog before pressing anything. `Don't Save` and `Discard` throw away unsaved work;
+`Cancel` is the safe answer, after which the cause can be fixed and the original call retried.
+Windows only — elsewhere `editor_dialog_list` answers `supported: false` and a person has to
+answer the dialog at the Editor.
 
 ## Jobs
 

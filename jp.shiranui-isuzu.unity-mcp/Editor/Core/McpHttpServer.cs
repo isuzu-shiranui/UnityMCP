@@ -33,7 +33,7 @@ namespace UnityMCP.Editor.Core
         /// answer for an assembly that is not loaded from a package, and CI checks that it too
         /// stays in step.
         /// </remarks>
-        private const string FallbackVersion = "4.0.2";
+        private const string FallbackVersion = "4.0.3";
 
         private static string ProtocolVersion
         {
