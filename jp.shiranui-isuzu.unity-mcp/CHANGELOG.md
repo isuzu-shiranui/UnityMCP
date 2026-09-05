@@ -1,5 +1,23 @@
 # Changelog
 
+## [4.0.3] - 2026-09-05
+
+### Fixed
+- The agent skill covers the tools 4.0.0 added. `SKILL.md` is what Claude Code and Codex read to
+  learn what this can do, and it named none of the twelve `animator_` tools, neither
+  `editor_dialog_list` nor `editor_dialog_press`, nor `input_pointer`, `definitions_list` or
+  `scene_browse_hierarchy --missing_scripts`. A tool absent from the skill is a tool an agent
+  does not reach for. The dialog pair mattered most: its own section, "The Editor stopped
+  responding", offered only `health`, `jobs` and `editor_log_tail`, so the way out of a modal
+  dialog was missing from the one page a stuck agent reads.
+- The NuGet listing shows what the package is. `dotnet tool search` returned the SDK's
+  placeholder `Package Description`, the assembly name in place of an author, and no licence,
+  project link or tags. The csproj now carries a description, `Authors`, `PackageTags`,
+  `PackageLicenseExpression`, `PackageProjectUrl`, `RepositoryUrl` and the README.
+- Package Manager's Documentation link points at the getting started guide rather than the
+  repository root, and `keywords` no longer names one AI client. The package works with Claude
+  Code, Claude Desktop, Cursor, Codex, the Gemini CLI and VS Code.
+
 ## [4.0.2] - 2026-09-05
 
 ### Fixed

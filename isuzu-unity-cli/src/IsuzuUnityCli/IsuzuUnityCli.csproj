@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>isuzu-unity-cli</AssemblyName>
     <RootNamespace>IsuzuUnityCli</RootNamespace>
-    <Version>4.0.2</Version>
+    <Version>4.0.3</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -19,7 +19,21 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>isuzu-unity-cli</ToolCommandName>
     <PackageId>IsuzuUnityCli</PackageId>
+    <Authors>Shiranui_Isuzu</Authors>
+    <Description>Drive a running Unity Editor from the terminal: read the console, compile, run tests, browse and edit the scene, capture the Game and Scene views. Pairs with the jp.shiranui-isuzu.unity-mcp Unity package, which the Editor serves MCP from directly.</Description>
+    <PackageTags>unity;unity3d;mcp;model-context-protocol;editor;cli;automation;ai-agent</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/isuzu-shiranui/UnityMCP</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/isuzu-shiranui/UnityMCP</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- nuget.org renders this on the package page. Without it the listing carries the SDK's
+         placeholder description and nothing a reader can act on. -->
+    <None Include="$(MSBuildThisFileDirectory)../../../README.en.md" Pack="true" PackagePath="README.md" Visible="false" />
+  </ItemGroup>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
     <!-- Every agent call pays process start. Native code starts in about 15 ms where the JIT
