@@ -315,7 +315,7 @@ namespace UnityMCP.Editor.Core
             var carrier = result?["result"] as JObject ?? result;
             var image = carrier?["image"];
 
-            if (image == null || image.Type != JTokenType.String)
+            if (image == null || image.Type != JTokenType.String || !IsEncodedPng(image.ToString()))
             {
                 return TextContent(result.ToString(Formatting.None));
             }
@@ -341,6 +341,19 @@ namespace UnityMCP.Editor.Core
                     ["mimeType"] = "image/png",
                 },
             };
+        }
+
+        /// <summary>Whether the text is base64 of something that begins like a PNG.</summary>
+        /// <remarks>
+        /// A field called <c>image</c> is not a promise that it holds one: a tool answering with
+        /// an asset path would have had that path taken out of its reply and sent as picture data.
+        /// The eight bytes a PNG opens with settle it. Ten base64 characters is as far as they
+        /// reach on their own — the eleventh carries four bits of the ninth byte, so it varies
+        /// with what follows and a longer prefix rejects real images.
+        /// </remarks>
+        private static bool IsEncodedPng(string text)
+        {
+            return text.StartsWith("iVBORw0KGg", StringComparison.Ordinal);
         }
 
         private static JArray TextContent(string text)

@@ -251,4 +251,69 @@ public class UninstallerTests
 
         Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
     }
+
+    /// <summary>
+    /// Whitespace and a byte order mark are not content, and neither is an object with nothing
+    /// in it. Judging emptiness by size let all of them through, which is how this guard came to
+    /// be taught one shape at a time.
+    /// </summary>
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("   \n\t ")]
+    [InlineData("\uFEFF")]
+    [InlineData("{}")]
+    [InlineData("")]
+    public void ABackupBesideAConfigWithNoContentIsLeftAlone(string content)
+    {
+        using var home = new TempHome();
+        var agent = AgentCatalog.Find("cursor")!;
+        var config = agent.ConfigPath!;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, content);
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), """{ "mcpServers": { "other": {} } }""");
+
+        var plan = Uninstaller.Plan([agent], [], includeSkills: false);
+
+        Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
+    }
+
+    /// <summary>
+    /// A config that still holds something is one this command can act on, so the copy beside it
+    /// is a leftover and goes.
+    /// </summary>
+    [Fact]
+    public void ABackupBesideAConfigThatStillHoldsSomethingIsPlanned()
+    {
+        using var home = new TempHome();
+        var agent = AgentCatalog.Find("cursor")!;
+        var config = agent.ConfigPath!;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, """{ "mcpServers": { "other": {} } }""");
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), """{ "mcpServers": {} }""");
+
+        var plan = Uninstaller.Plan([agent], [], includeSkills: false);
+
+        Assert.Contains(JsonConfigEditor.BackupFor(config), plan.State);
+    }
+
+    /// <summary>
+    /// A TOML holding only comments and blank lines is the same empty case.
+    /// </summary>
+    [Fact]
+    public void ABackupBesideACommentOnlyTomlIsLeftAlone()
+    {
+        using var home = new TempHome();
+        var agent = AgentCatalog.Find("codex")!;
+        var config = agent.ConfigPath!;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, "# nothing here\n\n# still nothing\n");
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), "model = \"gpt\"\n");
+
+        var plan = Uninstaller.Plan([agent], [], includeSkills: false);
+
+        Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
+    }
 }
