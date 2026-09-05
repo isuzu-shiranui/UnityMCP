@@ -58,6 +58,7 @@ public static class DoctorCommand
         context.Out.WriteLine();
         context.Out.WriteLine("MCP entries");
         ReportEntries(agents, running, known, fix, context);
+        ReportLeftFromV3(agents, context);
 
         context.Out.WriteLine();
         context.Out.WriteLine("On disk");
@@ -90,6 +91,79 @@ public static class DoctorCommand
 
         // Always zero: doctor reports, and a report that fails the shell is a report nobody runs.
         return 0;
+    }
+
+    /// <summary>
+    /// What a v3 install leaves behind: the old skill folder, and the old MCP entry.
+    /// </summary>
+    /// <remarks>
+    /// The entry is the one that costs something. It names a node script that
+    /// <c>npm uninstall -g</c> removes, so the client tries to spawn a missing file every time it
+    /// starts. Naming it here is the difference between a migration guide someone read once and
+    /// an answer from the command that exists to say what is wrong.
+    /// </remarks>
+    private static void ReportLeftFromV3(IReadOnlyList<AgentTarget> agents, CommandContext context)
+    {
+        foreach (var agent in agents)
+        {
+            if (agent.SkillsDirectory is not null)
+            {
+                var legacySkill = Path.Combine(agent.SkillsDirectory, SkillInstaller.LegacySkillName);
+
+                if (Directory.Exists(legacySkill))
+                {
+                    context.Out.WriteLine($"  [v3 leftover] {legacySkill}");
+                    context.Out.WriteLine("    the v3 skill. setup removes it; so does uninstall");
+                }
+            }
+
+            if (agent.ConfigPath is null || agent.Format != ConfigFormat.Json || !File.Exists(agent.ConfigPath))
+            {
+                continue;
+            }
+
+            JsonObject root;
+
+            try
+            {
+                root = JsonConfigEditor.Read(agent.ConfigPath);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+            {
+                continue;
+            }
+
+            foreach (var path in LegacyEntryPaths(agent, root))
+            {
+                context.Out.WriteLine($"  [v3 leftover] {agent.Name}: {string.Join(" > ", path)}");
+                context.Out.WriteLine($"    {agent.ConfigPath}");
+                context.Out.WriteLine("    a v3 entry naming a node script npm has already removed, so the "
+                    + "client fails to start it every launch. Remove it by hand");
+            }
+        }
+    }
+
+    private static IEnumerable<IReadOnlyList<string>> LegacyEntryPaths(AgentTarget agent, JsonObject root)
+    {
+        const string legacy = SkillInstaller.LegacySkillName;
+
+        if (root["mcpServers"] is JsonObject servers && servers.ContainsKey(legacy))
+        {
+            yield return ["mcpServers", legacy];
+        }
+
+        if (root["projects"] is not JsonObject projects)
+        {
+            yield break;
+        }
+
+        foreach (var pair in projects)
+        {
+            if ((pair.Value as JsonObject)?["mcpServers"] is JsonObject inner && inner.ContainsKey(legacy))
+            {
+                yield return ["projects", pair.Key, "mcpServers", legacy];
+            }
+        }
     }
 
     private static void ReportSkills(IReadOnlyList<AgentTarget> agents, bool fix, CommandContext context)

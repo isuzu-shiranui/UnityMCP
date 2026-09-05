@@ -33,6 +33,14 @@
   and a delayCall is in neither — so the next frame did not come, and the call was a reported
   success that did nothing. Play, stop, pause and unpause run through the frame sequencer now,
   and each takes effect within four seconds on an unfocused Editor.
+- `doctor` reports what a v3 install left behind: the old skill folder, and the old MCP entry.
+  That entry names a node script `npm uninstall -g` has already removed, so the client fails to
+  spawn it at every launch, and neither `doctor` nor `uninstall` mentioned it. The migration
+  guide says to delete it by hand, which does not help someone who runs `doctor` to find out
+  what is wrong.
+- Removing an entry takes the containers it emptied. A migrated config kept a project key
+  holding nothing but an empty `mcpServers`, permanently. The agent's own top-level map is left
+  alone either way, because absent and empty are not the same thing to the program reading it.
 - `uninstall` left the registration, and its bearer token, in `~/.claude.json` on a machine set
   up before 4.0.4. It looked for the entry only at the key this version writes, found nothing,
   listed nothing, and exited successfully. What stayed behind was a credential for an endpoint

@@ -83,7 +83,48 @@ public static class JsonConfigEditor
         }
 
         node.Remove(path[^1]);
+
+        PruneEmptyAncestors(root, path);
+
         return true;
+    }
+
+    /// <summary>
+    /// Drops the containers a removal has just emptied, innermost first.
+    /// </summary>
+    /// <remarks>
+    /// Removing the only entry a project key held left the key behind holding an empty
+    /// <c>mcpServers</c>, permanently, on every config that migrated. What is taken away is the
+    /// residue this tool created; the agent's own top-level map stays whether or not it is empty,
+    /// because absent and empty are not the same thing to the program that reads it.
+    /// </remarks>
+    private static void PruneEmptyAncestors(JsonObject root, IReadOnlyList<string> path)
+    {
+        var chain = new List<JsonObject> { root };
+        var node = root;
+
+        for (var i = 0; i < path.Count - 1; i++)
+        {
+            if (node[path[i]] is not JsonObject child)
+            {
+                return;
+            }
+
+            node = child;
+            chain.Add(child);
+        }
+
+        // chain[i] is the object path[i] names, so its parent is chain[i - 1]. The walk stops at
+        // 2 to leave the top-level map alone.
+        for (var i = chain.Count - 1; i >= 2; i--)
+        {
+            if (chain[i].Count > 0)
+            {
+                return;
+            }
+
+            chain[i - 1].Remove(path[i - 1]);
+        }
     }
 
     public static string Serialize(JsonObject root)

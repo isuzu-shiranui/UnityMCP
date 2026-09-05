@@ -134,4 +134,84 @@ public sealed class JsonConfigEditorTests
             Directory.Delete(directory, recursive: true);
         }
     }
+    /// <summary>
+    /// Removing the only entry a project key held used to leave the key behind holding an empty
+    /// mcpServers, permanently, on every machine that migrated.
+    /// </summary>
+    [Fact]
+    public void RemovingTheLastEntryTakesTheContainersItEmptied()
+    {
+        var root = JsonConfigEditor.Parse("""
+        {
+          "projects": {
+            "H:\\Old": { "mcpServers": { "isuzu-unity": { "url": "x" } } }
+          }
+        }
+        """);
+
+        Assert.True(JsonConfigEditor.Remove(root, ["projects", "H:\\Old", "mcpServers", "isuzu-unity"]));
+
+        var projects = (JsonObject)root["projects"]!;
+        Assert.False(projects.ContainsKey("H:\\Old"));
+        Assert.NotNull(root["projects"]);
+    }
+
+    /// <summary>
+    /// A project key Claude Code also keeps its own state under is not ours to take away.
+    /// </summary>
+    [Fact]
+    public void AProjectKeyCarryingOtherStateSurvives()
+    {
+        var root = JsonConfigEditor.Parse("""
+        {
+          "projects": {
+            "H:/Live": {
+              "mcpServers": { "isuzu-unity": { "url": "x" } },
+              "lastSessionId": "abc"
+            }
+          }
+        }
+        """);
+
+        Assert.True(JsonConfigEditor.Remove(root, ["projects", "H:/Live", "mcpServers", "isuzu-unity"]));
+
+        var project = (JsonObject)((JsonObject)root["projects"]!)["H:/Live"]!;
+        Assert.Equal("abc", project["lastSessionId"]!.GetValue<string>());
+        Assert.False(project.ContainsKey("mcpServers"));
+    }
+
+    /// <summary>
+    /// Another server in the same map keeps the map.
+    /// </summary>
+    [Fact]
+    public void ASiblingEntryKeepsTheMap()
+    {
+        var root = JsonConfigEditor.Parse("""
+        {
+          "projects": {
+            "H:/Both": { "mcpServers": { "isuzu-unity": { "url": "x" }, "other": { "url": "y" } } }
+          }
+        }
+        """);
+
+        Assert.True(JsonConfigEditor.Remove(root, ["projects", "H:/Both", "mcpServers", "isuzu-unity"]));
+
+        var servers = (JsonObject)((JsonObject)((JsonObject)root["projects"]!)["H:/Both"]!)["mcpServers"]!;
+        Assert.True(servers.ContainsKey("other"));
+    }
+
+    /// <summary>
+    /// A top-level map the agent owns stays, empty or not: absent and empty are not the same
+    /// thing to the program that reads it.
+    /// </summary>
+    [Fact]
+    public void TheAgentsOwnTopLevelMapIsLeftAlone()
+    {
+        var root = JsonConfigEditor.Parse("""{ "mcpServers": { "isuzu-unity": { "url": "x" } } }""");
+
+        Assert.True(JsonConfigEditor.Remove(root, ["mcpServers", "isuzu-unity"]));
+
+        Assert.NotNull(root["mcpServers"]);
+        Assert.Empty((JsonObject)root["mcpServers"]!);
+    }
 }
