@@ -248,8 +248,29 @@ public static class Uninstaller
         }
     }
 
+    /// <summary>
+    /// Lists a backup an earlier write left beside a config.
+    /// </summary>
+    /// <remarks>
+    /// That file is the config with the entry still in it, bearer token and all. Removing the
+    /// entry discards the copy it just made, but a copy from a run that was interrupted, or from
+    /// a run where the entry had already gone, is left for this to find. Putting it in the plan
+    /// is what shows it to the person and what takes it away.
+    /// </remarks>
+    private static void AddStrayBackup(UninstallPlan plan, string configPath)
+    {
+        var backup = JsonConfigEditor.BackupFor(configPath);
+
+        if (File.Exists(backup) && !plan.State.Contains(backup, StringComparer.OrdinalIgnoreCase))
+        {
+            plan.State.Add(backup);
+        }
+    }
+
     private static void AddIfPresent(UninstallPlan plan, AgentTarget agent, string configPath, string projectRoot)
     {
+        AddStrayBackup(plan, configPath);
+
         if (agent.Format == ConfigFormat.Toml)
         {
             if (ContainsTomlEntry(configPath))

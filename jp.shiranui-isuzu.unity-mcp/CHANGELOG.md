@@ -26,6 +26,10 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- A backup left by an interrupted run is found by the next one. Discarding it only on the success
+  path meant the run that found no entry to remove — which is exactly the run after one that was
+  interrupted — walked past the file holding the token. It is listed in the uninstall plan and
+  removed with it, and `doctor` names it.
 - `uninstall` takes away the copy the write kept. Making config writes safe gave every caller a
   backup of the file as it was, and on the removal path that is the config with the entry still
   in it, bearer token and all — so the credential this command exists to remove survived in a

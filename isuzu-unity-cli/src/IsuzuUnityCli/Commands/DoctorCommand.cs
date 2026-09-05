@@ -117,6 +117,18 @@ public static class DoctorCommand
                 }
             }
 
+            if (agent.ConfigPath is not null)
+            {
+                var backup = JsonConfigEditor.BackupFor(agent.ConfigPath);
+
+                if (File.Exists(backup))
+                {
+                    context.Out.WriteLine($"  [left behind] {backup}");
+                    context.Out.WriteLine("    a copy of the config as it was before an edit, so it holds "
+                        + "whatever the config held, token included. uninstall takes it away");
+                }
+            }
+
             if (agent.ConfigPath is null || agent.Format != ConfigFormat.Json || !File.Exists(agent.ConfigPath))
             {
                 continue;

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace IsuzuUnityCli.Tests;
 
+[Collection("environment")]
 public class UninstallerTests
 {
     /// <summary>
@@ -88,5 +89,35 @@ public class UninstallerTests
             () => JsonConfigEditor.Parse("""{"projects":{"p":{"mcpServers":{"a":1,"a":2}}}}"""));
 
         Assert.Contains("duplicate key", e.Message);
+    }
+
+    /// <summary>
+    /// A backup a run left behind is the config with the entry still in it. The run that finds no
+    /// entry to remove is exactly the run after one that was interrupted, so it has to be the one
+    /// that cleans up rather than the one that walks past.
+    /// </summary>
+    /// <remarks>
+    /// The plan is built by hand rather than through <c>Uninstaller.Plan</c>. That method reaches
+    /// the real state directory, and applying what it returns would delete the developer's own
+    /// descriptors and cache.
+    /// </remarks>
+    [Fact]
+    public void AStrayBackupIsRemovedEvenWithNoEntryLeft()
+    {
+        using var home = new TempHome();
+        var config = home.At("mcp.json");
+        var backup = JsonConfigEditor.BackupFor(config);
+
+        File.WriteAllText(config, """{ "mcpServers": {} }""");
+        File.WriteAllText(backup,
+            """{ "mcpServers": { "isuzu-unity": { "headers": { "Authorization": "Bearer SECRET" } } } }""");
+
+        var plan = new UninstallPlan();
+        plan.State.Add(backup);
+
+        Uninstaller.Apply(plan);
+
+        Assert.False(File.Exists(backup), "the backup holds the token this command exists to remove");
+        Assert.True(File.Exists(config), "the config it sat beside is not this command's to delete");
     }
 }
