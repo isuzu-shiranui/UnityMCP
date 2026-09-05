@@ -11,6 +11,7 @@ namespace IsuzuUnityCli.Tests;
 /// These files hold every MCP server the user has registered and, for Claude Code, the settings
 /// of every project they have opened. A bug here costs configuration nobody backed up.
 /// </summary>
+[Collection("environment")]
 public sealed class JsonConfigEditorTests
 {
     [Fact]
