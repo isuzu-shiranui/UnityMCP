@@ -107,12 +107,21 @@ namespace UnityMCP.Editor.Handlers
 
                 if (count <= 0 || startRow >= totalCount)
                 {
-                    return new JObject
+                    var noneVisible = new JObject
                     {
                         ["success"] = true,
                         ["logs"] = new JArray(),
                         ["totalCount"] = totalCount
                     };
+
+                    var withheld = HiddenByTheConsoleWindow(totalCount);
+                    if (withheld > 0)
+                    {
+                        noneVisible["hiddenByConsoleFilter"] = withheld;
+                        noneVisible["note"] = FilteringNotice(withheld);
+                    }
+
+                    return noneVisible;
                 }
 
                 // Begin getting entries
@@ -203,14 +212,25 @@ namespace UnityMCP.Editor.Handlers
                 warningCount = (int)parameters[1];
                 logCount = (int)parameters[2];
 
-                return new JObject
+                var visible = (int)GetCountMethod.Invoke(null, null);
+
+                var result = new JObject
                 {
                     ["success"] = true,
-                    ["totalCount"] = (int)GetCountMethod.Invoke(null, null),
+                    ["totalCount"] = visible,
                     ["errorCount"] = errorCount,
                     ["warningCount"] = warningCount,
                     ["logCount"] = logCount
                 };
+
+                var hidden = HiddenByTheConsoleWindow(visible);
+                if (hidden > 0)
+                {
+                    result["hiddenByConsoleFilter"] = hidden;
+                    result["note"] = FilteringNotice(hidden);
+                }
+
+                return result;
             }
             catch (Exception ex)
             {
@@ -246,6 +266,40 @@ namespace UnityMCP.Editor.Handlers
                     ["error"] = ex.Message
                 };
             }
+        }
+
+/// <summary>
+        /// How many entries the Console window is hiding right now, or zero.
+        /// </summary>
+        /// <remarks>
+        /// GetCount answers with the window's own filter applied: its Error, Warning and Log
+        /// toggles and the text in its search box. GetCountsByType ignores both. A reader that
+        /// only calls GetCount is told a smaller number with nothing to say why, and a search
+        /// box left with text in it reports zero entries while the Console holds hundreds.
+        /// </remarks>
+        private static int HiddenByTheConsoleWindow(int visible)
+        {
+            try
+            {
+                var counts = new object[] { 0, 0, 0 };
+                GetCountsByTypeMethod.Invoke(null, counts);
+                var everything = (int)counts[0] + (int)counts[1] + (int)counts[2];
+
+                return everything > visible ? everything - visible : 0;
+            }
+            catch (Exception)
+            {
+                // Reporting no filtering is the same answer this gave before the check existed.
+                return 0;
+            }
+        }
+
+        /// <summary>The sentence a caller needs to see when rows are being withheld.</summary>
+        private static string FilteringNotice(int hidden)
+        {
+            return $"The Console window is filtering: {hidden} more entries exist than are " +
+                   "reported here. Its Error, Warning and Log toggles and its search box apply " +
+                   "to this call. Turn the toggles on and clear the search box to see them all.";
         }
 
         /// <summary>

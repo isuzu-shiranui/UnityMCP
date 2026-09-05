@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.2] - 2026-09-05
+
+### Fixed
+- `console_read_logs` and `console_get_count` say when the Console window is withholding
+  entries. Unity's `LogEntries.GetCount` answers with that window's own filter applied: its
+  Error, Warning and Log toggles and the text in its search box. A project with 25 entries
+  reported 9 with the Log toggle off and 0 with anything typed in the search box, and neither
+  answer said why. An agent checking whether something failed was told nothing had. The reply
+  now carries `hiddenByConsoleFilter` and a sentence naming the cause, derived from
+  `GetCountsByType`, which ignores the filter. Nothing in the user's Console window is changed
+  to produce it: a tool that reads should not rewrite the window it reads from.
+
+The other half of this was already closed. `console_set_filter` is deliberately not a tool
+because setting that filter narrows every later read, and the note in `ConsoleTools.cs` records
+it. What remained was the same filter set by hand, by the person at the Editor.
+
 ## [4.0.1] - 2026-09-05
 
 ### Fixed
@@ -10,7 +26,9 @@
   both install scripts for one now, because they are parsed rather than displayed.
 - The Install CLI button in Preferences now opens a terminal. It ran the same one-liner through
   `Process.Start`, and security software refuses to create a process whose command line
-  downloads and runs a script in one expression, returning access denied to the caller. The
+  downloads and runs a script in one expression, returning access denied to the caller.
+  Windows Defender records it as `Trojan:Win32/Commando.A!ml` against the command line, not
+  against any file. The
   button fetches the script and hands the terminal a path instead, which also leaves the script
   on disk to read when an install fails.
 
