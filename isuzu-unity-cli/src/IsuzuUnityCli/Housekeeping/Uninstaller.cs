@@ -207,6 +207,7 @@ public static class Uninstaller
             }
 
             JsonConfigEditor.WriteText(entry.ConfigPath, updated);
+            DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
             return true;
         }
 
@@ -223,7 +224,28 @@ public static class Uninstaller
         }
 
         JsonConfigEditor.Write(entry.ConfigPath, root);
+        DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
         return true;
+    }
+
+    /// <summary>
+    /// Takes away the copy the write kept of the config as it was.
+    /// </summary>
+    /// <remarks>
+    /// That copy is the config with the entry still in it, bearer token and all, so leaving it is
+    /// leaving the credential this command was run to remove. A backup is worth having for an
+    /// edit; it is not worth having for a deletion.
+    /// </remarks>
+    private static void DiscardTheBackupOfWhatWasRemoved(string configPath)
+    {
+        try
+        {
+            File.Delete(JsonConfigEditor.BackupFor(configPath));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Reported by the caller's own listing rather than thrown: the entry itself is gone.
+        }
     }
 
     private static void AddIfPresent(UninstallPlan plan, AgentTarget agent, string configPath, string projectRoot)

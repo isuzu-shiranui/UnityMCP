@@ -26,6 +26,14 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- `uninstall` takes away the copy the write kept. Making config writes safe gave every caller a
+  backup of the file as it was, and on the removal path that is the config with the entry still
+  in it, bearer token and all — so the credential this command exists to remove survived in a
+  file beside it. The backup is also created with the same owner-only permissions as the config.
+- A duplicate key below the root took `doctor` down. Forcing the dictionary at parse time covered
+  the root object only, because `JsonObject` builds one per object, and the first code to walk
+  the nested maps hit the throw outside the filter that handles it. Every object is touched now.
+
 - Fetching a failed job reported the fetch as having failed. A failed job'''s detail carries its
   message under `error`, which is the shape a handler uses to report its own failure, so the
   check added earlier in this version read a successful `job_status` as a failed call and threw

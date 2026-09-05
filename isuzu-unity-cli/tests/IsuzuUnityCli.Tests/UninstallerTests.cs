@@ -1,0 +1,92 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+using IsuzuUnityCli.Agents;
+using IsuzuUnityCli.Housekeeping;
+using IsuzuUnityCli.Tests.Fakes;
+
+using Xunit;
+
+namespace IsuzuUnityCli.Tests;
+
+public class UninstallerTests
+{
+    /// <summary>
+    /// Taking the entry away leaves a backup of the config as it was, which is the config with
+    /// the entry still in it — bearer token and all. Uninstall exists to take that credential
+    /// away, so it has to take the copy with it.
+    /// </summary>
+    [Fact]
+    public void RemovingAnEntryTakesTheBackupOfItToo()
+    {
+        using var home = new TempHome();
+        var config = home.At("claude.json");
+
+        var content = new JsonObject
+        {
+            ["mcpServers"] = new JsonObject
+            {
+                ["isuzu-unity"] = new JsonObject
+                {
+                    ["url"] = "http://127.0.0.1:27000/mcp",
+                    ["headers"] = new JsonObject { ["Authorization"] = "Bearer SECRET" },
+                },
+            },
+        };
+
+        JsonConfigEditor.Write(config, content);
+        Assert.Contains("SECRET", File.ReadAllText(config));
+
+        var plan = new UninstallPlan();
+        plan.ConfigEntries.Add(new ConfigEntryRemoval
+        {
+            Target = AgentCatalog.Find("cursor")!,
+            ConfigPath = config,
+            JsonPath = ["mcpServers", "isuzu-unity"],
+        });
+
+        Uninstaller.Apply(plan);
+
+        Assert.DoesNotContain("SECRET", File.ReadAllText(config));
+        Assert.False(File.Exists(JsonConfigEditor.BackupFor(config)),
+            "the backup holds the entry that was just removed, token and all");
+    }
+
+    /// <summary>
+    /// An ordinary edit keeps its backup: that is what it is for.
+    /// </summary>
+    [Fact]
+    public void AnEditThatIsNotARemovalKeepsItsBackup()
+    {
+        using var home = new TempHome();
+        var config = home.At("claude.json");
+
+        File.WriteAllText(config, """{ "mcpServers": { "other": {} } }""");
+        JsonConfigEditor.Write(config, JsonConfigEditor.Parse("""{ "mcpServers": { "other": { "url": "x" } } }"""));
+
+        Assert.True(File.Exists(JsonConfigEditor.BackupFor(config)));
+    }
+
+    /// <summary>
+    /// JsonObject builds its dictionary per object, so forcing the root left a duplicate two
+    /// levels down to throw at whatever first walked that far — outside the filter that handles
+    /// it, which took the whole command down.
+    /// </summary>
+    [Fact]
+    public void ADuplicateKeyAnywhereIsAHandledError()
+    {
+        var e = Assert.Throws<JsonException>(
+            () => JsonConfigEditor.Parse("""{"mcpServers":{"a":{},"a":{}}}"""));
+
+        Assert.Contains("duplicate key", e.Message);
+    }
+
+    [Fact]
+    public void ADuplicateKeyDeeperStillIsAHandledError()
+    {
+        var e = Assert.Throws<JsonException>(
+            () => JsonConfigEditor.Parse("""{"projects":{"p":{"mcpServers":{"a":1,"a":2}}}}"""));
+
+        Assert.Contains("duplicate key", e.Message);
+    }
+}
