@@ -26,6 +26,19 @@
 - Both guide pages said a project without Timeline and Recorder publishes 75 tools. It
   publishes 77; reaching 75 also needs the Test Framework absent, and Unity installs that by
   default. The READMEs and the tool tables already stated the condition correctly.
+- Fetching a failed job reported the fetch as having failed. A failed job'''s detail carries its
+  message under `error`, which is the shape a handler uses to report its own failure, so the
+  check added earlier in this version read a successful `job_status` as a failed call and threw
+  away the status, the id and the label the caller asked for. A payload carrying `status` is
+  reporting on something else'''s outcome and is left alone now.
+- A job kept only the message it failed with. Answered inline a tool'''s failure carries a code and
+  an HTTP status, so `window_occluded` is told apart from a fault; through a job both were
+  dropped. The detail carries `errorCode` and `httpStatus`.
+- A tool that reports failure by returning it was delivered as a success when the call became a
+  job. `execute_code` failing to compile read as a failure when Roslyn was warm and as a success
+  when it was cold, because the result was nested under `result` where the convention no longer
+  applied. A job whose result reports a failure is a failed job.
+
 - Writing an agent's config no longer truncates it in place. `File.WriteAllText` overwrites the
   real file, so it passed through every size from near zero on its way to the new content, in the
   location the agent reads from, with no second copy anywhere on disk. Interrupting that window

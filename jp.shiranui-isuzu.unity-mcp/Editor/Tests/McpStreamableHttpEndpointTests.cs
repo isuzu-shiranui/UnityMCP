@@ -37,6 +37,16 @@ namespace UnityMCP.Editor.Tests
 
             [McpTool("ep_refused", "Reports failure the handler way.", Idempotency = McpIdempotency.Safe, MainThread = false)]
             public static JObject Refused() => new JObject { ["error"] = "No active scene view found" };
+
+            [McpTool("ep_job_detail", "Reports on another call's outcome.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject JobDetail() => new JObject
+            {
+                ["id"] = "ep_slow-1",
+                ["label"] = "ep_slow",
+                ["status"] = "failed",
+                ["ageSec"] = 3.5,
+                ["error"] = "the tool threw",
+            };
         }
 
         private ToolCatalog catalog;
@@ -104,6 +114,30 @@ namespace UnityMCP.Editor.Tests
                 Does.Contain("No active scene view found"));
             Assert.That(result["structuredContent"], Is.Null,
                 "a failure carries no structured result");
+        }
+
+        /// <summary>
+        /// A failed job's detail carries the failure message under <c>error</c>, which is the same
+        /// shape a handler uses to report its own failure. Read that way, a successful fetch
+        /// became a failed call and the status, the id and the label the caller asked for were
+        /// thrown away — so the client could not tell a failed job from a failed lookup.
+        /// </summary>
+        [Test]
+        public void AReportAboutAnotherCallIsNotItselfAFailure()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject
+            {
+                ["name"] = "ep_job_detail",
+                ["arguments"] = new JObject(),
+            }));
+
+            var result = response.Body["result"];
+
+            Assert.That(result["isError"], Is.Null, "fetching a failed job's detail succeeded");
+            Assert.That(result["structuredContent"], Is.Not.Null);
+            Assert.That(result["structuredContent"]["status"].Value<string>(), Is.EqualTo("failed"));
+            Assert.That(result["structuredContent"]["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
+            Assert.That(result["structuredContent"]["error"].Value<string>(), Is.EqualTo("the tool threw"));
         }
 
         private static IReadOnlyDictionary<string, string> Headers(params (string, string)[] pairs)
@@ -233,7 +267,7 @@ namespace UnityMCP.Editor.Tests
             var response = this.Post(Request(1, "tools/list"));
 
             var tools = ToolsOf(response);
-            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused" }));
+            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused", "ep_job_detail" }));
 
             var echo = tools.Single(t => t["name"].Value<string>() == "ep_echo");
             Assert.That(echo["annotations"]["readOnlyHint"].Value<bool>(), Is.True);
