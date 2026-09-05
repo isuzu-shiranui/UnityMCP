@@ -192,6 +192,19 @@ public static class JsonConfigEditor
     /// backup carries it too. Anything that takes an entry away has to take this with it.
     /// </remarks>
     public static string BackupFor(string configPath) => configPath + ".isuzu-bak";
+
+    /// <summary>Whether the path is a link rather than the file itself.</summary>
+    private static bool IsLink(string path)
+    {
+        try
+        {
+            return File.Exists(path) && File.ResolveLinkTarget(path, returnFinalTarget: false) != null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
     /// <summary>Writes the config without the old one ever ceasing to exist.</summary>
     /// <remarks>
     /// <c>File.WriteAllText</c> truncates in place: the file passes through every size from near
@@ -242,7 +255,17 @@ public static class JsonConfigEditor
                 }
             }
 
-            File.Move(temporary, path, overwrite: true);
+            if (IsLink(path))
+            {
+                // Renaming over a link replaces the link with a plain file and leaves whatever it
+                // pointed at untouched, so a config kept in a dotfiles repository is detached by
+                // the edit. Writing through it keeps the link, at the cost of the atomic rename.
+                File.WriteAllText(path, text, new UTF8Encoding(false));
+            }
+            else
+            {
+                File.Move(temporary, path, overwrite: true);
+            }
         }
         finally
         {

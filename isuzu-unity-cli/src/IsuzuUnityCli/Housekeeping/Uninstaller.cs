@@ -177,7 +177,15 @@ public static class Uninstaller
             }
         }
 
-        foreach (var path in plan.Skills.Concat(plan.State))
+        // A config edit that failed leaves the config as it was, which is the one moment the
+        // copy beside it matters. Removing it here would take the way back with it.
+        var keep = failed.Count > 0
+            ? plan.ConfigEntries
+                .Select(entry => JsonConfigEditor.BackupFor(entry.ConfigPath))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in plan.Skills.Concat(plan.State).Where(path => !keep.Contains(path)))
         {
             try
             {
@@ -307,14 +315,16 @@ public static class Uninstaller
         {
             if (Path.GetExtension(configPath).Equals(".toml", StringComparison.OrdinalIgnoreCase))
             {
-                _ = File.ReadAllText(configPath, Encoding.UTF8);
+                // Reading the bytes says nothing about whether they parse, and a config that does
+                // not parse is exactly the one whose copy is the only way back.
+                _ = TomlConfigEditor.Remove(File.ReadAllText(configPath, Encoding.UTF8), McpServerEntry.TomlTableName());
                 return true;
             }
 
             _ = JsonConfigEditor.Read(configPath);
             return true;
         }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is JsonException or TomlEditException or IOException or UnauthorizedAccessException)
         {
             return false;
         }
@@ -365,7 +375,7 @@ public static class Uninstaller
         {
             return JsonConfigEditor.Find(JsonConfigEditor.Read(configPath), path) is not null;
         }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is JsonException or TomlEditException or IOException or UnauthorizedAccessException)
         {
             return false;
         }

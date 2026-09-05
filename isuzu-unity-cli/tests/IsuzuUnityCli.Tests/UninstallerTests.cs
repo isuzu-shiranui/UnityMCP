@@ -180,4 +180,54 @@ public class UninstallerTests
 
         Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
     }
+
+    /// <summary>
+    /// Reading a TOML file's bytes says nothing about whether it parses, so the guard that keeps
+    /// a copy beside an unreadable config held for JSON and not for the other format.
+    /// </summary>
+    [Fact]
+    public void ABackupBesideATomlThatDoesNotParseIsLeftAlone()
+    {
+        using var home = new TempHome();
+        var agent = AgentCatalog.Find("codex")!;
+        var config = agent.ConfigPath!;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(config)!);
+        File.WriteAllText(config, "model = \"unterminated");
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), "model = \"gpt\"\n");
+
+        var plan = Uninstaller.Plan([agent], [], includeSkills: false);
+
+        Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
+    }
+
+    /// <summary>
+    /// A config edit that failed leaves the config as it was, which is the one moment the copy
+    /// beside it matters. Removing it in the same run took the way back with it.
+    /// </summary>
+    [Fact]
+    public void AFailedConfigEditKeepsTheBackupItWouldHaveNeeded()
+    {
+        using var home = new TempHome();
+        var config = home.At("mcp.json");
+        var backup = JsonConfigEditor.BackupFor(config);
+
+        // A lone surrogate parses and cannot be written back, so the removal throws.
+        File.WriteAllText(config, "{\"note\":\"\\ud800\",\"mcpServers\":{\"isuzu-unity\":{}}}");
+        File.WriteAllText(backup, """{ "mcpServers": { "other": {} } }""");
+
+        var plan = new UninstallPlan();
+        plan.ConfigEntries.Add(new ConfigEntryRemoval
+        {
+            Target = AgentCatalog.Find("cursor")!,
+            ConfigPath = config,
+            JsonPath = ["mcpServers", "isuzu-unity"],
+        });
+        plan.State.Add(backup);
+
+        var (_, failed) = Uninstaller.Apply(plan);
+
+        Assert.NotEmpty(failed);
+        Assert.True(File.Exists(backup), "the edit failed, so the copy beside it is the way back");
+    }
 }
