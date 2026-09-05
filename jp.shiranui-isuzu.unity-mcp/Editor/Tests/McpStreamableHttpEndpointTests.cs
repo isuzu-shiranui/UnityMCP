@@ -38,6 +38,20 @@ namespace UnityMCP.Editor.Tests
             [McpTool("ep_refused", "Reports failure the handler way.", Idempotency = McpIdempotency.Safe, MainThread = false)]
             public static JObject Refused() => new JObject { ["error"] = "No active scene view found" };
 
+            [McpTool("ep_shot_job", "A capture fetched through a job.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject ShotJob() => new JObject
+            {
+                ["id"] = "capture_screenshot-1",
+                ["label"] = "capture_screenshot",
+                ["status"] = "completed",
+                ["result"] = new JObject
+                {
+                    ["view"] = "game",
+                    ["width"] = 2,
+                    ["image"] = "aGVsbG8=",
+                },
+            };
+
             [McpTool("ep_job_detail", "Reports on another call's outcome.", Idempotency = McpIdempotency.Safe, MainThread = false)]
             public static JObject JobDetail() => new JObject
             {
@@ -138,6 +152,30 @@ namespace UnityMCP.Editor.Tests
             Assert.That(result["structuredContent"]["status"].Value<string>(), Is.EqualTo("failed"));
             Assert.That(result["structuredContent"]["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
             Assert.That(result["structuredContent"]["error"].Value<string>(), Is.EqualTo("the tool threw"));
+        }
+
+        /// <summary>
+        /// A capture answered inline carries the PNG at the top; fetched through job_status it
+        /// sits under "result". Looking only at the top meant the same screenshot arrived as an
+        /// image when the Editor was idle and as a wall of base64 when it was busy.
+        /// </summary>
+        [Test]
+        public void ACaptureFetchedThroughAJobIsAnImageToo()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject
+            {
+                ["name"] = "ep_shot_job",
+                ["arguments"] = new JObject(),
+            }));
+
+            var content = (JArray)response.Body["result"]["content"];
+
+            Assert.That(content.Count, Is.EqualTo(2));
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("aGVsbG8="));
+            Assert.That(content[0]["text"].Value<string>(), Does.Contain("capture_screenshot"),
+                "the job's own fields stay with the caller");
+            Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
+            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("aGVsbG8="));
         }
 
         private static IReadOnlyDictionary<string, string> Headers(params (string, string)[] pairs)
@@ -267,7 +305,7 @@ namespace UnityMCP.Editor.Tests
             var response = this.Post(Request(1, "tools/list"));
 
             var tools = ToolsOf(response);
-            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused", "ep_job_detail" }));
+            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused", "ep_job_detail", "ep_shot_job" }));
 
             var echo = tools.Single(t => t["name"].Value<string>() == "ep_echo");
             Assert.That(echo["annotations"]["readOnlyHint"].Value<bool>(), Is.True);

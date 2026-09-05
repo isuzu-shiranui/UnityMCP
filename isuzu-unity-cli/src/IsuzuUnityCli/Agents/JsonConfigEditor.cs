@@ -219,26 +219,47 @@ public static class JsonConfigEditor
             Directory.CreateDirectory(directory);
         }
 
-        var temporary = path + ".isuzu-tmp";
+        // Unique per process and per call: a fixed name is one two concurrent writers race
+        // for, where the loser renames the winner's content over the config.
+        var temporary = $"{path}.{Environment.ProcessId}.{Guid.NewGuid():N}.isuzu-tmp";
 
-        File.WriteAllText(temporary, text, new UTF8Encoding(false));
-        RestrictToOwner(temporary);
-
-        if (File.Exists(path) && new FileInfo(path).Length > 0)
+        try
         {
-            try
+            File.WriteAllText(temporary, text, new UTF8Encoding(false));
+            RestrictToOwner(temporary);
+
+            if (File.Exists(path) && new FileInfo(path).Length > 0)
             {
-                File.Copy(path, BackupFor(path), overwrite: true);
-                RestrictToOwner(BackupFor(path));
+                try
+                {
+                    File.Copy(path, BackupFor(path), overwrite: true);
+                    RestrictToOwner(BackupFor(path));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // A backup that cannot be taken is not a reason to refuse the write: the
+                    // rename below is what actually protects the file.
+                }
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            // The temp holds the whole config. Left behind by a failed rename it is a second copy
+            // of every secret in it, under a name nothing looks for.
+            if (File.Exists(temporary))
             {
-                // A backup that cannot be taken is not a reason to refuse the write: the rename
-                // below is what actually protects the file.
+                try
+                {
+                    File.Delete(temporary);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                }
             }
         }
 
-        File.Move(temporary, path, overwrite: true);
         RestrictToOwner(path);
     }
 

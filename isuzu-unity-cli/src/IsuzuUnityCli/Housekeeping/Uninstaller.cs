@@ -78,6 +78,13 @@ public static class Uninstaller
             // both are looked at once per known project rather than once per agent.
             if (agent.IsProjectScoped || agent.Name == "claude-code")
             {
+                // The entries are per project, but the file an agent keeps them in is not, and a
+                // backup beside it is there whether or not any Editor is running.
+                if (agent.ConfigPath is not null)
+                {
+                    AddStrayBackup(plan, agent.ConfigPath);
+                }
+
                 foreach (var root in projectRoots)
                 {
                     AddIfPresent(plan, agent, agent.ConfigPathFor(root), root);
@@ -153,9 +160,15 @@ public static class Uninstaller
         {
             try
             {
-                if (RemoveEntry(entry))
+                if (RemoveEntry(entry, out var backupLeft))
                 {
                     removed.Add(entry.Description);
+                }
+
+                if (backupLeft != null)
+                {
+                    failed.Add($"{backupLeft}: the copy of the config as it was could not be removed, "
+                        + "and it holds the token");
                 }
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or TomlEditException)
@@ -198,8 +211,10 @@ public static class Uninstaller
         return (removed, failed);
     }
 
-    private static bool RemoveEntry(ConfigEntryRemoval entry)
+    private static bool RemoveEntry(ConfigEntryRemoval entry, out string? backupLeft)
     {
+        backupLeft = null;
+
         if (entry.Target.Format == ConfigFormat.Toml)
         {
             var content = File.ReadAllText(entry.ConfigPath, Encoding.UTF8);
@@ -211,7 +226,7 @@ public static class Uninstaller
             }
 
             JsonConfigEditor.WriteText(entry.ConfigPath, updated);
-            DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
+            backupLeft = DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
             return true;
         }
 
@@ -228,7 +243,7 @@ public static class Uninstaller
         }
 
         JsonConfigEditor.Write(entry.ConfigPath, root);
-        DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
+        backupLeft = DiscardTheBackupOfWhatWasRemoved(entry.ConfigPath);
         return true;
     }
 
@@ -240,15 +255,20 @@ public static class Uninstaller
     /// leaving the credential this command was run to remove. A backup is worth having for an
     /// edit; it is not worth having for a deletion.
     /// </remarks>
-    private static void DiscardTheBackupOfWhatWasRemoved(string configPath)
+    /// <summary>The backup path when it could not be removed, or null when it is gone.</summary>
+    private static string? DiscardTheBackupOfWhatWasRemoved(string configPath)
     {
+        var backup = JsonConfigEditor.BackupFor(configPath);
+
         try
         {
-            File.Delete(JsonConfigEditor.BackupFor(configPath));
+            File.Delete(backup);
+            return null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // Reported by the caller's own listing rather than thrown: the entry itself is gone.
+            // Swallowing this would report a clean uninstall while the token is still on disk.
+            return backup;
         }
     }
 
@@ -265,9 +285,38 @@ public static class Uninstaller
     {
         var backup = JsonConfigEditor.BackupFor(configPath);
 
-        if (File.Exists(backup) && !plan.State.Contains(backup, StringComparer.OrdinalIgnoreCase))
+        if (!File.Exists(backup) || plan.State.Contains(backup, StringComparer.OrdinalIgnoreCase))
         {
-            plan.State.Add(backup);
+            return;
+        }
+
+        // A config that cannot be read is the one case where the copy beside it is the only way
+        // back, and it is also the case that reads as "no entry to remove" — so removing the copy
+        // would take the config's other servers and settings with it and report success.
+        if (File.Exists(configPath) && !CanBeRead(configPath))
+        {
+            return;
+        }
+
+        plan.State.Add(backup);
+    }
+
+    private static bool CanBeRead(string configPath)
+    {
+        try
+        {
+            if (Path.GetExtension(configPath).Equals(".toml", StringComparison.OrdinalIgnoreCase))
+            {
+                _ = File.ReadAllText(configPath, Encoding.UTF8);
+                return true;
+            }
+
+            _ = JsonConfigEditor.Read(configPath);
+            return true;
+        }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

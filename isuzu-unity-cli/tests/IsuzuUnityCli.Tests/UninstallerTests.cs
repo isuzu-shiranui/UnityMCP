@@ -150,4 +150,34 @@ public class UninstallerTests
 
         Assert.Contains(JsonConfigEditor.BackupFor(config), plan.State);
     }
+
+    /// <summary>
+    /// A config that cannot be read is the one case where the copy beside it is the only way
+    /// back — and it is also the case that reads as "no entry to remove", so the run would have
+    /// taken the copy and reported success.
+    /// </summary>
+    [Fact]
+    public void ABackupBesideAConfigThatCannotBeReadIsLeftAlone()
+    {
+        using var home = new TempHome();
+        var project = home.MakeDirectory("Game");
+        var config = Path.Combine(project, ".mcp.json");
+
+        File.WriteAllText(config, "{ this is not json");
+        File.WriteAllText(JsonConfigEditor.BackupFor(config), """{ "mcpServers": { "other": {} } }""");
+
+        var descriptor = new InstanceDescriptor
+        {
+            ProjectName = "Game",
+            ProjectPath = Path.Combine(project, "Assets"),
+            Port = 27180,
+            Token = "t",
+            Endpoint = "http://127.0.0.1:27180",
+            McpUrl = "http://127.0.0.1:27180/mcp",
+        };
+
+        var plan = Uninstaller.Plan([AgentCatalog.Find("claude-code")!], [descriptor], includeSkills: false);
+
+        Assert.DoesNotContain(JsonConfigEditor.BackupFor(config), plan.State);
+    }
 }
