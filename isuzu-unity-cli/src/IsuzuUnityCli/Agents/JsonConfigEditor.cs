@@ -46,8 +46,9 @@ public static class JsonConfigEditor
         {
             // JSON permits duplicate keys and JsonNode accepts them, then throws when the
             // dictionary is built on the first lookup — somewhere deep in a caller rather than
-            // here. Forcing it now turns that into a JsonException callers already handle.
-            _ = parsed.Count;
+            // here. The dictionary is per object, so every object has to be touched, not just the
+            // root: a duplicate nested two levels down waited until something walked that far.
+            ForceEveryDictionary(parsed);
         }
         catch (ArgumentException e)
         {
@@ -55,6 +56,28 @@ public static class JsonConfigEditor
         }
 
         return parsed;
+    }
+
+    private static void ForceEveryDictionary(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject o:
+                foreach (var pair in o)
+                {
+                    ForceEveryDictionary(pair.Value);
+                }
+
+                break;
+
+            case JsonArray a:
+                foreach (var item in a)
+                {
+                    ForceEveryDictionary(item);
+                }
+
+                break;
+        }
     }
 
     public static JsonObject Read(string path)
@@ -163,6 +186,12 @@ public static class JsonConfigEditor
         return Encoding.UTF8.GetString(buffer.ToArray()) + "\n";
     }
 
+    /// <summary>The copy kept of the file a write replaced.</summary>
+    /// <remarks>
+    /// It holds whatever the config held, which on a config carrying a bearer token means the
+    /// backup carries it too. Anything that takes an entry away has to take this with it.
+    /// </remarks>
+    public static string BackupFor(string configPath) => configPath + ".isuzu-bak";
     /// <summary>Writes the config without the old one ever ceasing to exist.</summary>
     /// <remarks>
     /// <c>File.WriteAllText</c> truncates in place: the file passes through every size from near
@@ -199,7 +228,8 @@ public static class JsonConfigEditor
         {
             try
             {
-                File.Copy(path, path + ".isuzu-bak", overwrite: true);
+                File.Copy(path, BackupFor(path), overwrite: true);
+                RestrictToOwner(BackupFor(path));
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
