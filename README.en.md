@@ -100,6 +100,8 @@ To avoid handling the token yourself, let the CLI register the client for you:
 isuzu-unity-cli setup --mcp --agent claude-code
 ```
 
+Claude Code files the server under the Unity project's path, so start it in the Unity project folder. A session started elsewhere does not see it.
+
 `--agent` accepts `claude-code`, `claude-desktop`, `codex`, `cursor`, `gemini` or `vscode`.
 
 Claude Desktop also has an extension bundle. Double-click `isuzu-unity-cli.mcpb` from [Releases](https://github.com/isuzu-shiranui/UnityMCP/releases) to install it.

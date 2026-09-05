@@ -14,7 +14,11 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project
 
 `--agent` accepts `claude-code`, `claude-desktop`, `codex`, `cursor`, `gemini` or `vscode`. `claude-desktop` works on Windows and macOS only, since Claude Desktop does not ship for Linux.
 
-`--scope user|project` applies to Claude Code. Project scope writes `.mcp.json` with `${UNITY_MCP_TOKEN}`, never a raw token.
+`--scope user|project` applies to Claude Code.
+
+The default, `user`, files the server under the Unity project's own path in `~/.claude.json`, so **start Claude Code in the Unity project folder**. A session started elsewhere, including in a subfolder, does not see the server, and `/mcp` lists nothing. This is what lets one machine hold several Unity projects at once, each reaching its own Editor.
+
+Project scope writes `.mcp.json` in the Unity project instead, with `${UNITY_MCP_TOKEN}` and never a raw token. Use it when the registration should travel with the repository.
 
 `--no-skill` skips the skill install. `--project <name>` targets a specific project. A running Editor is required.
 

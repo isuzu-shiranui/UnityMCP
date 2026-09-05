@@ -14,7 +14,11 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project
 
 `--agent` は `claude-code` / `claude-desktop` / `codex` / `cursor` / `gemini` / `vscode` から選べます。`claude-desktop` は Windows と macOS だけです。Linux には Claude Desktop が無いためです。
 
-`--scope user|project` は Claude Code 向けです。project スコープは `.mcp.json` に `${UNITY_MCP_TOKEN}` を書き込みます。生のトークンは書きません。
+`--scope user|project` は Claude Code に効きます。
+
+既定の `user` は、`~/.claude.json` の中でその Unity プロジェクトのパスの下にサーバーを登録します。そのため **Claude Code は Unity プロジェクトのフォルダーで起動してください**。別の場所で起動すると、サブフォルダーであってもサーバーは見えず、`/mcp` には何も出ません。1 台で複数の Unity プロジェクトを開き、それぞれ自分の Editor につなげるのはこの仕組みのためです。
+
+project スコープでは、代わりに Unity プロジェクト内に `.mcp.json` を書きます。トークンは `${UNITY_MCP_TOKEN}` で参照し、生のトークンは書きません。登録をリポジトリと一緒に配る場合はこちらを使ってください。
 
 `--no-skill` はスキルの導入をスキップします。`--project <name>` で対象プロジェクトを指定します。Editor が起動している必要があります。
 
