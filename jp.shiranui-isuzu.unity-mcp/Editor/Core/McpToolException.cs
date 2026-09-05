@@ -3,6 +3,31 @@ using System;
 namespace UnityMCP.Editor.Core
 {
     /// <summary>
+    /// Handlers that report failure as <c>{"error": "message"}</c> rather than by throwing.
+    /// </summary>
+    /// <remarks>
+    /// Both transports have to read this the same way. A result carrying <c>error</c> is a
+    /// failure, and a caller told otherwise acts on a message that says the opposite.
+    /// </remarks>
+    internal static class HandlerErrorResult
+    {
+        /// <summary>The message a handler reported this way, or null when the result is not one.</summary>
+        public static string Message(Newtonsoft.Json.Linq.JObject result)
+        {
+            if (result == null || result["result"] != null)
+            {
+                return null;
+            }
+
+            var error = result["error"];
+
+            return error != null && error.Type == Newtonsoft.Json.Linq.JTokenType.String
+                ? error.ToString()
+                : null;
+        }
+    }
+
+    /// <summary>
     /// Thrown when a tool call fails in a way the caller can act on — a missing argument,
     /// an uncoercible value, a destructive call without confirmation.
     /// <para>

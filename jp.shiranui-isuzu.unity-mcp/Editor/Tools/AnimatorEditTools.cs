@@ -51,7 +51,7 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "animator_add_layer",
             "Add a layer to an Animator Controller, with an empty state machine. Set 'weight' to 1 " +
-            "unless the layer is meant to start switched off; a new layer defaults to 0 and then " +
+            "unless the layer is meant to start switched off; this tool creates one at 1, and then " +
             "animates nothing however it is wired. The first layer's weight is ignored by Unity, " +
             "which always plays it at 1." + Shared,
             Idempotency = McpIdempotency.Unsafe,

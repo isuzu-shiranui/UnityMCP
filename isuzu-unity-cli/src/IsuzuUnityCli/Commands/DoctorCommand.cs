@@ -23,6 +23,9 @@ public sealed class EntryReport
     /// <summary>Set when the entry is stale and this descriptor is what it should say.</summary>
     public InstanceDescriptor? Repair { get; init; }
 
+    /// <summary>A key a repair takes away after writing <see cref="JsonPath"/>.</summary>
+    public IReadOnlyList<string>? RetireJsonPath { get; init; }
+
     /// <summary>True for a config committed with the project, which never carries the token itself.</summary>
     public bool UsesPlaceholderToken { get; init; }
 }
@@ -269,6 +272,30 @@ public static class DoctorCommand
                     McpServerEntry.ClaudeCodeProjectKey(pair.Key),
                     StringComparison.OrdinalIgnoreCase));
 
+            var current = McpServerEntry.ClaudeCodeProjectKey(pair.Key);
+
+            if (current != pair.Key)
+            {
+                // Claude Code reads this map by a forward-slash key, so an entry under any other
+                // spelling is one it never sees, however well the URL and the token check out.
+                // A repair writes the entry at the key it reads and takes the old one away.
+                reports.Add(new EntryReport
+                {
+                    Agent = agent,
+                    ConfigPath = agent.ConfigPath!,
+                    JsonPath = ["projects", current, "mcpServers", AgentCatalog.ServerName],
+                    RetireJsonPath = ["projects", pair.Key, "mcpServers", AgentCatalog.ServerName],
+                    Scope = pair.Key,
+                    Status = descriptor != null
+                        ? "filed where Claude Code does not read it, by a build before 4.0.4"
+                        : "filed where Claude Code does not read it, by a build before 4.0.4; "
+                          + "start that project's Editor, or run setup --mcp",
+                    Repair = descriptor,
+                });
+
+                continue;
+            }
+
             reports.Add(Judge(agent, agent.ConfigPath!, ["projects", pair.Key, "mcpServers", AgentCatalog.ServerName], pair.Key, value, descriptor, running, placeholder: false));
         }
     }
@@ -466,6 +493,11 @@ public static class DoctorCommand
             : McpServerEntry.For(report.Agent, descriptor, context.ExecutablePath);
 
         JsonConfigEditor.Upsert(root, report.JsonPath!, entry);
+
+        if (report.RetireJsonPath != null)
+        {
+            JsonConfigEditor.Remove(root, report.RetireJsonPath);
+        }
 
         if (report.Agent.Name == "vscode")
         {

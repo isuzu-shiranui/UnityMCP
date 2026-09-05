@@ -119,7 +119,7 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "scene_open",
             "Open a scene, replacing what is open or adding to it. Unsaved changes stop this " +
-            "rather than being discarded.",
+            "rather than being discarded, unless the scene is being added additively.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Open(
             [McpArg("path", "Project path of the scene, e.g. Assets/Scenes/Main.unity.")]

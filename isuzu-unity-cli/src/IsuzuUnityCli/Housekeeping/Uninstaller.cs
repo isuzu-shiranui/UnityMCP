@@ -238,11 +238,23 @@ public static class Uninstaller
             return;
         }
 
-        var path = McpServerEntry.PathFor(agent, projectRoot);
+        var paths = new List<IReadOnlyList<string>> { McpServerEntry.PathFor(agent, projectRoot) };
 
-        if (ContainsJsonEntry(configPath, path))
+        // An earlier Windows build filed the entry under a backslash key. Leaving it there leaves
+        // the token there too.
+        var superseded = McpServerEntry.SupersededClaudeCodePath(agent, projectRoot);
+
+        if (superseded != null)
         {
-            plan.ConfigEntries.Add(new ConfigEntryRemoval { Target = agent, ConfigPath = configPath, JsonPath = path });
+            paths.Add(superseded);
+        }
+
+        foreach (var path in paths)
+        {
+            if (ContainsJsonEntry(configPath, path))
+            {
+                plan.ConfigEntries.Add(new ConfigEntryRemoval { Target = agent, ConfigPath = configPath, JsonPath = path });
+            }
         }
     }
 

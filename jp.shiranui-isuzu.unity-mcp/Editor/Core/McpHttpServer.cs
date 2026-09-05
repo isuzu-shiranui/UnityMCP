@@ -1162,21 +1162,15 @@ namespace UnityMCP.Editor.Core
                     }
                 };
             }
-            else if (result != null
-                     && result["error"] != null
-                     && result["error"].Type == JTokenType.String
-                     && result["result"] == null)
+            else if (HandlerErrorResult.Message(result) is { } reported)
             {
-                // A handler that reports failure as `{"error": "msg"}` instead of throwing.
-                // Promote it to a proper error envelope so status and HTTP code reflect the
-                // failure.
                 envelope = new JObject
                 {
                     ["status"] = "error",
                     ["error"] = new JObject
                     {
                         ["code"] = "invalid_params",
-                        ["message"] = result["error"].ToString()
+                        ["message"] = reported
                     }
                 };
                 statusCode = 400;
