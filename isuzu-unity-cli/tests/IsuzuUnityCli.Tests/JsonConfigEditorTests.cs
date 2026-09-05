@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Agents;
+using IsuzuUnityCli.Tests.Fakes;
 using Xunit;
 
 namespace IsuzuUnityCli.Tests;
@@ -213,5 +214,80 @@ public sealed class JsonConfigEditorTests
 
         Assert.NotNull(root["mcpServers"]);
         Assert.Empty((JsonObject)root["mcpServers"]!);
+    }
+    /// <summary>
+    /// The write used to truncate the real file in place, so the config passed through every size
+    /// from near zero on its way to the new content with no second copy anywhere. Losing that
+    /// window costs the whole file: the login, every project key, every tool grant.
+    /// </summary>
+    [Fact]
+    public void WritingKeepsWhatItReplaces()
+    {
+        using var home = new TempHome();
+        var path = home.At("config.json");
+
+        File.WriteAllText(path, """{ "keep": "the old content" }""");
+
+        JsonConfigEditor.Write(path, JsonConfigEditor.Parse("""{ "new": true }"""));
+
+        Assert.True(File.Exists(path + ".isuzu-bak"));
+        Assert.Contains("the old content", File.ReadAllText(path + ".isuzu-bak"));
+        Assert.Contains("new", File.ReadAllText(path));
+        Assert.False(File.Exists(path + ".isuzu-tmp"), "the temporary file is renamed, not left");
+    }
+
+    [Fact]
+    public void WritingWhereThereWasNothingLeavesNoBackup()
+    {
+        using var home = new TempHome();
+        var path = home.At("fresh.json");
+
+        JsonConfigEditor.Write(path, JsonConfigEditor.Parse("""{ "new": true }"""));
+
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(path + ".isuzu-bak"), "there was nothing to keep");
+    }
+
+    /// <summary>
+    /// A lone surrogate is legal JSON and cannot be encoded as UTF-8. Left as an
+    /// InvalidOperationException it reached the caller as a stack trace and a dead process.
+    /// </summary>
+    [Fact]
+    public void TextThatCannotBeWrittenBackIsAHandledError()
+    {
+        var root = JsonConfigEditor.Parse("{\"note\":\"\\ud800\"}");
+
+        var e = Assert.Throws<JsonException>(() => { _ = JsonConfigEditor.Serialize(root); });
+        Assert.Contains("cannot be written back", e.Message);
+    }
+
+    /// <summary>
+    /// JSON permits duplicate keys. JsonNode accepts them and throws only when the dictionary is
+    /// built on the first lookup, which happened deep inside a caller rather than at the parse.
+    /// </summary>
+    [Fact]
+    public void ADuplicateKeyIsAHandledError()
+    {
+        var e = Assert.Throws<JsonException>(
+            () => JsonConfigEditor.Parse("""{"projects":{"a":1},"projects":{"b":2}}"""));
+
+        Assert.Contains("duplicate key", e.Message);
+    }
+
+    /// <summary>
+    /// A config that cannot be written back has to leave the file it could not replace alone.
+    /// </summary>
+    [Fact]
+    public void AFailedWriteLeavesTheFileAsItWas()
+    {
+        using var home = new TempHome();
+        var path = home.At("config.json");
+
+        File.WriteAllText(path, """{ "keep": "everything" }""");
+
+        var root = JsonConfigEditor.Parse("{\"note\":\"\\ud800\"}");
+
+        Assert.Throws<JsonException>(() => { JsonConfigEditor.Write(path, root); });
+        Assert.Contains("everything", File.ReadAllText(path));
     }
 }

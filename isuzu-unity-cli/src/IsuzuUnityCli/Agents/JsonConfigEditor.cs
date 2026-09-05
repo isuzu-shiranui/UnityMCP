@@ -39,8 +39,22 @@ public static class JsonConfigEditor
             return new JsonObject();
         }
 
-        return JsonNode.Parse(text) as JsonObject
+        var parsed = JsonNode.Parse(text) as JsonObject
             ?? throw new JsonException("the config is not a JSON object");
+
+        try
+        {
+            // JSON permits duplicate keys and JsonNode accepts them, then throws when the
+            // dictionary is built on the first lookup — somewhere deep in a caller rather than
+            // here. Forcing it now turns that into a JsonException callers already handle.
+            _ = parsed.Count;
+        }
+        catch (ArgumentException e)
+        {
+            throw new JsonException("the config has a duplicate key: " + e.Message, e);
+        }
+
+        return parsed;
     }
 
     public static JsonObject Read(string path)
@@ -131,14 +145,38 @@ public static class JsonConfigEditor
     {
         using var buffer = new MemoryStream();
 
-        using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
+        try
         {
-            root.WriteTo(writer);
+            using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
+            {
+                root.WriteTo(writer);
+            }
+        }
+        catch (InvalidOperationException e)
+        {
+            // A string holding a lone surrogate is legal JSON and cannot be encoded as UTF-8.
+            // Callers handle a JsonException; an InvalidOperationException reaches them as a
+            // stack trace and a dead process.
+            throw new JsonException("the config holds text that cannot be written back: " + e.Message, e);
         }
 
         return Encoding.UTF8.GetString(buffer.ToArray()) + "\n";
     }
 
+    /// <summary>Writes the config without the old one ever ceasing to exist.</summary>
+    /// <remarks>
+    /// <c>File.WriteAllText</c> truncates in place: the file passes through every size from near
+    /// zero on its way to the new content, in the location the agent reads from, with no second
+    /// copy anywhere. Losing that window costs the whole file — for Claude Code that is the login,
+    /// every project key, every tool grant and the prompt history, none of it reconstructable.
+    /// Writing beside it and renaming over it means a reader sees either the old file or the new
+    /// one, and the rename is atomic on Windows as well as on POSIX.
+    /// <para>
+    /// The previous content is kept as <c>.isuzu-bak</c> before the rename, for the failures a
+    /// rename cannot cover: a config already damaged when it was read, or an edit that turns out
+    /// to be wrong.
+    /// </para>
+    /// </remarks>
     public static void Write(string path, JsonObject root)
     {
         var directory = Path.GetDirectoryName(path);
@@ -148,7 +186,27 @@ public static class JsonConfigEditor
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(path, Serialize(root), new UTF8Encoding(false));
+        // Serialised first, so a config that cannot be written back fails with the file untouched.
+        var text = Serialize(root);
+        var temporary = path + ".isuzu-tmp";
+
+        File.WriteAllText(temporary, text, new UTF8Encoding(false));
+        RestrictToOwner(temporary);
+
+        if (File.Exists(path) && new FileInfo(path).Length > 0)
+        {
+            try
+            {
+                File.Copy(path, path + ".isuzu-bak", overwrite: true);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // A backup that cannot be taken is not a reason to refuse the write: the rename
+                // below is what actually protects the file.
+            }
+        }
+
+        File.Move(temporary, path, overwrite: true);
         RestrictToOwner(path);
     }
 
