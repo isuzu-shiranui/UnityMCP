@@ -12,7 +12,7 @@ There is also a route that installs the package without Git. The VRChat Creator 
 https://unity-mcp.shiranui-isuzu.dev/vpm.json
 ```
 
-Paste that URL into Add Repository. In VCC it is on the Packages tab of the Settings page. In ALCOM it is on the Repositories page under Resources. The one-click add link is on the [getting started guide](https://unity-mcp.shiranui-isuzu.dev/en/#vpm-title).
+Paste that URL into Add Repository. In VCC it is on the Packages tab of the Settings page. In ALCOM it is on the Repositories tab of the Packages page. The one-click add link is on the [getting started guide](https://unity-mcp.shiranui-isuzu.dev/en/#vpm-title).
 
 Once the repository is added, Unity MCP appears in the project's package list. The repository carries every published version, so an older one can be installed from the same list.
 

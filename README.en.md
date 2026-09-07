@@ -43,7 +43,7 @@ With the VRChat Creator Companion (VCC) or ALCOM, install from the VPM repositor
 https://unity-mcp.shiranui-isuzu.dev/vpm.json
 ```
 
-Paste that URL into Add Repository. In VCC that button is on the Packages tab of the Settings page. In ALCOM it is on the Repositories page under Resources. Once the repository is added, Unity MCP appears in the project's package list.
+Paste that URL into Add Repository. In VCC that button is on the Packages tab of the Settings page. In ALCOM it is on the Repositories tab of the Packages page. Once the repository is added, Unity MCP appears in the project's package list.
 
 The one-click add link is on the getting started guide, under [If you use VCC or ALCOM](https://unity-mcp.shiranui-isuzu.dev/en/#vpm-title).
 
