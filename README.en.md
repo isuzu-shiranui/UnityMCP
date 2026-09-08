@@ -12,9 +12,11 @@ If this is your first time, start with [Getting started with Unity MCP](https://
 
 This framework opens the Unity Editor to AI agents, to people and to scripts. Running a command by hand and calling it from a script go through the same path.
 
+Any Unity project will do. A VPM repository is published as well, so it can be installed from VCC (VRChat Creator Companion) and from ALCOM.
+
 The main path is the command line `isuzu-unity-cli`. The published binaries are native, so they need no Node and no .NET runtime.
 
-MCP clients connect directly to the Streamable HTTP endpoint that the Editor itself publishes at `http://127.0.0.1:<port>/mcp`. There is no separate MCP server process.
+MCP clients connect directly to the Streamable HTTP endpoint that the Editor itself publishes at `http://127.0.0.1:<port>/mcp`. There is no separate MCP server process. Checked with Claude Code, Cursor, Codex, the Gemini CLI, VS Code and Claude Desktop.
 
 A tool is a static C# method with `[McpTool]` on it. Every tool is served to both the CLI and MCP clients.
 

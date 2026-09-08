@@ -16,7 +16,12 @@
     "editor",
     "automation",
     "ai-agent",
-    "cli"
+    "cli",
+    "claude",
+    "cursor",
+    "codex",
+    "vpm",
+    "vcc"
   ],
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.1"

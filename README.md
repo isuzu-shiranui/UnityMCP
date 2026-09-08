@@ -12,9 +12,11 @@
 
 Unity Editor を AI エージェントに開放するフレームワークです。人が手で実行しても、スクリプトから呼んでも、同じ経路を通ります。
 
+Unity プロジェクトなら種類を問いません。VPM リポジトリも用意しているので、VCC（VRChat Creator Companion）や ALCOM からも入れられます。
+
 主な経路はコマンドラインの `isuzu-unity-cli` です。配布している実行ファイルはネイティブなので、Node も .NET ランタイムも要りません。
 
-MCP クライアントは、Editor 自身が公開する Streamable HTTP エンドポイント `http://127.0.0.1:<port>/mcp` に直接つながります。別プロセスの MCP サーバーはありません。
+MCP クライアントは、Editor 自身が公開する Streamable HTTP エンドポイント `http://127.0.0.1:<port>/mcp` に直接つながります。別プロセスの MCP サーバーはありません。Claude Code、Cursor、Codex、Gemini CLI、VS Code、Claude Desktop で確認しています。
 
 ツールは C# の static メソッドに `[McpTool]` を付けるだけで定義できます。CLI と MCP の両方に配信されます。
 
