@@ -121,6 +121,9 @@ public sealed class UnityHttpClientTests
             Client = Client(),
             ReadDescriptors = () => [server.Descriptor()],
             WorkingDirectory = Path.GetTempPath(),
+            // The assertion below is on the indented form. The default reads
+            // Console.IsOutputRedirected, which is true under the test host.
+            Indented = true,
         };
 
         var code = await CallCommand.Run(ArgParser.Parse(["call", "build_player", "--target", "StandaloneWindows64"]), context);

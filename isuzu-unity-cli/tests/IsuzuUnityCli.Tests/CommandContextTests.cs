@@ -11,11 +11,13 @@ public sealed class CommandContextTests
          "message":"'execute_code' is still running on the Editor main thread. The Editor is showing a dialog \"MCP probe\" (Pick one) with buttons Yes / No."}}
         """;
 
-    private static (CommandContext Context, StringWriter Out, StringWriter Err) Context()
+    // Indentation is stated rather than inherited: its default reads Console.IsOutputRedirected,
+    // which depends on how the test host was started.
+    private static (CommandContext Context, StringWriter Out, StringWriter Err) Context(bool indented = true)
     {
         var output = new StringWriter();
         var error = new StringWriter();
-        return (new CommandContext { Out = output, Err = error }, output, error);
+        return (new CommandContext { Out = output, Err = error, Indented = indented }, output, error);
     }
 
     [Fact]
@@ -27,6 +29,20 @@ public sealed class CommandContextTests
 
         Assert.Contains("\"jobId\": \"execute_code-3\"", output.ToString());
         Assert.Contains("showing a dialog \"MCP probe\"", error.ToString());
+    }
+
+    [Fact]
+    public void PackedOutputCarriesTheSameFieldsWithoutTheWhitespace()
+    {
+        var (indented, prettyOut, _) = Context();
+        var (packed, packedOut, _) = Context(indented: false);
+
+        indented.Report(Envelope.Parse(202, Running), raw: false);
+        packed.Report(Envelope.Parse(202, Running), raw: false);
+
+        Assert.Contains("\"jobId\":\"execute_code-3\"", packedOut.ToString());
+        Assert.DoesNotContain("\"jobId\": ", packedOut.ToString());
+        Assert.True(packedOut.ToString().Length < prettyOut.ToString().Length);
     }
 
     [Fact]

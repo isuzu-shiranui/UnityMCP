@@ -27,6 +27,9 @@ namespace UnityMCP.Editor.Tests
         [SetUp]
         public void SetUp()
         {
+            // The baseline outlives a single test, so each one starts from nothing.
+            SceneHierarchyBaseline.Reset();
+
             this.root = new GameObject(RootName);
 
             var childA = new GameObject(ChildAName);
@@ -201,6 +204,302 @@ namespace UnityMCP.Editor.Tests
             Assert.IsNull(childA["path"], "the fields allowlist must still drop unlisted keys");
         }
 
+        private static JObject Full()
+        {
+            return SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix)));
+        }
+
+        private static JObject Since(string snapshotId)
+        {
+            return SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix), ("since", snapshotId)));
+        }
+
+        private static string SnapshotOf(JObject result)
+        {
+            return result["snapshotId"]?.ToString();
+        }
+
+        private static int Count(JObject result, string key)
+        {
+            return (result[key] as JArray)?.Count ?? -1;
+        }
+
+        [Test]
+        public void EveryReplyNamesTheStateItDescribes()
+        {
+            var full = Full();
+
+            Assert.That(SnapshotOf(full), Is.Not.Null.And.Not.Empty,
+                "without an id the caller has nothing to ask for a difference from");
+        }
+
+        [Test]
+        public void AStillSceneDiffersFromItsOwnSnapshotInNothing()
+        {
+            var result = Since(SnapshotOf(Full()));
+
+            Assert.That(Count(result, "added"), Is.Zero);
+            Assert.That(Count(result, "changed"), Is.Zero);
+            Assert.That(Count(result, "removed"), Is.Zero);
+            Assert.That(result["unchanged"].Value<int>(), Is.EqualTo(result["total"].Value<int>()));
+        }
+
+        [Test]
+        public void OneClientReadingDoesNotConsumeTheChangesAnotherIsWaitingFor()
+        {
+            // The failure this pins: with one baseline per filter, the second read would move the
+            // state the first caller compares against, and it would never hear about the change.
+            var a = SnapshotOf(Full());
+            var b = SnapshotOf(Full());
+
+            var added = new GameObject(NamePrefix + "Shared");
+            try
+            {
+                var forB = Since(b);
+                var forA = Since(a);
+
+                Assert.That(Count(forB, "added"), Is.EqualTo(1), "B has to see it");
+                Assert.That(Count(forA, "added"), Is.EqualTo(1), "and B reading must not eat it for A");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(added);
+            }
+        }
+
+        [Test]
+        public void AReplyThatNeverArrivedLeavesTheOldSnapshotUsable()
+        {
+            // A caller that did not receive an answer retries with the id it still holds, and has
+            // to be told the same difference rather than nothing.
+            var held = SnapshotOf(Full());
+
+            var added = new GameObject(NamePrefix + "Lost");
+            try
+            {
+                var first = Since(held);
+                var retry = Since(held);
+
+                Assert.That(Count(first, "added"), Is.EqualTo(1));
+                Assert.That(Count(retry, "added"), Is.EqualTo(1), "the snapshot must not have moved");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(added);
+            }
+        }
+
+        [Test]
+        public void ASnapshotTheEditorNoLongerHoldsIsAnErrorRatherThanAnEmptyDiff()
+        {
+            var result = Since("snap-does-not-exist");
+
+            Assert.That(result["error"], Is.Not.Null);
+            Assert.That(result["added"], Is.Null, "an empty diff would read as a still scene");
+        }
+
+        [Test]
+        public void ReorderingSiblingsIsAChangeRatherThanNothing()
+        {
+            // A path carries an index only where a sibling name repeats, so without the sibling
+            // index a swap of two differently-named siblings was invisible.
+            var snapshot = SnapshotOf(Full());
+            GameObject.Find(RootName + "/" + ChildBName).transform.SetSiblingIndex(0);
+
+            var result = Since(snapshot);
+
+            Assert.That(Count(result, "changed"), Is.GreaterThan(0), "the reorder has to be reported");
+            Assert.That(Count(result, "removed"), Is.Zero);
+            Assert.That(Count(result, "added"), Is.Zero);
+        }
+
+        [Test]
+        public void ARenameIsOneChangedNodeRatherThanARemovalAndAnAddition()
+        {
+            var snapshot = SnapshotOf(Full());
+
+            // A leaf: renaming a parent rewrites the path of everything under it, and those are
+            // real changes too. This isolates the renamed object itself.
+            GameObject.Find(RootName + "/" + ChildBName).name = ChildBName + "Renamed";
+
+            var result = Since(snapshot);
+
+            // Following objects by path would report this as the old one disappearing and a new
+            // one arriving, which is what instance ids are here to avoid.
+            Assert.That(Count(result, "changed"), Is.EqualTo(1));
+            Assert.That(Count(result, "removed"), Is.Zero);
+            Assert.That(Count(result, "added"), Is.Zero);
+        }
+
+        [Test]
+        public void ADestroyedObjectIsNamedInRemovedTheWayTheNodesNameIt()
+        {
+            var full = Full();
+            var childB = FindByName(ChildrenOf(FindByName(SceneObjects(full), RootName)), ChildBName);
+            var goneId = childB["instanceId"];
+
+            UnityEngine.Object.DestroyImmediate(GameObject.Find(RootName + "/" + ChildBName));
+
+            var result = Since(SnapshotOf(full));
+            var removed = (JArray)result["removed"];
+
+            Assert.That(removed.Count, Is.EqualTo(1));
+            // Same JSON type the nodes carry, so a caller keyed by the id it was given can find
+            // the removal with it. Before Unity 6.5 that is a number, not a string.
+            Assert.That(removed[0].Type, Is.EqualTo(goneId.Type),
+                "removed ids have to be spelled the way node ids are");
+            Assert.That(removed[0].ToString(), Is.EqualTo(goneId.ToString()));
+        }
+
+        [Test]
+        public void AChangedNodeReplacesRatherThanMergesIntoWhatWasHeld()
+        {
+            // A caller applying a shallow merge would keep the old tag and the old active, both
+            // of which are gone from the node precisely because they went back to their default.
+            var childB = GameObject.Find(RootName + "/" + ChildBName);
+            childB.SetActive(false);
+            childB.tag = "Player";
+
+            var snapshot = SnapshotOf(Full());
+            childB.SetActive(true);
+            childB.tag = "Untagged";
+
+            var changed = (JArray)Since(snapshot)["changed"];
+            var node = FindByName(changed, ChildBName);
+
+            Assert.That(node, Is.Not.Null, "going back to the default is still a change");
+            Assert.That(node["active"], Is.Null, "the node carries no active, meaning true");
+            Assert.That(node["tag"], Is.Null, "the node carries no tag, meaning Untagged");
+        }
+
+        [Test]
+        public void RemovedNamesWhatLeftTheResultRatherThanWhatWasDestroyed()
+        {
+            // Renaming an object out of the filter puts it in `removed` while it sits in the
+            // scene. A caller deleting its own record of the object on that word would be wrong.
+            var snapshot = SnapshotOf(Full());
+            var stillThere = GameObject.Find(RootName + "/" + ChildBName);
+            stillThere.name = "OutOfTheFilter";
+
+            try
+            {
+                var result = Since(snapshot);
+
+                Assert.That(Count(result, "removed"), Is.EqualTo(1));
+                Assert.That(stillThere, Is.Not.Null, "and the object is still in the scene");
+                Assert.That(GameObject.Find("/" + RootName + "/OutOfTheFilter"), Is.Not.Null);
+            }
+            finally
+            {
+                stillThere.name = ChildBName;
+            }
+        }
+
+        [Test]
+        public void ADiffCarriesTheParentAndSceneTheTreeWouldHaveShown()
+        {
+            // A diff arrives flat, so the two things the tree says by its shape have to be on
+            // the node instead.
+            var snapshot = SnapshotOf(Full());
+            var added = new GameObject(NamePrefix + "Flat");
+            added.transform.SetParent(this.root.transform);
+
+            try
+            {
+                var node = FindByName((JArray)Since(snapshot)["added"], NamePrefix + "Flat");
+
+                Assert.That(node, Is.Not.Null);
+                Assert.That(node["parentInstanceId"]?.ToString(),
+                    Is.EqualTo(EntityIdCompat.WireIdOf(this.root).ToString()),
+                    "without this the caller can only re-nest by parsing paths");
+                Assert.That(node["scene"], Is.Not.Null,
+                    "a root moving between two open scenes changes nothing else about it");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(added);
+            }
+        }
+
+        [Test]
+        public void TheTreeLeavesOutWhatItsShapeAlreadySays()
+        {
+            // Carried on every node these were 40% of the reply, and the tree states both: the
+            // scene by its grouping, the parent by the nesting.
+            var node = FindByName(SceneObjects(Full()), RootName);
+
+            Assert.That(node["parentInstanceId"], Is.Null);
+            Assert.That(node["scene"], Is.Null);
+        }
+
+        [Test]
+        public void ASnapshotIsNotComparedAgainstADifferentWalk()
+        {
+            // A shallower walk leaves out everything below its depth. Diffed against a deeper
+            // snapshot it would report all of that as removed, naming objects that are still in
+            // the scene — a confident wrong answer rather than an error.
+            var deep = SnapshotOf(SceneHierarchy.Browse(
+                ToolArgs.Of(("name", NamePrefix), ("maxDepth", 12))));
+
+            var result = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("maxDepth", 1), ("since", deep)));
+
+            Assert.That(result["error"], Is.Not.Null);
+            Assert.That(result["removed"], Is.Null);
+        }
+
+        [Test]
+        public void ASnapshotIsComparedAgainstTheSameWalkWithoutComplaint()
+        {
+            var snapshot = SnapshotOf(SceneHierarchy.Browse(
+                ToolArgs.Of(("name", NamePrefix), ("maxDepth", 12))));
+
+            var result = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("maxDepth", 12), ("since", snapshot)));
+
+            Assert.That(result["error"], Is.Null);
+            Assert.That(Count(result, "removed"), Is.Zero);
+        }
+
+        [Test]
+        public void APagedDiffIsRefusedRatherThanAnsweredWrongly()
+        {
+            // The snapshot would hold one window and the next call another, so an object pushed
+            // out of the window by an earlier insertion would read as removed while it is still
+            // in the scene.
+            var snapshot = SnapshotOf(Full());
+            var limited = SceneHierarchy.Browse(ToolArgs.Of(("since", snapshot), ("limit", 10)));
+            var skipped = SceneHierarchy.Browse(ToolArgs.Of(("since", snapshot), ("offset", 5)));
+
+            Assert.That(limited["error"], Is.Not.Null);
+            Assert.That(skipped["error"], Is.Not.Null);
+            Assert.That(limited["added"], Is.Null);
+        }
+
+        [Test]
+        public void AFieldsAllowlistCannotDropTheKeyTheDiffIsBuiltOn()
+        {
+            // Without instanceId every node fails to match itself, and the call reports a still
+            // scene however much moved.
+            var snapshot = SnapshotOf(SceneHierarchy.Browse(
+                ToolArgs.Of(("name", NamePrefix), ("fields", "name"))));
+
+            var added = new GameObject(NamePrefix + "Added");
+            try
+            {
+                var result = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", NamePrefix), ("since", snapshot), ("fields", "name")));
+
+                Assert.That(Count(result, "added"), Is.EqualTo(1), "the new object has to be seen");
+                Assert.That(((JArray)result["added"])[0]["instanceId"], Is.Not.Null,
+                    "instanceId is kept even though the allowlist did not name it");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(added);
+            }
+        }
+
         private static int ActiveSceneIndex()
         {
             var active = SceneManager.GetActiveScene();
@@ -217,18 +516,34 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
-        public void EveryObjectReportsHowManyOfItsComponentsLostTheirScript()
+        public void AnObjectWhoseScriptsAllResolveSaysSoByLeavingTheCountOut()
         {
             // A missing script cannot be synthesised in a test: it needs a serialised reference to
-            // a type the domain no longer has. What can be pinned is that the count is reported and
-            // reads zero for objects whose components all resolve, so a caller can trust the field
-            // rather than inferring absence from a name it has to match.
+            // a type the domain no longer has. What can be pinned is the reading of an absent key,
+            // which is what the description promises: no `missingScripts` means none are missing.
             var result = SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix)));
             var nodes = SceneObjects(result);
             var node = FindByName(nodes, RootName);
 
-            Assert.That(node["missingScripts"], Is.Not.Null, "the field has to be present to be trusted");
-            Assert.That(node["missingScripts"].Value<int>(), Is.Zero);
+            Assert.That(node["missingScripts"], Is.Null, "a zero count is carried by the key's absence");
+        }
+
+        [Test]
+        public void KeysSittingAtTheirDefaultAreLeftOutOfEveryNode()
+        {
+            // These four are the bulk of a large response and say nothing. The contract is that a
+            // caller reads their absence as the default, so a node built from an untouched
+            // GameObject has to carry none of them.
+            var result = SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix)));
+            var node = FindByName(SceneObjects(result), RootName);
+
+            Assert.That(node["active"], Is.Null, "active true is the default");
+            Assert.That(node["tag"], Is.Null, "Untagged is the default");
+            Assert.That(node["layer"], Is.Null, "Default is the default layer");
+            Assert.That(node["name"], Is.Not.Null, "name is never dropped");
+            Assert.That(node["path"], Is.Not.Null, "path is never dropped");
+            Assert.That(node["instanceId"], Is.Not.Null, "instanceId is never dropped");
+            Assert.That(node["id"], Is.Null, "id duplicated instanceId and is gone");
         }
 
         [Test]

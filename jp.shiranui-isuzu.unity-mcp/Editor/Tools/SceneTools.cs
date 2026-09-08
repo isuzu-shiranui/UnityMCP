@@ -27,7 +27,14 @@ namespace UnityMCP.Editor.Tools
             "include objects that do not themselves satisfy the filter. While a prefab is open for " +
             "editing this still reports the scene behind it, and paths from that scene cannot be " +
             "resolved by the gameobject_ and inspect_ tools, which address the prefab contents " +
-            "instead.",
+            "instead. In a reply that was not narrowed by 'fields', a key missing from a node " +
+            "is at its default: active true, tag Untagged, layer Default, no missing " +
+            "scripts. Under a 'fields' allowlist a key is missing because it was not " +
+            "asked for, and says nothing about the object — the two readings do not mix, " +
+            "so do not fold a narrowed reply into a cache of full ones. The allowlist " +
+            "always keeps 'instanceId', because every reply is a state a later call can " +
+            "ask the difference from. Every reply carries a 'snapshotId' naming the state " +
+            "it describes, which 'since' takes to ask for a difference instead of a tree.",
             Idempotency = McpIdempotency.Safe,
             // Produces the object paths every other tool takes as an argument, so it is needed
             // before most of them rather than instead of them.
@@ -61,7 +68,32 @@ namespace UnityMCP.Editor.Tools
             [McpArg("offset", "Entries to skip, for paging.")]
             int offset = 0,
             [McpArg("fields", "Comma-separated field whitelist, to keep responses small.")]
-            string fields = null)
+            string fields = null,
+            [McpArg("since", "A 'snapshotId' from an earlier call. Given one, the reply is what " +
+                             "differs from that state — added, changed and removed, flat rather " +
+                             "than nested, with a count of the rest — instead of the tree. " +
+                             "Objects are followed by instance id, so a rename reads as one " +
+                             "change rather than a removal and an addition. Every reply carries " +
+                             "its own 'snapshotId', including this one, so a caller holds its " +
+                             "own place and nobody else's call moves it; a reply that never " +
+                             "arrives leaves the last id usable. It covers the whole filtered " +
+                             "set, so 'limit' and 'offset' are refused with it. A " +
+                             "snapshot the Editor no longer holds is an error asking for a " +
+                             "fresh read; it does not survive the Editor reloading its scripts. " +
+                             "Ask with the same filters the snapshot was taken under: comparing " +
+                             "across two different walks is refused, because everything the " +
+                             "narrower one leaves out would otherwise read as removed. " +
+                             "'removed' names what left this result, which is not the same " +
+                             "as destroyed: renaming an object out of a name filter, " +
+                             "deactivating one under 'active_only', or moving one past " +
+                             "'max_depth' all put it there while it sits in the scene. A " +
+                             "node in 'changed' replaces the one held under that id rather " +
+                             "than merging into it: a key it does not carry is at its " +
+                             "default, so merging would keep a stale 'active' or 'tag' " +
+                             "that has since gone back to normal. 'unchanged' counts nodes " +
+                             "identical in the fields this reply carries, not objects " +
+                             "nothing happened to.")]
+            string since = null)
         {
             return SceneHierarchy.Browse(ToolArgs.Of(
                 ("name", name),
@@ -73,7 +105,8 @@ namespace UnityMCP.Editor.Tools
                 ("sceneIndex", sceneIndex),
                 ("limit", limit),
                 ("offset", offset),
-                ("fields", fields)));
+                ("fields", fields),
+                ("since", since)));
         }
 
         [McpTool(

@@ -8,13 +8,21 @@ namespace IsuzuUnityCli.Cli;
 public static class JsonOutput
 {
     // The default encoder escapes every non-ASCII character, which turns Japanese tool output into \uXXXX noise.
-    private static readonly JsonWriterOptions WriterOptions = new()
+    private static readonly JsonWriterOptions Pretty = new()
     {
         Indented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public static string Format(JsonNode? node)
+    // Indentation is most of a large response: a 523-object scene prints as 346 KB indented and
+    // 124 KB packed, and whatever reads it pays for the whitespace.
+    private static readonly JsonWriterOptions Packed = new()
+    {
+        Indented = false,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    public static string Format(JsonNode? node, bool indented)
     {
         if (node is null)
         {
@@ -22,7 +30,7 @@ public static class JsonOutput
         }
 
         using var buffer = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(buffer, WriterOptions))
+        using (var writer = new Utf8JsonWriter(buffer, indented ? Pretty : Packed))
         {
             node.WriteTo(writer);
         }
@@ -30,8 +38,8 @@ public static class JsonOutput
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    public static void Print(TextWriter output, JsonNode? node)
+    public static void Print(TextWriter output, JsonNode? node, bool indented)
     {
-        output.WriteLine(Format(node));
+        output.WriteLine(Format(node, indented));
     }
 }

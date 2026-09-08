@@ -1,5 +1,61 @@
 # Changelog
 
+## [4.1.0] - 2026-09-09
+
+### Breaking
+- A `scene_browse_hierarchy` node no longer carries `id`. It held the same value as `instanceId`,
+  written from the same expression, and every other tool emits only `instanceId`. Read
+  `instanceId`; a `fields` allowlist naming `id` now selects nothing.
+- A node leaves out any key sitting at its default — `active` true, `tag` Untagged, `layer`
+  Default, `missingScripts` zero. On a scene of 523 objects those four were 24 KB of a reply that
+  said nothing by carrying them. In a reply that was not narrowed by `fields`, a missing key is
+  at its default; under an allowlist it is missing because it was not asked for, and the two
+  readings do not mix. Code that reads `node["tag"]` unconditionally, or deserialises into a
+  type whose `Active` defaults to false, has to change.
+- The CLI no longer indents JSON when its output is piped or redirected. Indentation was 2.8x
+  the bytes of a large reply and whatever reads it pays for the whitespace: a 523-object
+  hierarchy printed as 346 KB where the same content packs into 124 KB. A terminal still gets
+  indentation, because a person is reading it, and `--compact` forces the packed form there too.
+  Anything parsing the CLI's output as JSON is unaffected; anything matching its text is not.
+
+  Together the three take a 523-object hierarchy from 346 KB to 74 KB, and from 87,563 tokens
+  to 38,975.
+
+### Added
+- Every `scene_browse_hierarchy` reply carries a `snapshotId` naming the state it describes, and
+  `since` takes one back: the reply is then what differs from that state — added, changed and
+  removed, flat rather than nested, with a count of the rest. An unchanged scene answers in
+  107 bytes where the full tree takes 84 KB.
+
+  The caller holds its own place. A snapshot is never consumed and never moves, so a second
+  client reading the same scene cannot swallow the changes the first is waiting for, and a reply
+  that never arrives leaves the last id usable — the retry reports the same difference rather
+  than nothing. Objects are followed by instance id, so a rename reads as one change instead of
+  a removal and an addition.
+
+  `removed` names what left this result, which is not the same as destroyed: renaming an object
+  out of a name filter, deactivating one under `active_only`, or moving one past `max_depth` all
+  put it there while it sits in the scene. A node in `changed` replaces the one held under that
+  id rather than merging into it, because a key it does not carry is at its default.
+
+  Refused rather than answered wrongly: a snapshot compared against different filters (everything
+  the narrower walk leaves out would read as removed), a diff with `limit` or `offset` (a window
+  cannot be diffed), and a snapshot the Editor no longer holds. A `fields` allowlist always keeps
+  `instanceId`, because the comparison is built on it.
+- A node carries `siblingIndex`. A path carries an index only where a sibling name repeats, so
+  without it swapping two differently-named siblings changed nothing any reader could see — and
+  sibling order decides draw order under a Canvas.
+- A node in a diff carries `parentInstanceId` and `scene`. A diff arrives flat, so the two things
+  a tree states by its shape have to be on the node instead; without them a root moving between
+  two open scenes read as unchanged. A nested reply leaves both out, because `scenes` groups by
+  scene and `children` names the parent.
+- `--compact` on the CLI prints JSON without indentation, for a terminal.
+
+### Fixed
+- An option that takes no value no longer swallows the token after it. `--compact projects` lost
+  the command and `call --compact <tool>` lost the tool name, and in both the flag then read as
+  unset. `--raw`, `--yes`, `--fix`, `--no-skill`, `--help` and `--version` had the same trap.
+
 ## [4.0.6] - 2026-09-08
 
 ### Added

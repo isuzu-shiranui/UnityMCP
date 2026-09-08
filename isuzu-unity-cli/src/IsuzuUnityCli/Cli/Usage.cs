@@ -34,6 +34,9 @@ public static class Usage
                                          Either the product name or the project folder the
                                          window title shows; a unique part of either will do
           --raw                          Print the response envelope instead of just the result
+          --compact                      Print JSON without indentation. Already the default when
+                                         output is piped or redirected, which is how an agent
+                                         reads it; this forces it in a terminal too
           --version                      Show the version
           -h, --help                     Show this help
 

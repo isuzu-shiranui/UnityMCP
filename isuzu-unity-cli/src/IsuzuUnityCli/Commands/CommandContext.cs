@@ -28,6 +28,13 @@ public sealed class CommandContext
     public UnityHttpClient Client { get; init; } = new();
     public CancellationToken Cancellation { get; init; }
 
+    /// <summary>
+    /// Whether printed JSON is indented. Stated rather than sensed: <see cref="Out"/> is
+    /// substitutable, so reading the process's own stdout here would describe a writer this
+    /// context may not be using. <c>Program.Main</c> decides it once from the real stdout.
+    /// </summary>
+    public bool Indented { get; init; }
+
     public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
     {
         return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
@@ -42,7 +49,7 @@ public sealed class CommandContext
     {
         if (raw)
         {
-            JsonOutput.Print(Out, envelope.Raw);
+            JsonOutput.Print(Out, envelope.Raw, Indented);
             ReportRunning(envelope);
             return envelope.IsError ? 1 : 0;
         }
@@ -53,7 +60,7 @@ public sealed class CommandContext
             return 1;
         }
 
-        JsonOutput.Print(Out, envelope.Result);
+        JsonOutput.Print(Out, envelope.Result, Indented);
         ReportRunning(envelope);
         return 0;
     }

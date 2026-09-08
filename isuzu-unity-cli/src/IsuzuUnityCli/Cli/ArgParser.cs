@@ -21,7 +21,17 @@ public static class ArgParser
     public static readonly IReadOnlySet<string> CliOnlyOptions = new HashSet<string>(StringComparer.Ordinal)
     {
         "json", "project", "file", "raw", "help", "agent", "client", "yes", "no-skill", "mcp", "scope", "fix", "version",
-        "group",
+        "group", "compact",
+    };
+
+    /// <summary>
+    /// Options that are on or off. Without this the parser takes whatever follows as the value,
+    /// so <c>--compact projects</c> loses the command and <c>call --compact scene_browse_hierarchy</c>
+    /// loses the tool name, and neither reads as set.
+    /// </summary>
+    private static readonly IReadOnlySet<string> ValuelessOptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "compact", "raw", "help", "version", "yes", "no-skill", "fix",
     };
 
     public static ParsedArgs Parse(IReadOnlyList<string> argv)
@@ -49,7 +59,8 @@ public static class ArgParser
             var name = token.Substring(2);
             var next = i + 1 < argv.Count ? argv[i + 1] : null;
 
-            if (next is null || next.StartsWith("--", StringComparison.Ordinal))
+            if (next is null || next.StartsWith("--", StringComparison.Ordinal)
+                || ValuelessOptions.Contains(name))
             {
                 AddFlag(flags, name);
             }
