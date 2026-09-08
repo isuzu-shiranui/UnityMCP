@@ -91,7 +91,18 @@ public sealed class UnityHttpClient
                 }
 
                 var code = lastException is null ? "unknown" : RetryPolicy.CodeOf(lastException);
-                throw new UnityError(code, $"Retry budget exhausted after {attempts} attempt(s) ({elapsed}ms): {code}", null, lastException);
+                var why = code == "ECONNREFUSED"
+                    ? " Nothing is listening on the port. The Editor stops serving while it rebuilds "
+                      + "its domain, which a script change triggers and which ends on its own, so "
+                      + "the same call usually works a few seconds later. If it does not, the Editor "
+                      + "is closed or the server was stopped in Preferences."
+                    : string.Empty;
+
+                throw new UnityError(
+                    code,
+                    $"Retry budget exhausted after {attempts} attempt(s) ({elapsed}ms): {code}.{why}",
+                    null,
+                    lastException);
             }
 
             var remaining = _options.BudgetMs - elapsed;

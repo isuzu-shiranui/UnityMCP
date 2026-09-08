@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.0.5] - 2026-09-08
+
+### Fixed
+- A refused connection says what it usually means. The Editor stops serving while it rebuilds its
+  domain, which any script change starts, so a call made in those few seconds comes back as though
+  nothing is there. The CLI said `Retry budget exhausted: ECONNREFUSED` and left the reader to
+  guess; it now says the Editor is probably rebuilding and the same call usually works shortly
+  after. The agent skill says the same thing, and says not to fall back to reading the code
+  statically or to re-run setup, because the registration is fine.
+- The skill also says that this reaches every client at once: two agents on one project both lose
+  the connection when either of them edits a script, so the one that did nothing sees it too.
+  Transcripts show an agent reading that as its own setup being broken.
+- The English pages sent readers to ALCOM's "Repositories page under Resources". ALCOM has no
+  Resources section; its own English locale calls the sidebar item Packages and the tab
+  Repositories. The Japanese pages were already right.
+
+### Changed
+- The first screen of both READMEs says the two things people search for and could not find
+  there: that any Unity project will do and a VPM repository is published for VCC and ALCOM, and
+  which clients this has been checked with. The client names had appeared once, as lowercase
+  argument values, a hundred lines down.
+- `package.json` gains `claude`, `cursor`, `codex`, `vpm` and `vcc` as keywords.
+
 ## [4.0.4] - 2026-09-05
 
 ### Fixed
