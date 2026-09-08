@@ -327,6 +327,26 @@ isuzu-unity-cli call capture_screenshot --view scene --max_size 512 \
   | python -c "import sys,json,base64; d=json.load(sys.stdin); open('scene.png','wb').write(base64.b64decode(d['image']))"
 ```
 
+### The connection was refused
+
+A call that comes back "unable to connect", `ECONNREFUSED`, or with the MCP server reported as
+disconnected is almost always the Editor rebuilding its domain. Changing a `.cs` file starts
+that, and the server is gone for the few seconds it takes.
+
+Wait and call again. Do not fall back to reading the code statically, and do not re-run setup:
+the registration is fine and the Editor is coming back.
+
+```bash
+isuzu-unity-cli verify                       # edits, waits out the reload, returns the errors
+isuzu-unity-cli call compile_status          # or just call again after a few seconds
+```
+
+It is worth knowing that this reaches every client at once. Two agents on one project both lose
+the connection when either of them edits a script, so the one that did nothing sees it too.
+
+If calls still fail after half a minute, the Editor is closed, or the server was stopped on the
+Preferences page.
+
 ### The Editor stopped responding
 
 ```bash
