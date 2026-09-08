@@ -22,7 +22,7 @@ The idempotency column says only whether a call may be retried automatically aft
 | `compile_request` | unsafe | Ask for a recompile. Runs a full asset refresh first, which imports changed assets and can open a modal dialog |
 | `test_run` | unsafe | Start an EditMode or PlayMode test run |
 | `test_results` | safe | The current or most recent run (readable while it runs) |
-| `scene_browse_hierarchy` | safe | Walk the hierarchy. Emits `path`, which every editing tool takes. A filtered walk also returns the parents leading down to each match. `missing_scripts: true` returns only objects carrying a component whose script cannot be resolved, and `missingScripts` on each object counts them |
+| `scene_browse_hierarchy` | safe | Walk the hierarchy. Emits `path`, which every editing tool takes. A filtered walk also returns the parents leading down to each match. `missing_scripts: true` returns only objects carrying a component whose script cannot be resolved, and `missingScripts` on each object counts them. A key missing from a node is at its default: active true, tag Untagged, layer Default, no missing scripts. Every reply carries a `snapshotId`; pass one back as `since` and the reply is what differs from that state instead of the tree |
 | `scene_list` | safe | Open scenes, and the scenes in the build settings |
 | `inspect_read` | safe | Read a serialized property. Omit `component_type` to address the GameObject itself |
 | `inspect_list` | safe | Discover property paths. Omit `component_type` to address the GameObject itself |

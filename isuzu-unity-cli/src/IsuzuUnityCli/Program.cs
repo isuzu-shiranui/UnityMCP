@@ -20,7 +20,12 @@ public static class Program
             cts.Cancel();
         };
 
-        var context = new CommandContext { Cancellation = cts.Token };
+        // A terminal gets indentation because a person is reading it; a pipe or a redirect,
+        // which is how an agent reads it, gets the packed form. --compact forces packed anywhere.
+        var indented = !Console.IsOutputRedirected
+            && !ArgParser.Parse(argv).HasFlag("compact");
+
+        var context = new CommandContext { Cancellation = cts.Token, Indented = indented };
         return await Run(argv, context);
     }
 

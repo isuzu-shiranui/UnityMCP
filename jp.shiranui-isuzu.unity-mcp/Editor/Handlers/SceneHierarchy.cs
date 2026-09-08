@@ -30,6 +30,51 @@ namespace UnityMCP.Editor.Handlers
                 var offset = Math.Max(0, parameters["offset"]?.Value<int>() ?? 0);
                 var fieldsFilter = ListResponseBuilder.ParseFieldsParam(parameters["fields"]?.ToString());
 
+                var since = parameters["since"]?.ToString();
+                var diffing = !string.IsNullOrEmpty(since);
+
+                // Identity is what a diff is built on, and every reply is one a later call can
+                // diff against, so the allowlist never drops it. Left out, each node would fail
+                // to match itself and the comparison would report a still scene however much
+                // had moved.
+                if (fieldsFilter != null && fieldsFilter.Length > 0
+                    && Array.IndexOf(fieldsFilter, "instanceId") < 0)
+                {
+                    var widened = new string[fieldsFilter.Length + 1];
+                    Array.Copy(fieldsFilter, widened, fieldsFilter.Length);
+                    widened[fieldsFilter.Length] = "instanceId";
+                    fieldsFilter = widened;
+                }
+
+                // Two different walks describe two different sets of objects. Comparing across
+                // them reports everything the narrower one leaves out as removed, which is a
+                // confident wrong answer about objects that are still in the scene.
+                var walk = WalkOf(nameFilter, componentFilter, tagFilter, maxDepth,
+                    activeOnly, missingScriptsOnly, sceneIndex, fieldsFilter);
+
+                if (diffing)
+                {
+                    var takenUnder = SceneHierarchyBaseline.WalkOf(since);
+                    if (takenUnder != null && !string.Equals(takenUnder, walk, StringComparison.Ordinal))
+                    {
+                        return new JObject
+                        {
+                            ["error"] = $"snapshot '{since}' was taken with different arguments ({takenUnder}); ask for the difference with the same ones, or read without 'since' to take a new snapshot"
+                        };
+                    }
+                }
+
+                // A window over the traversal cannot be diffed. The snapshot would hold one page
+                // and the next call another, so an object pushed out of the window by an earlier
+                // insertion would be reported as removed while it is still there.
+                if (diffing && (limit > 0 || offset > 0))
+                {
+                    return new JObject
+                    {
+                        ["error"] = "'since' covers the whole filtered set and cannot be paged; drop limit and offset, or narrow with a filter instead"
+                    };
+                }
+
                 var hasFilter = !string.IsNullOrEmpty(nameFilter)
                     || !string.IsNullOrEmpty(componentFilter)
                     || !string.IsNullOrEmpty(tagFilter)
@@ -80,13 +125,37 @@ namespace UnityMCP.Editor.Handlers
                 // 2. Apply offset/limit and project to JObjects via ListResponseBuilder.
                 var total = flat.Count;
                 var effectiveLimit = limit <= 0 ? int.MaxValue : limit;
-                var page = ListResponseBuilder.Build(
-                    flat,
-                    offset,
-                    effectiveLimit,
-                    ProjectFlatNode,
-                    fieldsFilter
-                );
+                JObject page;
+                projecting = flat;
+                try
+                {
+                    page = ListResponseBuilder.Build(
+                        flat,
+                        offset,
+                        effectiveLimit,
+                        ProjectFlatNode,
+                        fieldsFilter
+                    );
+                }
+                finally
+                {
+                    projecting = null;
+                }
+
+                if (diffing)
+                {
+                    return Changes(since, walk, page, total);
+                }
+
+                // A snapshot of what is about to be described, named so the next call can ask
+                // for the difference from it. Taken before the page is re-nested, because the
+                // rebuild moves the nodes into the tree, and before the two keys below are
+                // dropped, because a comparison has to see everything that can change.
+                var snapshotId = SceneHierarchyBaseline.Remember(walk, Peek(page));
+
+                // The tree says both of these already: `scenes` groups by scene and `children`
+                // names the parent. Carried per node they were 40% of the response.
+                DropWhatTheTreeAlreadySays(page);
 
                 // 3. Rebuild the scenes[] structure from the page, preserving
                 //    parent→children where both ends survived the paging window.
@@ -94,6 +163,7 @@ namespace UnityMCP.Editor.Handlers
 
                 var result = new JObject
                 {
+                    ["snapshotId"] = snapshotId,
                     ["scenes"] = scenes,
                     ["sceneCount"] = endIndex - startIndex,
                     ["total"] = total,
@@ -109,6 +179,114 @@ namespace UnityMCP.Editor.Handlers
             {
                 return new JObject { ["error"] = $"Failed to browse scene hierarchy: {e.Message}" };
             }
+        }
+
+        /// <summary>
+        /// The page as a diff against the snapshot the caller named. Flat rather than nested: a
+        /// diff is a list of what moved, and nesting it would carry back the parents that did
+        /// not move, which is the cost this mode exists to avoid.
+        /// </summary>
+        private static JObject Changes(string since, string walk, JObject page, int total)
+        {
+            var nodes = Detach(page);
+            var diff = SceneHierarchyBaseline.CompareWith(since, walk, nodes, out var snapshotId);
+
+            if (diff == null)
+            {
+                return new JObject
+                {
+                    ["error"] = $"no snapshot '{since}'. It expired, or the Editor reloaded its scripts since it was taken; read without 'since' to take a new one."
+                };
+            }
+
+            return new JObject
+            {
+                ["snapshotId"] = snapshotId,
+                ["since"] = since,
+                ["added"] = diff.Added,
+                ["changed"] = diff.Changed,
+                ["removed"] = diff.Removed,
+                ["unchanged"] = diff.Unchanged,
+                ["total"] = total,
+                ["truncated"] = page["truncated"],
+                ["next"] = page["next"],
+            };
+        }
+
+        /// <summary>
+        /// What a snapshot covers, so a later call can be told it is asking about a different
+        /// set of objects rather than being handed a diff between two of them.
+        /// </summary>
+        private static string WalkOf(
+            string name, string component, string tag, int maxDepth,
+            bool activeOnly, bool missingScriptsOnly, int? sceneIndex, string[] fields)
+        {
+            var joined = fields == null ? string.Empty : string.Join(",", fields);
+            return $"name={name}|component={component}|tag={tag}|maxDepth={maxDepth}" +
+                   $"|activeOnly={activeOnly}|missingScripts={missingScriptsOnly}" +
+                   $"|sceneIndex={sceneIndex}|fields={joined}";
+        }
+
+        /// <summary>
+        /// Removes the keys a nested reply does not need. They stay in the snapshot, so a later
+        /// diff still notices a root moving between two open scenes or a node changing parent
+        /// without changing its path.
+        /// </summary>
+        private static void DropWhatTheTreeAlreadySays(JObject page)
+        {
+            var items = page["items"] as JArray;
+            if (items == null)
+            {
+                return;
+            }
+
+            foreach (var item in items)
+            {
+                var node = (JObject)item;
+                node.Remove("parentInstanceId");
+                node.Remove("scene");
+            }
+        }
+
+        /// <summary>The page's nodes, left where they are: the tree rebuild still needs them.</summary>
+        private static List<JObject> Peek(JObject page)
+        {
+            var nodes = new List<JObject>();
+            var items = page["items"] as JArray;
+
+            if (items != null)
+            {
+                foreach (var item in items)
+                {
+                    nodes.Add((JObject)item);
+                }
+            }
+
+            return nodes;
+        }
+
+        /// <summary>
+        /// The page's nodes, off the array that owns them. Newtonsoft copies a token that already
+        /// belongs to a container when it is added to a second one, so leaving them parented
+        /// would put copies into the response.
+        /// </summary>
+        private static List<JObject> Detach(JObject page)
+        {
+            var nodes = new List<JObject>();
+            var items = page["items"] as JArray;
+
+            if (items == null)
+            {
+                return nodes;
+            }
+
+            foreach (var item in items)
+            {
+                nodes.Add((JObject)item);
+            }
+
+            items.RemoveAll();
+            return nodes;
         }
 
         private sealed class FlatNode
@@ -166,27 +344,69 @@ namespace UnityMCP.Editor.Handlers
             }
         }
 
+        /// <summary>
+        /// The flat list the current page is being projected from. <see cref="ProjectFlatNode"/>
+        /// needs it to name a node's parent, and the projector signature takes one node.
+        /// </summary>
+        [ThreadStatic]
+        private static List<FlatNode> projecting;
+
         private static JObject ProjectFlatNode(FlatNode n)
         {
             // The nested structure is rebuilt in RebuildScenesFromPage, so we
             // emit only the node-level keys here. ListResponseBuilder applies
             // the `fieldsFilter` allowlist after this projection.
             var go = n.Go;
-            return new JObject
+            var node = new JObject
             {
                 ["name"] = go.name,
                 // The identifier every authoring tool takes. Without it a caller who has just
                 // browsed the hierarchy has to guess at the path of the thing they are looking
                 // at, and guesses fail on any name that repeats among siblings.
                 ["path"] = UnityMCP.Editor.Tools.ObjectResolve.PathOf(go),
-                ["id"] = EntityIdCompat.WireIdOf(go),
                 ["instanceId"] = EntityIdCompat.WireIdOf(go),
-                ["active"] = go.activeSelf,
-                ["tag"] = go.tag,
-                ["layer"] = LayerMask.LayerToName(go.layer),
-                ["components"] = GetComponentNames(go),
-                ["missingScripts"] = MissingScriptCount(go),
+                // A path carries an index only where a sibling name repeats, so without this a
+                // reorder is invisible — and it decides draw order under a Canvas.
+                ["siblingIndex"] = go.transform.GetSiblingIndex(),
+                // A diff arrives flat. Without this the caller can only rebuild the tree by
+                // parsing paths, which is ambiguous when a name contains a slash and says
+                // nothing when a parent is replaced by another of the same name.
+                ["parentInstanceId"] = n.ParentIndex >= 0 && projecting != null
+                    ? EntityIdCompat.WireIdOf(projecting[n.ParentIndex].Go)
+                    : JValue.CreateNull(),
+                // Moving a root from one open scene to another changes nothing else about it.
+                // The path is the stable name; the index shifts as scenes open and close.
+                ["scene"] = SceneManager.GetSceneAt(n.SceneIndex).path,
             };
+
+            // Keys at their default are left out. On a scene of any size they are most of the
+            // response and they carry nothing: a caller reads an absent key as the default.
+            if (!go.activeSelf)
+            {
+                node["active"] = false;
+            }
+
+            if (!string.Equals(go.tag, "Untagged", StringComparison.Ordinal))
+            {
+                node["tag"] = go.tag;
+            }
+
+            var layer = LayerMask.LayerToName(go.layer);
+            if (!string.Equals(layer, "Default", StringComparison.Ordinal))
+            {
+                node["layer"] = layer;
+            }
+
+            // Never empty: every GameObject carries a Transform.
+            node["components"] = GetComponentNames(go);
+
+            var missing = MissingScriptCount(go);
+            if (missing > 0)
+            {
+                node["missingScripts"] = missing;
+            }
+
+            return node;
         }
 
         private static JArray RebuildScenesFromPage(

@@ -43,7 +43,7 @@ public static class ProjectsCommand
             ContainsWorkingDirectory = here is not null && ReferenceEquals(here, d),
         }).ToList();
 
-        JsonOutput.Print(context.Out, JsonSerializer.SerializeToNode(rows, CliJsonContext.Default.ListProjectRow));
+        JsonOutput.Print(context.Out, JsonSerializer.SerializeToNode(rows, CliJsonContext.Default.ListProjectRow), context.Indented);
         return 0;
     }
 }

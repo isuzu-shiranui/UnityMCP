@@ -22,7 +22,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |
 | `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
 | `test_results` | safe | 実行中・直近のテスト結果（実行中でも読める） |
-| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です |
+| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります |
 | `scene_list` | safe | 開いているシーンとビルド設定のシーン |
 | `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です |
 | `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと GameObject 自身が対象です |

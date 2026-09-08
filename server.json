@@ -3,7 +3,7 @@
   "name": "io.github.isuzu-shiranui/unity-mcp",
   "title": "Unity MCP",
   "description": "Drive a running Unity Editor from an AI agent. The Editor serves MCP itself over Streamable HTTP on the loopback interface, so there is no second server process; this package is the client that bridges stdio to it. Covers the console, compilation, the scene, assets, prefabs, materials, shaders, Animator Controllers, Timeline, the test runner, play mode, builds and screenshots.",
-  "version": "4.0.6",
+  "version": "4.1.0",
   "repository": {
     "url": "https://github.com/isuzu-shiranui/UnityMCP",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "nuget",
       "identifier": "IsuzuUnityCli",
-      "version": "4.0.6",
+      "version": "4.1.0",
       "transport": {
         "type": "stdio"
       },

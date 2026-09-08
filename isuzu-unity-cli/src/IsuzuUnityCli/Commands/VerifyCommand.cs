@@ -61,7 +61,7 @@ public static class VerifyCommand
 
         if (parsed.HasFlag("raw"))
         {
-            JsonOutput.Print(context.Out, run.Summary(startedAt, elapsed.Elapsed));
+            JsonOutput.Print(context.Out, run.Summary(startedAt, elapsed.Elapsed), context.Indented);
         }
         else
         {
