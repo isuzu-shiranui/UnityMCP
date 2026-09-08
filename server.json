@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.isuzu-shiranui/unity-mcp",
+  "name": "dev.shiranui-isuzu/unity-mcp",
   "title": "Unity MCP",
   "description": "Unity Editor automation for AI agents: scenes, prefabs, assets, shaders, Timeline, tests, builds.",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "repository": {
     "url": "https://github.com/isuzu-shiranui/UnityMCP",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "nuget",
       "identifier": "IsuzuUnityCli",
-      "version": "4.1.0",
+      "version": "4.1.1",
       "transport": {
         "type": "stdio"
       },

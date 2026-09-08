@@ -1,6 +1,6 @@
 # Unity MCP Integration Framework
 
-<!-- mcp-name: io.github.isuzu-shiranui/unity-mcp -->
+<!-- mcp-name: dev.shiranui-isuzu/unity-mcp -->
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 ![Version](https://img.shields.io/badge/version-4.0.6-brightgreen)
