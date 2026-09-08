@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.1.1] - 2026-09-09
+
+### Changed
+- The registry entry moved from `io.github.isuzu-shiranui/unity-mcp` to
+  `dev.shiranui-isuzu/unity-mcp`, verified against the domain rather than the GitHub account.
+  The registry orders search results by name, and a search for "unity" is capped at 100: under
+  the old namespace this sat at 97 of them, behind every entry whose name merely contains
+  "comm**unity**". Under the new one it sits at 6. The name a package is published under is the
+  only lever on that, so it is worth the version this costs. The `mcp-name` marker the NuGet
+  README carries moves with it, which is what proves the two belong to the same owner.
+- The registry description names what the tools address — scenes, prefabs, assets, shaders,
+  Timeline, tests, builds — so a search for any of those reaches it. Capped at 100 characters.
+
 ## [4.1.0] - 2026-09-09
 
 ### Breaking
