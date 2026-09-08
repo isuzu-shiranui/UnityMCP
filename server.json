@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.isuzu-shiranui/unity-mcp",
+  "title": "Unity MCP",
+  "description": "Drive a running Unity Editor from an AI agent. The Editor serves MCP itself over Streamable HTTP on the loopback interface, so there is no second server process; this package is the client that bridges stdio to it. Covers the console, compilation, the scene, assets, prefabs, materials, shaders, Animator Controllers, Timeline, the test runner, play mode, builds and screenshots.",
+  "version": "4.0.6",
+  "repository": {
+    "url": "https://github.com/isuzu-shiranui/UnityMCP",
+    "source": "github"
+  },
+  "websiteUrl": "https://unity-mcp.shiranui-isuzu.dev/en/",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "identifier": "IsuzuUnityCli",
+      "version": "4.0.6",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "UNITY_MCP_STATE_DIR",
+          "description": "Where the Editor writes its descriptors. Set this only when the default location cannot be reached, such as from WSL.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "UNITY_MCP_HOST",
+          "description": "Replaces 127.0.0.1 in the descriptor endpoint, for reaching an Editor on the Windows host from WSL.",
+          "format": "string",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

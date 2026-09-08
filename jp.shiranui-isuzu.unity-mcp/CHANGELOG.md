@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.6] - 2026-09-08
+
+### Added
+- A `server.json` at the repository root, so this can be published to the official MCP registry.
+  An agent looking for a way to drive Unity searches that registry before it searches the web,
+  and this was not in it. The entry describes the NuGet package as a stdio client, which is what
+  it is: the Editor serves MCP itself, and the CLI bridges a client's stdio to the endpoint the
+  Editor publishes. The registry's `remotes` form does not fit, because it requires a publicly
+  reachable URL and this one is on the loopback interface.
+- The README the NuGet package ships carries an `mcp-name` marker. That is how the registry
+  proves the package and the registry entry belong to the same owner.
+
 ## [4.0.5] - 2026-09-08
 
 ### Fixed
