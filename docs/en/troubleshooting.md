@@ -90,7 +90,11 @@ Every answer that returns a job, and every `job_status` result while it runs, ap
 
 To recover, read the dialog with `editor_dialog_list` first. Then press a button with `editor_dialog_press`, passing the button's visible text and `confirm: true`. Buttons like `Don't Save` or `Discard` throw away unsaved work. When unsure press `Cancel`, fix the cause such as an unsaved scene, and repeat the original call.
 
-Once a button is pressed, the waiting job completes and `job_status` returns its result. Dialog detection works on Windows only. Elsewhere `editor_dialog_list` returns `supported: false`, and the dialog has to be answered in the Editor.
+Once a button is pressed, the waiting job completes and `job_status` returns its result. Native dialog detection supports Windows and macOS; other platforms return `supported: false`.
+
+On macOS the bundled, Editor-only universal native plugin inspects this Editor's Cocoa modal windows and attached sheets. It needs no Accessibility permission. Standard enabled response buttons are supported; arbitrary custom Unity windows and other applications are not. Pass the opaque `handle` from `editor_dialog_list` to `editor_dialog_press` to target the inspected dialog. macOS button matching preserves literal ampersands.
+
+A Cocoa modal event loop must still be running. A genuinely frozen loop returns `available: false`, `inspectionError` and `reason`, not a reliable empty-dialog result. Inspection waits at most 750 ms; presses wait at most 3 seconds. A press that has not started is cancelled on timeout and will not execute later. If `dialog_action_pending` is reported, the action already started: inspect again before deciding what to do, and never retry it blindly. `/health.mainThread` also reports `dialogDetectionError`.
 
 ## Calls take about 100 ms when the Editor is not focused
 

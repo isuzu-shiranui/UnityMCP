@@ -1122,13 +1122,15 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         private JObject MainThreadHealth()
         {
-            var dialogs = EditorDialogs.List();
+            var dialogs = EditorDialogs.List(out var error);
 
             return new JObject
             {
                 ["stalledMs"] = this.MainThreadStalledMs,
                 ["dialog"] = dialogs.Length > 0 ? dialogs[0].ToJson() : null,
-                ["dialogDetection"] = EditorDialogs.IsSupported ? "windows" : "unavailable",
+                ["dialogDetection"] = !EditorDialogs.IsSupported ? "unavailable" :
+                    System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX) ? "macos" : "windows",
+                ["dialogDetectionError"] = error,
             };
         }
 

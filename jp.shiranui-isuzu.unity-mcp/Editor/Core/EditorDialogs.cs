@@ -15,7 +15,8 @@ namespace UnityMCP.Editor.Core
     /// <remarks>
     /// A modal dialog runs its own message loop on the main thread, so nothing queued for that
     /// thread runs until it is answered. The loop does pump window messages, which is what lets a
-    /// click sent from another thread close it. Windows only: the dialogs are top-level windows
+    /// click sent from another thread close it. macOS delegates to a bounded Cocoa helper
+    /// scheduled in native modal run-loop modes. On Windows the dialogs are top-level windows
     /// of class <c>#32770</c> belonging to this process, their body is a <c>Static</c> or a
     /// read-only <c>Edit</c> child (Unity's own dialogs use the latter, with an empty
     /// <c>Static</c> for the icon), and their buttons are <c>Button</c> children whose text
@@ -38,14 +39,22 @@ namespace UnityMCP.Editor.Core
         private const uint ReadTimeoutMs = 300;
         private const uint ClickTimeoutMs = 3000;
 
-        /// <summary>True on Windows, where the dialogs can be enumerated.</summary>
-        public static bool IsSupported => RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        /// <summary>Native modal inspection is implemented on Windows and macOS.</summary>
+        public static bool IsSupported => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
 
         /// <summary>
         /// Every visible dialog of this process, front-most first. Empty when unsupported.
         /// </summary>
         public static DialogInfo[] List()
         {
+            return List(out _);
+        }
+
+        /// <summary>A failed native read must not be presented as proof that no dialog exists.</summary>
+        public static DialogInfo[] List(out string error)
+        {
+            error = null;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return MacEditorDialogs.List(out error);
             if (!IsSupported)
             {
                 return Array.Empty<DialogInfo>();
@@ -85,6 +94,7 @@ namespace UnityMCP.Editor.Core
         /// </summary>
         public static bool Press(string handle, string buttonText)
         {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return MacEditorDialogs.Press(handle, buttonText);
             if (!IsSupported || !TryParseHandle(handle, out var hwnd) || !IsWindow(hwnd))
             {
                 return false;
@@ -216,7 +226,7 @@ namespace UnityMCP.Editor.Core
         /// <summary>One visible dialog as reported to callers.</summary>
         internal sealed class DialogInfo
         {
-            /// <summary>The window handle as a decimal string; the argument <see cref="Press"/> takes.</summary>
+            /// <summary>Platform-specific opaque handle; pass back unchanged to <see cref="Press"/>.</summary>
             public string Handle { get; set; }
 
             public string Title { get; set; }

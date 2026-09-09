@@ -16,7 +16,7 @@ The idempotency column says only whether a call may be retried automatically aft
 | `console_get_count` | safe | Error / warning / log counts |
 | `console_clear` | unsafe | Clear the console |
 | `editor_log_tail` | safe | `Editor.log` from disk (works while the Editor is wedged) |
-| `editor_dialog_list` | safe | Title, message and buttons of the modal dialogs the Editor is showing, plus how long the main thread has been stalled (works while the Editor is wedged; Windows only) |
+| `editor_dialog_list` | safe | Title, message and buttons of native modal dialogs, plus main-thread stall time (Windows and macOS; Cocoa modal loop required on macOS). Check `available` and `inspectionError` before interpreting an empty list. |
 | `editor_dialog_press` | unsafe | Press a button on an open dialog to unblock the main thread. Needs `confirm: true`. Buttons like "Don't Save" discard unsaved work, so read the message with `editor_dialog_list` first |
 | `compile_status` | safe | Whether scripts are compiling, and whether the last compile succeeded |
 | `compile_request` | unsafe | Ask for a recompile. Runs a full asset refresh first, which imports changed assets and can open a modal dialog |

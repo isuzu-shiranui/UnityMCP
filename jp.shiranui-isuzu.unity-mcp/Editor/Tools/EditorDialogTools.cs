@@ -23,16 +23,21 @@ namespace UnityMCP.Editor.Tools
             "the main thread has been unresponsive. Use this when a call stays running, when /health reports a stalled " +
             "main thread, or when a job never completes: a dialog such as \"Scene(s) Have Been Modified\" or an import " +
             "prompt blocks every main-thread tool until someone answers it. Works while the Editor is blocked. " +
-            "Windows only; elsewhere supported is false and dialogs is empty.",
+            "Windows and macOS native dialogs/sheets. macOS requires a pumping Cocoa modal event loop; a hard " +
+            "freeze reports available=false and a reason, not a false empty-dialog result.",
             Idempotency = McpIdempotency.Safe,
             MainThread = false,
             Group = McpToolGroups.Diagnostics)]
         public static JObject List()
         {
+            var dialogs = EditorDialogs.List(out var error);
             return new JObject
             {
                 ["supported"] = EditorDialogs.IsSupported,
-                ["dialogs"] = new JArray(EditorDialogs.List().Select(d => (object)d.ToJson()).ToArray()),
+                ["available"] = EditorDialogs.IsSupported && error == null,
+                ["inspectionError"] = error,
+                ["reason"] = error == null ? null : MacEditorDialogs.Explanation(error),
+                ["dialogs"] = new JArray(dialogs.Select(d => (object)d.ToJson()).ToArray()),
                 ["stalledMs"] = StalledMs(),
             };
         }
@@ -44,7 +49,8 @@ namespace UnityMCP.Editor.Tools
             "buttons like \"Don't Save\", \"Discard\" or \"Yes\" can throw away unsaved work, and \"Cancel\" usually " +
             "aborts the operation that opened the dialog. Prefer \"Cancel\" when unsure, then fix the cause (for example " +
             "save the scene with scene_save) and repeat the original call. The button is matched by its visible text, " +
-            "case-insensitively. Windows only.",
+            "case-insensitively. Windows and macOS. Pass the handle returned by editor_dialog_list to reject " +
+            "a stale/replaced macOS dialog. A timeout after an action starts is uncertain: inspect again, do not retry blindly.",
             MainThread = false,
             Destructive = true,
             Group = McpToolGroups.Diagnostics)]
@@ -52,7 +58,9 @@ namespace UnityMCP.Editor.Tools
             [McpArg("button", "Visible text of the button to press, for example \"Cancel\" or \"Don't Save\".")]
             string button,
             [McpArg("title", "When several dialogs are open, the one whose title contains this text. Otherwise the front-most dialog is used.")]
-            string title = null)
+            string title = null,
+            [McpArg("handle", "Optional opaque handle from editor_dialog_list. Selects that exact dialog rather than whichever is now front-most.")]
+            string handle = null)
         {
             if (string.IsNullOrWhiteSpace(button))
             {
@@ -63,11 +71,13 @@ namespace UnityMCP.Editor.Tools
             {
                 throw new McpToolException(
                     "dialog_detection_unavailable",
-                    "Dialogs can only be read and pressed on Windows. Answer the dialog in the Editor.",
+                    "Native dialog inspection is supported on Windows and macOS. Answer the dialog in the Editor on this platform.",
                     501);
             }
 
-            var dialogs = EditorDialogs.List();
+            var dialogs = EditorDialogs.List(out var error);
+            if (error != null) throw new McpToolException(error, MacEditorDialogs.Explanation(error), 503);
+            if (!string.IsNullOrEmpty(handle)) dialogs = dialogs.Where(d => d.Handle == handle).ToArray();
             if (!string.IsNullOrEmpty(title))
             {
                 dialogs = dialogs
