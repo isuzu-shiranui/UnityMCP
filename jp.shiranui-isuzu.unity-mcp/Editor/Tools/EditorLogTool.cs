@@ -66,7 +66,12 @@ namespace UnityMCP.Editor.Tools
             [McpArg("pattern", "Optional .NET regex; only matching lines are returned.")]
             string pattern = null,
             [McpArg("ignore_case", "Match the pattern case-insensitively.")]
-            bool ignoreCase = true)
+            bool ignoreCase = true,
+            [McpArg("since", "A 'position' from an earlier reply. Returns only what the log has " +
+                             "gained since then, which is what a check after an action wants. " +
+                             "A position past the end means the log was replaced, and the tail " +
+                             "is returned instead with 'restarted' set.")]
+            long since = 0)
         {
             var path = logPath;
 
@@ -97,13 +102,14 @@ namespace UnityMCP.Editor.Tools
             }
 
             var requested = Math.Max(1, Math.Min(lines, MaxLines));
-            var text = ReadTail(path, out var totalBytes, out var readBytes);
+            var text = ReadFrom(path, since, out var totalBytes, out var readBytes, out var restarted);
 
             var all = text.Split('\n');
             var matched = new List<string>();
 
             // The first element is usually a partial line left over from the byte-offset read.
-            var start = readBytes < totalBytes ? 1 : 0;
+            // Resuming from a position given by an earlier reply lands on a line boundary instead.
+            var start = readBytes < totalBytes && since <= 0 ? 1 : 0;
 
             for (var i = start; i < all.Length; i++)
             {
@@ -140,33 +146,60 @@ namespace UnityMCP.Editor.Tools
 
             kept.Reverse();
 
+            // Folding first: a run of alike lines is what the pipeline writes, and it is most of
+            // a tail. Trimming afterwards works on the frames that are left.
+            var folded = LogNoise.TrimStacks(LogNoise.FoldRepeats(kept, out var hidden));
+
             return new LogTailResult
             {
                 Path = path,
                 FileBytes = totalBytes,
                 ScannedBytes = readBytes,
                 Matched = matched.Count,
-                Returned = kept.Count,
+                Returned = folded.Count,
                 Truncated = truncated,
-                Lines = kept,
+                Restarted = restarted,
+                FoldedAway = hidden,
+                Position = totalBytes,
+                Lines = folded,
             };
         }
 
         /// <summary>
-        /// Reads the last <see cref="MaxTailBytes"/> of the file.
+        /// Reads from <paramref name="since"/>, or the last <see cref="MaxTailBytes"/> when that is
+        /// zero or no longer inside the file.
         /// </summary>
         /// <remarks>
         /// <c>FileShare.ReadWrite</c> is required: Unity holds the log open for writing, and
         /// anything stricter fails with a sharing violation.
         /// </remarks>
-        private static string ReadTail(string path, out long totalBytes, out int readBytes)
+        private static string ReadFrom(
+            string path, long since, out long totalBytes, out int readBytes, out bool restarted)
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 
             totalBytes = stream.Length;
-            readBytes = (int)Math.Min(totalBytes, MaxTailBytes);
 
-            stream.Seek(-readBytes, SeekOrigin.End);
+            // A position past the end means the Editor started a new log, so there is nothing to
+            // resume from and the tail is the honest answer.
+            restarted = since > totalBytes;
+
+            if (since > 0 && !restarted)
+            {
+                readBytes = (int)Math.Min(totalBytes - since, MaxTailBytes);
+                stream.Seek(since, SeekOrigin.Begin);
+            }
+            else
+            {
+                readBytes = (int)Math.Min(totalBytes, MaxTailBytes);
+                stream.Seek(-readBytes, SeekOrigin.End);
+            }
+
+            if (readBytes == 0)
+            {
+                return string.Empty;
+            }
+
 
             var buffer = new byte[readBytes];
             var offset = 0;
@@ -200,6 +233,15 @@ namespace UnityMCP.Editor.Tools
 
             /// <summary>True when lines were dropped, so the caller knows not to treat this as complete.</summary>
             public bool Truncated { get; set; }
+
+            /// <summary>True when 'since' pointed past the end, so the log had been replaced.</summary>
+            public bool Restarted { get; set; }
+
+            /// <summary>Lines left out because an identical-shaped one was already reported.</summary>
+            public int FoldedAway { get; set; }
+
+            /// <summary>Pass back as 'since' to read only what arrives after this call.</summary>
+            public long Position { get; set; }
 
             public List<string> Lines { get; set; }
         }

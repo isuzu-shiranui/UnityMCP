@@ -272,7 +272,9 @@ namespace UnityMCP.Editor.TestRunner
                     ["status"] = result.TestStatus.ToString().ToLowerInvariant(),
                     ["durationSeconds"] = result.Duration,
                     ["message"] = string.IsNullOrEmpty(result.Message) ? null : result.Message,
-                    ["stackTrace"] = string.IsNullOrEmpty(result.StackTrace) ? null : result.StackTrace,
+                    ["stackTrace"] = string.IsNullOrEmpty(result.StackTrace)
+                        ? null
+                        : LogNoise.TrimStack(result.StackTrace),
                 };
 
                 yield break;

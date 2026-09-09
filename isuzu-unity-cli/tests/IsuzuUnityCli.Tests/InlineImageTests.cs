@@ -75,6 +75,35 @@ public sealed class InlineImageTests : IDisposable
     }
 
     [Fact]
+    public void ACaptureTakenAlongsideOtherWorkIsFoundToo()
+    {
+        // input_replay's then_capture puts the picture under `capture`, beside what the replay
+        // itself reports. Looking only at the top and at `result` printed the base64.
+        var reply = new JsonObject
+        {
+            ["sent"] = 2,
+            ["window"] = "Game",
+            ["capture"] = Reply(),
+        };
+
+        var path = InlineImage.Externalise(reply, directory);
+
+        Assert.NotNull(path);
+        Assert.Null(reply["capture"]!["image"]);
+        Assert.Equal(path, (string?)reply["capture"]!["path"]);
+        Assert.Equal(2, (int?)reply["sent"]);
+    }
+
+    [Fact]
+    public void APictureInsideAnArrayIsFound()
+    {
+        var reply = new JsonObject { ["captures"] = new JsonArray(Reply()) };
+
+        Assert.NotNull(InlineImage.Externalise(reply, directory));
+        Assert.Null(reply["captures"]![0]!["image"]);
+    }
+
+    [Fact]
     public void AReplyWithoutAPictureIsUntouched()
     {
         var reply = new JsonObject { ["isPlaying"] = false };

@@ -36,15 +36,8 @@ namespace UnityMCP.Editor.Handlers
                 // Identity is what a diff is built on, and every reply is one a later call can
                 // diff against, so the allowlist never drops it. Left out, each node would fail
                 // to match itself and the comparison would report a still scene however much
-                // had moved.
-                if (fieldsFilter != null && fieldsFilter.Length > 0
-                    && Array.IndexOf(fieldsFilter, "instanceId") < 0)
-                {
-                    var widened = new string[fieldsFilter.Length + 1];
-                    Array.Copy(fieldsFilter, widened, fieldsFilter.Length);
-                    widened[fieldsFilter.Length] = "instanceId";
-                    fieldsFilter = widened;
-                }
+                // had moved. It goes to the builder as alwaysKeep rather than into the filter,
+                // so it cannot stand in for a field name the caller got wrong.
 
                 // Two different walks describe two different sets of objects. Comparing across
                 // them reports everything the narrower one leaves out as removed, which is a
@@ -134,7 +127,8 @@ namespace UnityMCP.Editor.Handlers
                         offset,
                         effectiveLimit,
                         ProjectFlatNode,
-                        fieldsFilter
+                        fieldsFilter,
+                        IdentityField
                     );
                 }
                 finally
@@ -174,6 +168,13 @@ namespace UnityMCP.Editor.Handlers
                 };
 
                 return result;
+            }
+            catch (McpToolException)
+            {
+                // A refusal answers the request. Folded into the failure below it reads as the
+                // Editor being unreadable, and a caller retries rather than correcting what it
+                // sent.
+                throw;
             }
             catch (Exception e)
             {
@@ -343,6 +344,14 @@ namespace UnityMCP.Editor.Handlers
                 CollectFilteredFlat(child, sceneIndex, myIndex, flat);
             }
         }
+
+        /// <summary>Kept on every node however the caller narrows the reply.</summary>
+        /// <remarks>
+        /// Not <c>[ThreadStatic]</c>: an initialiser on such a field runs only on the thread that
+        /// first touched the class, and this is read from the Editor's main thread, where it would
+        /// be null.
+        /// </remarks>
+        private static readonly string[] IdentityField = { "instanceId" };
 
         /// <summary>
         /// The flat list the current page is being projected from. <see cref="ProjectFlatNode"/>

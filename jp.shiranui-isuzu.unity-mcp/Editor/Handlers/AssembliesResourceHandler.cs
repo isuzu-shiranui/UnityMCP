@@ -69,10 +69,12 @@ namespace UnityMCP.Editor.Resources
         private JObject CreateAssemblyObject(Assembly assembly)
         {
             var assemblyName = assembly.GetName();
+
+            // No fullName: it is name, version, and the same culture and token boilerplate on
+            // every row, so it repeated what the other two fields already say.
             return new JObject
             {
                 ["name"] = assemblyName.Name,
-                ["fullName"] = assembly.FullName,
                 ["version"] = assemblyName.Version?.ToString(),
                 ["assemblyType"] = this.GetAssemblyType(assembly)
             };

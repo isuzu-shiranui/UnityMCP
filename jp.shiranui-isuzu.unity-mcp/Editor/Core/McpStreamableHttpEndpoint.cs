@@ -246,10 +246,12 @@ namespace UnityMCP.Editor.Core
                         return EndpointResponse.Json(200, RpcResult(id, ToolError($"Error [invalid_params]: {reported}")));
                     }
 
+                    var answered = WithoutInlineImage(outcome.Result, out var picture);
+
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
-                        ["content"] = ResultContent(outcome.Result),
-                        ["structuredContent"] = outcome.Result,
+                        ["content"] = ResultContent(answered, picture),
+                        ["structuredContent"] = answered,
                     }));
 
                 case ToolCallOutcome.Kind.Failed:
@@ -297,38 +299,83 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
-        /// The MCP content for a result, with an image carried as an image rather than as text.
+        /// The result with its inline PNG taken out, and that PNG, so the picture can travel as
+        /// image content instead of as text.
         /// </summary>
         /// <remarks>
         /// A capture returns its PNG base64-encoded. Left inside the JSON it is a wall of text a
         /// model cannot look at, and a small screenshot is large enough to crowd out everything
-        /// else in the reply. As image content the client renders it and the model sees the
-        /// picture, which is the whole point of asking for one. The base64 is taken out of the
-        /// structured copy for the same reason.
+        /// else in the reply. The structured copy is stripped too: keeping it there shipped the
+        /// same picture twice, once priced by its size and once by its dimensions.
         /// </remarks>
-        private static JArray ResultContent(JObject result)
+        private static JObject WithoutInlineImage(JObject result, out string image)
         {
-            // A capture answered inline carries the PNG at the top; fetched through job_status it
-            // sits under "result", because that reply is the job's detail rather than the tool's
-            // own. Looking only at the top meant the same screenshot came back as an image when
-            // the Editor was idle and as a wall of base64 when it was busy.
-            var carrier = result?["result"] as JObject ?? result;
-            var image = carrier?["image"];
+            image = null;
 
-            if (image == null || image.Type != JTokenType.String || !IsEncodedPng(image.ToString()))
+            if (ImageCarrier(result) == null)
             {
-                return TextContent(result.ToString(Formatting.None));
+                return result;
             }
 
             var describing = (JObject)result.DeepClone();
+            var carrier = ImageCarrier(describing);
 
-            if (describing["result"] is JObject nested)
+            image = carrier["image"].ToString();
+            carrier.Remove("image");
+
+            return describing;
+        }
+
+        /// <summary>The object holding an <c>image</c> that is base64 of a PNG, or null.</summary>
+        /// <remarks>
+        /// Searched for rather than looked up in a fixed place. A capture answered inline carries
+        /// the PNG at the top, job_status nests it under <c>result</c> because that reply is the
+        /// job's detail rather than the tool's own, and input_replay puts it under <c>capture</c>.
+        /// Each position that was hardcoded here shipped the next tool's base64 as text.
+        /// </remarks>
+        private static JObject ImageCarrier(JToken node)
+        {
+            if (node is JObject body)
             {
-                nested.Remove("image");
+                if (body["image"] is JValue value
+                    && value.Type == JTokenType.String
+                    && IsEncodedPng(value.ToString()))
+                {
+                    return body;
+                }
+
+                foreach (var property in body.Properties())
+                {
+                    var found = ImageCarrier(property.Value);
+
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
             }
-            else
+            else if (node is JArray array)
             {
-                describing.Remove("image");
+                foreach (var item in array)
+                {
+                    var found = ImageCarrier(item);
+
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>The MCP content for a result whose picture has already been taken out.</summary>
+        private static JArray ResultContent(JObject describing, string image)
+        {
+            if (image == null)
+            {
+                return TextContent(describing.ToString(Formatting.None));
             }
 
             return new JArray
@@ -337,7 +384,7 @@ namespace UnityMCP.Editor.Core
                 new JObject
                 {
                     ["type"] = "image",
-                    ["data"] = image.ToString(),
+                    ["data"] = image,
                     ["mimeType"] = "image/png",
                 },
             };

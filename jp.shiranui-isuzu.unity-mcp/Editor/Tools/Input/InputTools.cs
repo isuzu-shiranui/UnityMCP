@@ -50,7 +50,7 @@ namespace UnityMCP.Editor.Tools
             string action = "move",
             [McpArg("button", "Mouse button: 0 left, 1 right, 2 middle.")]
             int button = 0,
-            [McpArg("from", "[x, y] where the gesture starts. Required.")]
+            [McpArg("from", "[x, y] where the gesture starts.", Required = true)]
             double[] from = null,
             [McpArg("to", "[x, y] where a drag ends. Ignored by other actions.")]
             double[] to = null,

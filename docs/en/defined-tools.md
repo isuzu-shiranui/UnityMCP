@@ -108,7 +108,7 @@ The result is `{steps: [{id, tool, ok, result|error}, …]}`. This kind exists t
 | `destructive` | `false` (`true` for a `sequence` that contains a destructive step) | `true` injects `confirm`/`dry_run` the same way an attribute-based tool does. `false` on a `sequence` that contains a destructive step is a load error |
 | `undoGroup` | none | allowed only on `sequence`, and only with `mainThread: true` |
 | `alwaysLoad` | `false` | keeps the tool loaded rather than deferred behind tool search |
-| `maxResultSizeChars` | `0` (client default) | raises the size at which the result spills to a file |
+| `maxResultSizeChars` | `0` (client default) | the size this tool asks the client to allow, in characters. Published in `_meta` as a hint; nothing on this side measures or cuts a response |
 | `inputs` | none | name → `{type, description, required?, default?, enum?}`. `type` is `string`, `integer`, `number`, `boolean`, `object` or `array` |
 | `examples` | none | worked argument objects, as JSON objects or JSON strings |
 

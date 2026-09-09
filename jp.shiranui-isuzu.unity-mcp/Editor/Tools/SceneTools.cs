@@ -155,7 +155,7 @@ namespace UnityMCP.Editor.Tools
             "rather than being discarded, unless the scene is being added additively.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Open(
-            [McpArg("path", "Project path of the scene, e.g. Assets/Scenes/Main.unity.")]
+            [McpArg("path", "Project path of the scene, e.g. Assets/Scenes/Main.unity.", Required = true)]
             string path = null,
             [McpArg("additive", "Add to the open scenes instead of replacing them.")]
             bool additive = false)

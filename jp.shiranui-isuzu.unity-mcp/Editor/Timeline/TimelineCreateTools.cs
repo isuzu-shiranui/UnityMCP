@@ -56,7 +56,7 @@ namespace UnityMCP.Editor.Timeline
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Create Timeline")]
         public static JObject Create(
-            [McpArg("asset_path", "Where to write the .playable, e.g. 'Assets/Stage/Stage.playable'.")]
+            [McpArg("asset_path", "Where to write the .playable, e.g. 'Assets/Stage/Stage.playable'.", Required = true)]
             string assetPath = null,
             [McpArg("frame_rate", "Timeline frame rate. Recorder takes its capture rate from this.")]
             double frameRate = 60,
@@ -167,7 +167,7 @@ namespace UnityMCP.Editor.Timeline
             string objectPath = null,
             [McpArg("instance_id", "Address the director's GameObject by instance id instead.")]
             long? instanceId = null,
-            [McpArg("type", "Track type: activation, animation, audio, control, group, playable or signal.")]
+            [McpArg("type", "Track type: activation, animation, audio, control, group, playable or signal.", Required = true)]
             string type = null,
             [McpArg("name", "Name for the track. Timeline makes it unique among its siblings.")]
             string name = null,
@@ -282,7 +282,7 @@ namespace UnityMCP.Editor.Timeline
             string objectPath = null,
             [McpArg("instance_id", "Address the director's GameObject by instance id instead.")]
             long? instanceId = null,
-            [McpArg("track", "Track path to add the clip to, as timeline_inspect reports it.")]
+            [McpArg("track", "Track path to add the clip to, as timeline_inspect reports it.", Required = true)]
             string track = null,
             [McpArg("start", "Clip start on the timeline, in seconds.")]
             double start = 0,

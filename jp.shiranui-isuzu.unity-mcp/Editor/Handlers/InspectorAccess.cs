@@ -46,40 +46,62 @@ namespace UnityMCP.Editor.Handlers
                     return new JObject { ["error"] = "GameObject not found" };
                 }
 
-                // No componentType: list all components (context-economy aware).
+                var offset = parameters["offset"]?.Value<int>() ?? 0;
+                var limit = parameters["limit"]?.Value<int>() ?? 0;
+                var fields = ListResponseBuilder.ParseFieldsParam(parameters["fields"]?.ToString());
+
+                // The components view answers a listing only. A read or a write with no component
+                // named targets the GameObject itself, which is what those tools promise; sending
+                // them here answered a write with a component list and wrote nothing.
+                if (mode == "list" && string.IsNullOrEmpty(componentType))
+                {
+                    var detail = parameters["detail"]?.ToString() ?? "standard";
+                    return ListComponents(
+                        go, offset, limit <= 0 ? int.MaxValue : limit, fields, detail);
+                }
+
+                SerializedObject serializedObject;
+                string target;
+
                 if (string.IsNullOrEmpty(componentType))
                 {
-                    var listOffset = parameters["offset"]?.Value<int>() ?? 0;
-                    var listLimit = parameters["limit"]?.Value<int>() ?? int.MaxValue;
-                    var listFields = ListResponseBuilder.ParseFieldsParam(parameters["fields"]?.ToString());
-                    var detail = parameters["detail"]?.ToString() ?? "standard";
-                    return ListComponents(go, listOffset, listLimit, listFields, detail);
+                    serializedObject = new SerializedObject(go);
+                    target = "GameObject";
                 }
-
-                // Find the target component
-                var component = FindComponent(go, componentType, componentIndex);
-                if (component == null)
+                else
                 {
-                    return new JObject
+                    var component = FindComponent(go, componentType, componentIndex);
+                    if (component == null)
                     {
-                        ["error"] = $"Component '{componentType}' (index {componentIndex}) not found on '{go.name}'"
-                    };
-                }
+                        return new JObject
+                        {
+                            ["error"] = $"Component '{componentType}' (index {componentIndex}) not found on '{go.name}'"
+                        };
+                    }
 
-                var serializedObject = new SerializedObject(component);
+                    serializedObject = new SerializedObject(component);
+                    target = componentType;
+                }
 
                 if (mode == "write")
                 {
-                    return WriteProperty(serializedObject, propertyPath, value, componentType);
+                    return WriteProperty(serializedObject, propertyPath, value, target);
                 }
 
                 // Read mode
                 if (string.IsNullOrEmpty(propertyPath))
                 {
-                    return ListProperties(serializedObject, componentType);
+                    return ListProperties(serializedObject, target, offset, limit, fields);
                 }
 
-                return ReadProperty(serializedObject, propertyPath, componentType);
+                return ReadProperty(serializedObject, propertyPath, target);
+            }
+            catch (McpToolException)
+            {
+                // A refusal answers the request. Folded into the failure below it reads as the
+                // Editor being unreadable, and a caller retries rather than correcting what it
+                // sent.
+                throw;
             }
             catch (Exception e)
             {
@@ -234,24 +256,28 @@ namespace UnityMCP.Editor.Handlers
             return null;
         }
 
-        private static JObject ListProperties(SerializedObject serializedObject, string componentType)
+        private static JObject ListProperties(
+            SerializedObject serializedObject, string componentType, int offset, int limit, string[] fields)
         {
-            var properties = new JArray();
+            var all = new List<JObject>();
             var iterator = serializedObject.GetIterator();
             var enterChildren = true;
-            var count = 0;
 
-            while (iterator.NextVisible(enterChildren) && count < MaxProperties)
+            while (iterator.NextVisible(enterChildren) && all.Count < MaxProperties)
             {
                 enterChildren = false;
-                properties.Add(BuildPropertyInfo(iterator));
-                count++;
+                all.Add(BuildPropertyInfo(iterator));
             }
+
+            var page = ListResponseBuilder.Build(all, offset, limit, item => item, fields);
 
             return new JObject
             {
                 ["component"] = componentType,
-                ["properties"] = properties
+                ["properties"] = page["items"],
+                ["count"] = all.Count,
+                ["truncated"] = page["truncated"],
+                ["next"] = page["next"],
             };
         }
 

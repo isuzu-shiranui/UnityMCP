@@ -23,6 +23,13 @@ namespace UnityMCP.Editor.Tools
     /// </remarks>
     internal static class GpuTools
     {
+        /// <summary>
+        /// Ceilings on what the reply carries. Samples and buckets were bounded only by the data,
+        /// so a large ask against a 4096-square texture answered with millions of numbers.
+        /// </summary>
+        private const int MaxSamples = 256;
+        private const int MaxBuckets = 256;
+
         [McpTool(
             "gpu_readback",
             "Read a GPU buffer or texture back and report its statistics: range, mean, how many " +
@@ -256,12 +263,23 @@ namespace UnityMCP.Editor.Tools
 
             if (samples > 0)
             {
-                meta["samples"] = new JArray(values.Skip(start).Take(Math.Min(samples, length))
+                // Capped: these are for recognising the data, not for transferring it, and each
+                // value serialises to as much as nineteen characters.
+                var wanted = Math.Min(Math.Min(samples, MaxSamples), length);
+
+                meta["samples"] = new JArray(values.Skip(start).Take(wanted)
                     .Select(v => (object)v).ToArray());
+
+                if (samples > wanted)
+                {
+                    meta["samplesCapped"] = MaxSamples;
+                }
             }
 
             if (buckets > 0 && max > min)
             {
+                buckets = Math.Min(buckets, MaxBuckets);
+
                 var counts = new int[buckets];
 
                 for (var i = start; i < start + length; i++)

@@ -238,7 +238,7 @@ namespace UnityMCP.Editor.Timeline
                 if (includeClips || IsControlTrack(t))
                 {
                     entry["clips"] = new JArray(t.GetClips()
-                        .Select(c => (object)DescribeClip(c, director, nestDepth, visited))
+                        .Select(c => (object)DescribeClip(c, director, includeClips, nestDepth, visited))
                         .ToArray());
                 }
 
@@ -252,7 +252,7 @@ namespace UnityMCP.Editor.Timeline
         }
 
         private static JObject DescribeClip(
-            TimelineClip clip, PlayableDirector director, int nestDepth, HashSet<long> visited)
+            TimelineClip clip, PlayableDirector director, bool includeClips, int nestDepth, HashSet<long> visited)
         {
             var entry = new JObject
             {
@@ -283,8 +283,11 @@ namespace UnityMCP.Editor.Timeline
 
                         if (nestDepth > 0)
                         {
+                            // includeClips travels: a caller who asked for no clips meant
+                            // this timeline too. The track filter does not, because it names
+                            // tracks in the timeline the caller asked about, not in this one.
                             entry["nested"] = DescribeDirector(
-                                childDirector, true, null, nestDepth - 1, visited);
+                                childDirector, includeClips, null, nestDepth - 1, visited);
                         }
                         else
                         {

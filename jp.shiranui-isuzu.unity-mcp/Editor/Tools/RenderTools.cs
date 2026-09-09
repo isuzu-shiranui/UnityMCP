@@ -19,6 +19,12 @@ namespace UnityMCP.Editor.Tools
     /// </summary>
     internal static class RenderTools
     {
+        /// <summary>
+        /// Cameras reported. Each runs to about a kilobyte with its matrices, and a cinematic
+        /// scene keeps one per shot.
+        /// </summary>
+        private const int MaxCameras = 50;
+
         [McpTool(
             "render_compare",
             "Compare two captured images and report how they differ, in numbers. Use this instead of " +
@@ -29,9 +35,9 @@ namespace UnityMCP.Editor.Tools
             "images have to be the same size.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Compare(
-            [McpArg("before", "Path to the first PNG, from capture_screenshot's save_path.")]
+            [McpArg("before", "Path to the first PNG, from capture_screenshot's save_path.", Required = true)]
             string before = null,
-            [McpArg("after", "Path to the second PNG.")]
+            [McpArg("after", "Path to the second PNG.", Required = true)]
             string after = null,
             [McpArg("threshold", "Largest per-channel difference, 0-255, at or below which a pixel " +
                                  "counts as unchanged. Only red, green and blue are compared; alpha " +
@@ -217,13 +223,16 @@ namespace UnityMCP.Editor.Tools
             "to tell which are drawing.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject CameraInfo(
-            [McpArg("name", "Only report the camera with this name.")]
+            [McpArg("name", "Only report cameras whose name contains this text, ignoring case. " +
+                            "Without it every camera in the open scenes is reported, inactive " +
+                            "ones included.")]
             string name = null,
             [McpArg("include_matrices", "Include the view and projection matrices, row-major.")]
             bool includeMatrices = true)
         {
             var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None)
-                .Where(c => string.IsNullOrWhiteSpace(name) || c.name == name)
+                .Where(c => string.IsNullOrWhiteSpace(name)
+                            || c.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
                 .OrderByDescending(c => c.isActiveAndEnabled)
                 .ThenBy(c => c.depth)
                 .ToArray();
@@ -237,7 +246,9 @@ namespace UnityMCP.Editor.Tools
                         : $"No camera named '{name}'.");
             }
 
-            var list = new JArray(cameras.Select(c =>
+            var shown = cameras.Take(MaxCameras).ToArray();
+
+            var list = new JArray(shown.Select(c =>
             {
                 var entry = new JObject
                 {

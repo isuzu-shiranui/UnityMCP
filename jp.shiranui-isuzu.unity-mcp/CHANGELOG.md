@@ -1,14 +1,84 @@
 # Changelog
 
-## [4.1.2] - 2026-09-09
+## [4.2.0] - 2026-09-09
+
+### Breaking
+- `project_assemblies` no longer returns `fullName`. It held the assembly name and version that
+  `name` and `version` already carry, followed by the same `Culture=neutral, PublicKeyToken=null`
+  on almost every row. Dropping it halves the reply: 24,350 tokens to 12,248 on a project with 249
+  loaded assemblies. Read `name` and `version`.
+- A `fields` list that matches nothing on the entries returned is refused with `invalid_params`
+  instead of answered with empty objects. Three tools took the same parameter and did three
+  different things with a name that matched nothing — empty objects, everything but the
+  identifier, or the filter ignored altogether — and none of them said anything was wrong. The
+  error names the fields the entries do carry. `console_read_logs` takes `t`, `m`, `f` and `l`,
+  which its description now says.
+- Thirty tools declare arguments their handlers already refused to work without: `asset_info`,
+  `asset_create_folder`, `asset_move`, `asset_delete`, `asset_reimport`, `reflect_read`,
+  `reflect_find_type`, `render_compare`, `build_player`, `scene_open`, `prefab_create`,
+  `prefab_instantiate`, `gameobject_add_component`, `gameobject_remove_component`,
+  `input_pointer`, nine `animator_*` tools and six `timeline_*` tools. A client that validates
+  arguments against the schema will now refuse these calls up front rather than sending them to
+  be rejected. Arguments wanted only in some situations — `input_pointer`'s `to`, `material_set`'s
+  `value`, the `timeline_*` clip selectors — stay optional.
 
 ### Fixed
-- A screenshot taken through the CLI is written to a file, and the reply carries the path.
-  It used to print the picture as base64. An MCP client turns that base64 into an image block,
-  which a model is charged for by the picture's dimensions — about 940 tokens for an 825x845
-  capture. Printed to a terminal the same bytes are read as text: 89,000 tokens, ninety-five
-  times the price for the same picture. The tool cannot tell which way its answer will travel,
-  so the CLI decides on the way out. The MCP path is unchanged and still carries the image.
+- A screenshot taken through the CLI is written to a file and the reply carries the path. Printed,
+  the base64 is read as text: about 89,000 tokens for an 825x845 capture against 940 as an image.
+  The picture is now found wherever the tool puts it — at the top of the reply, under `result`
+  when it arrives through `job_status`, or under `capture` when `input_replay` takes one — rather
+  than in two fixed places. `--raw` prints through the same path; it used to return before the
+  picture was moved.
+- `input_replay` with `then_capture` and no `capture_path` sent the PNG as base64 over MCP as well
+  as the CLI: 80,216 tokens as a text block against 785 as an image. It reached an MCP client as
+  `type: "text"` because the endpoint looked for the picture in two fixed places and the capture
+  sits under `capture`.
+- An MCP reply carried the base64 twice, once as an image block and once inside
+  `structuredContent`. A capture's reply is halved, from 169,806 characters to 85,021.
+- `project_packages` with `include_registry` returned the whole registry however small a `limit`
+  was asked for, because the registry half was built outside the paging. `limit: 2` returned 175
+  registry entries and 29,214 tokens; it now returns two, with `registryCount` naming the total.
+- `inspect_write` with no `component_type` listed the object's components and wrote nothing,
+  reporting a result rather than a failure. A read or a write with no component named now targets
+  the GameObject itself, which is what those tools describe. The components view answers a listing.
+- `inspect_list` ignored `offset` and `limit` when a `component_type` was named, returning every
+  property whatever was asked for.
+- `console_read_logs` compared an unknown `type` against each severity in turn and matched none,
+  so the filter narrowed nothing and every entry came back. `type: "ERROR"` is now refused.
+- `capture_screenshot` scaled an explicit `width` or `height` down to `max_size`, which their
+  descriptions say they override: 2048 came back as 1024 with nothing said. They are now honoured,
+  and an edge past 4096 is refused rather than quietly shrunk.
+- `timeline_inspect` discarded `include_clips` when it followed a Control track into a child
+  timeline, so a caller asking for no clips got them anyway from the nested one.
+- A refusal raised inside `console_read_logs`, `scene_browse_hierarchy` or `inspect_*` was folded
+  into that tool's generic failure message, so a wrong argument read as the Editor being
+  unreadable and a caller retried instead of correcting what it sent.
+
+### Changed
+- `console_read_logs` keeps the stack frames that name a file and a line, and replaces the rest
+  with a count and the assemblies they came from. Cutting each message at 500 characters spent the
+  budget on the test runner rather than the test: on a fifty-entry read, none of the fifty kept a
+  frame that could be opened, several severed mid-path. Paths are cut to their last three
+  segments. `test_results` reports a failure's trace the same way.
+- `editor_log_tail` folds lines whose shape repeats, keeping the first whole and counting the
+  rest, and applies the same stack trimming. A line reporting a problem is never folded. The
+  default read drops from 14,341 tokens to 3,335, and the 2,000-line cap from 110,059 to 54,822.
+- `editor_log_tail` gained `since`, which takes the `position` a previous reply returned and
+  answers with what the log has gained since. Checking the log after an action costs 105 tokens
+  rather than reading the tail again.
+- Ceilings where a reply's size followed the project rather than the request: `reflect_read` walks
+  at most 2,000 nodes, four levels deep, 200 items per collection, and cuts a string at 4,000
+  characters — depth and item count multiply, so neither bounds a reply on its own.
+  `gpu_readback` caps `samples` and `histogram` at 256; `animator_inspect` reports 120 states and
+  24 transitions each; `asset_info` lists 200 dependencies; `render_camera_info` reports 50
+  cameras. Each says what it left out and how many there were.
+- `render_camera_info` matches `name` as a case-insensitive substring. Exact matching selected one
+  camera or none, so a caller looking at a group had no way to ask for less than all of them.
+- `project_packages` leaves out `author` when nobody filled it in, rather than three empty strings
+  on every row.
+- `maxResultSizeChars` is documented as what it is: a hint published in `_meta` for the client to
+  act on. Nothing in the package measures a response or cuts one, so a tool can and does answer
+  above its own stated number.
 
 ## [4.1.1] - 2026-09-09
 

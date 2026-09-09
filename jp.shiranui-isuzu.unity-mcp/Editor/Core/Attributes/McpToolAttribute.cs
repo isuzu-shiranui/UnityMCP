@@ -94,14 +94,14 @@ namespace UnityMCP.Editor.Core.Attributes
         public bool AlwaysLoad { get; set; }
 
         /// <summary>
-        /// Raises the size at which this tool's text result is spilled to a file instead of
-        /// being returned inline, in characters. Zero leaves the client's default in place.
+        /// What this tool asks the client to allow before it writes the result to a file rather
+        /// than passing it inline, in characters. Zero leaves the client's default in place.
         /// </summary>
         /// <remarks>
-        /// For tools whose useful answer is genuinely large — a deep hierarchy, a long log tail —
-        /// the default truncation loses the part the caller asked for. This does nothing for image
-        /// results, so it will not help a screenshot. Surfaced as
-        /// <c>anthropic/maxResultSizeChars</c> in the tool's <c>_meta</c>.
+        /// A hint, and nothing more: it is published as <c>anthropic/maxResultSizeChars</c> in the
+        /// tool's <c>_meta</c> and read by the client. Nothing on this side measures a response or
+        /// cuts one, so a tool can and does answer above its own stated number — what bounds a
+        /// reply is the tool's own paging and ceilings. It says nothing about an image result.
         /// </remarks>
         public int MaxResultSizeChars { get; set; }
 

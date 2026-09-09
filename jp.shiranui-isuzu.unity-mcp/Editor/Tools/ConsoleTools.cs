@@ -41,7 +41,9 @@ namespace UnityMCP.Editor.Tools
             int offset = 0,
             [McpArg("type", "Severity filter: all, error, warning, or log.")]
             string type = "all",
-            [McpArg("fields", "Comma-separated field whitelist, to keep responses small.")]
+            [McpArg("fields", "Comma-separated field whitelist, to keep responses small. The " +
+                              "fields are 't' (severity), 'm' (message with its stack), 'f' " +
+                              "(file) and 'l' (line).")]
             string fields = null)
         {
             return LogReader.ReadLogs(ToolArgs.Of(

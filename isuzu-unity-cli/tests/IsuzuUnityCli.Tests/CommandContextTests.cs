@@ -11,6 +11,12 @@ public sealed class CommandContextTests
          "message":"'execute_code' is still running on the Editor main thread. The Editor is showing a dialog \"MCP probe\" (Pick one) with buttons Yes / No."}}
         """;
 
+    // A one-pixel PNG, base64-encoded: the signature is what the check reads.
+    private const string Shot = """
+        {"status":"success","result":{"view":"game","width":2,
+         "image":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}}
+        """;
+
     // Indentation is stated rather than inherited: its default reads Console.IsOutputRedirected,
     // which depends on how the test host was started.
     private static (CommandContext Context, StringWriter Out, StringWriter Err) Context(bool indented = true)
@@ -54,6 +60,39 @@ public sealed class CommandContextTests
 
         Assert.Contains("\"status\": \"success\"", output.ToString());
         Assert.Contains("showing a dialog", error.ToString());
+    }
+
+    [Fact]
+    public void RawOutputWritesAPictureToDiskRatherThanPrintingIt()
+    {
+        // --raw prints the envelope instead of the result, and used to return before the picture
+        // was moved, so the same screenshot cost ninety times as much through that one flag.
+        var directory = Path.Combine(Path.GetTempPath(), "raw-image-" + Guid.NewGuid().ToString("N"));
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = output,
+            Err = error,
+            Indented = false,
+            CaptureDirectory = directory,
+        };
+
+        try
+        {
+            context.Report(Envelope.Parse(200, Shot), raw: true);
+
+            Assert.DoesNotContain("iVBORw0KGg", output.ToString());
+            Assert.Contains("\"width\":2", output.ToString());
+            Assert.Contains("image written to", error.ToString());
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 
     [Fact]

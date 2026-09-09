@@ -45,8 +45,19 @@ namespace UnityMCP.Editor.Resources
 
             if (includeRegistry)
             {
-                var registryPackages = this.GetRegistryPackages();
-                result["registryPackages"] = registryPackages;
+                // Paged like the project list. Built outside the builder, the whole registry came
+                // back however small a limit the caller asked for.
+                var registry = this.GetRegistryPackages();
+                var registryPage = ListResponseBuilder.Build(
+                    registry,
+                    offset,
+                    limit,
+                    p => this.PackageToJObject(p, "available"),
+                    fieldsFilter);
+
+                result["registryPackages"] = registryPage["items"];
+                result["registryCount"] = registry.Count;
+                result["registryTruncated"] = registryPage["truncated"];
             }
 
             return result;
@@ -75,9 +86,9 @@ namespace UnityMCP.Editor.Resources
             return result;
         }
 
-        private JArray GetRegistryPackages()
+        private List<PackageInfo> GetRegistryPackages()
         {
-            var result = new JArray();
+            var result = new List<PackageInfo>();
             var searchRequest = Client.SearchAll();
 
             while (!searchRequest.IsCompleted)
@@ -88,7 +99,7 @@ namespace UnityMCP.Editor.Resources
             if (searchRequest.Status == StatusCode.Success)
             {
                 foreach (var package in searchRequest.Result)
-                    result.Add(this.PackageToJObject(package, "available"));
+                    result.Add(package);
             }
             else if (searchRequest.Status == StatusCode.Failure)
             {
@@ -100,7 +111,7 @@ namespace UnityMCP.Editor.Resources
 
         private JObject PackageToJObject(PackageInfo package, string state)
         {
-            return new JObject
+            var json = new JObject
             {
                 ["name"] = package.name,
                 ["displayName"] = package.displayName,
@@ -109,13 +120,23 @@ namespace UnityMCP.Editor.Resources
                 ["category"] = package.category,
                 ["source"] = package.source.ToString(),
                 ["state"] = state,
-                ["author"] = new JObject
+            };
+
+            // Registry packages mostly leave the author blank, and three empty strings on every
+            // row cost more than the field is worth.
+            if (!string.IsNullOrEmpty(package.author?.name)
+                || !string.IsNullOrEmpty(package.author?.email)
+                || !string.IsNullOrEmpty(package.author?.url))
+            {
+                json["author"] = new JObject
                 {
                     ["name"] = package.author?.name,
                     ["email"] = package.author?.email,
                     ["url"] = package.author?.url
-                }
-            };
+                };
+            }
+
+            return json;
         }
     }
 }

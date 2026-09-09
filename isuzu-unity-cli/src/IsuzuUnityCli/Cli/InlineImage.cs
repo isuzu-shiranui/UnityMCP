@@ -27,14 +27,12 @@ public static class InlineImage
     {
         var carrier = Carrier(result);
 
-        if (carrier is null
-            || carrier[Key] is not JsonValue value
-            || !value.TryGetValue<string>(out var encoded)
-            || !encoded.StartsWith(PngPrefix, StringComparison.Ordinal))
+        if (carrier is null)
         {
             return null;
         }
 
+        var encoded = carrier[Key]!.GetValue<string>();
         byte[] bytes;
         try
         {
@@ -57,17 +55,46 @@ public static class InlineImage
         return path;
     }
 
-    /// <summary>
-    /// The object holding the image. A job's detail nests the tool's answer under
-    /// <c>result</c>, so the image sits one level down there.
-    /// </summary>
-    private static JsonObject? Carrier(JsonNode? result)
+    /// <summary>The object holding an <c>image</c> that is base64 of a PNG, or null.</summary>
+    /// <remarks>
+    /// Searched for rather than looked up in a fixed place. A capture answered inline carries the
+    /// PNG at the top, a job's detail nests it under <c>result</c>, and input_replay puts it under
+    /// <c>capture</c>. Each position that was hardcoded here printed the next tool's base64.
+    /// </remarks>
+    private static JsonObject? Carrier(JsonNode? node)
     {
-        if (result is not JsonObject body)
+        if (node is JsonObject body)
         {
-            return null;
+            if (body[Key] is JsonValue value
+                && value.TryGetValue<string>(out var encoded)
+                && encoded.StartsWith(PngPrefix, StringComparison.Ordinal))
+            {
+                return body;
+            }
+
+            foreach (var property in body)
+            {
+                var found = Carrier(property.Value);
+
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
+        }
+        else if (node is JsonArray array)
+        {
+            foreach (var item in array)
+            {
+                var found = Carrier(item);
+
+                if (found is not null)
+                {
+                    return found;
+                }
+            }
         }
 
-        return body[Key] is null && body["result"] is JsonObject nested ? nested : body;
+        return null;
     }
 }
