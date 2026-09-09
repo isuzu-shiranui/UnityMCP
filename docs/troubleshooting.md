@@ -88,7 +88,11 @@ HTTP サーバーはワーカースレッドで動き続けるので、呼び出
 
 対処は、まず `editor_dialog_list` で題名・本文・ボタンを読むことです。それから `editor_dialog_press` にボタンの表示文字列と `confirm: true` を渡して押します。`Don't Save` や `Discard` のようなボタンは未保存の作業を捨てます。迷ったときは `Cancel` を押し、原因（未保存のシーンなど）を直してから元の呼び出しをやり直してください。
 
-押した後は、待っていたジョブが `job_status` で完了に変わります。ダイアログの検出と操作は Windows 限定です。他の OS では `editor_dialog_list` が `supported: false` を返すので、Editor 側でダイアログに答えてください。
+押した後は、待っていたジョブが `job_status` で完了に変わります。ネイティブダイアログの検出と操作は Windows と macOS に対応します。他の OS では `supported: false` を返します。
+
+macOS は同梱の Editor 専用ユニバーサルプラグインで、この Editor の Cocoa モーダルウィンドウとシートを調べます。アクセシビリティ権限は不要です。通常の有効な応答ボタンが対象で、独自の Unity ウィンドウや他のアプリは対象外です。読み取った `handle` を `editor_dialog_press` に渡して対象を固定してください。macOS ではボタン名の `&` をそのまま扱います。
+
+Cocoa のモーダルループも完全に停止している場合、一覧は `available: false`、`inspectionError`、`reason` を返します。これは「ダイアログが無い」という意味ではありません。検出は最大 750 ms、クリックは最大 3 秒で待機を打ち切ります。未開始のクリックは取り消され、後から実行されません。`dialog_action_pending` は既に開始済みなので、連打せず状態を再確認してください。`/health.mainThread.dialogDetectionError` でも検出失敗を確認できます。
 
 ## フォーカスの無い Editor で呼び出しが約 100 ms かかるとき
 

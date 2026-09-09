@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] - macOS dialog support (fork)
+
+- Inspect and answer native macOS modal dialogs and sheets while Unity's update
+  dispatcher is blocked, using a bundled universal Editor-only Cocoa helper.
+- No Accessibility permission required. Inspection/action waits are bounded;
+  unstarted timed-out clicks are cancelled instead of executing later.
+- Add availability diagnostics and optional exact dialog handles. Preserve the
+  existing confirmation requirement and Windows implementation.
+- Add native modal-loop tests and a managed response-envelope regression test.
+
 ## [4.2.0] - 2026-09-09
 
 ### Breaking

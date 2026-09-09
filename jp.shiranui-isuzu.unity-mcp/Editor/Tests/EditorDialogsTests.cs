@@ -27,7 +27,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void SupportFollowsThePlatform()
         {
-            Assert.That(EditorDialogs.IsSupported, Is.EqualTo(RuntimeInformation.IsOSPlatform(OSPlatform.Windows)));
+            Assert.That(EditorDialogs.IsSupported, Is.EqualTo(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)));
         }
 
         [Test]
@@ -35,6 +35,15 @@ namespace UnityMCP.Editor.Tests
         {
             // Nothing modal is up while the tests run, so an empty array is the expected answer.
             Assert.That(EditorDialogs.List(), Is.Empty);
+        }
+
+        [Test]
+        public void ListToolDoesNotReturnAReservedErrorField()
+        {
+            var result = Tools.EditorDialogTools.List();
+            Assert.That(result.Property("error"), Is.Null);
+            Assert.That(result.Property("available"), Is.Not.Null);
+            Assert.That(result.Property("inspectionError"), Is.Not.Null);
         }
 
         [Test]

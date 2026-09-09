@@ -1,9 +1,13 @@
 {
-    "sourceHash":  "fd972b18e8a89542acae918cf5ed1ca86f3a534ccb6cdb1d09b833c15ecdd152",
-    "total":  552,
-    "passed":  551,
+    "sourceHash":  "8322994eab3f7bb94734bca2eae76d66f5b8bcf36252e2019c08b879a3b828f7",
+    "total":  543,
+    "passed":  542,
     "failed":  0,
     "skipped":  1,
-    "unityVersion":  "6000.0.35f1",
-    "ranAt":  "2026-09-09T09:38:26.7177183Z"
+    "unityVersion":  "2022.3.22f1",
+    "ranAt":  "2026-09-09T17:26:41Z",
+    "platform": "macOS arm64",
+    "skippedReason": "Scene View navigation requires an interactive Editor",
+    "nativeSourceSha256": "71234bbc4d6c2c1b620fea2649037267c5808551c8fef948b0a68e69bccf3b7e",
+    "nativeBinarySha256": "52483c4615f0b1bf1401f126dc662c4f0347b06f25d3100a0f04b64735c9fdd4"
 }

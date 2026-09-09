@@ -16,7 +16,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（Editor が固まっていても動く） |
-| `editor_dialog_list` | safe | Editor が表示中のモーダルダイアログの題名・本文・ボタンと、メインスレッドの停止時間（Editor が固まっていても動く。Windows 限定） |
+| `editor_dialog_list` | safe | ネイティブモーダルの題名・本文・ボタンと停止時間（Windows / macOS。macOS は Cocoa のモーダルループが必要）。空の一覧を判断する前に `available` と `inspectionError` を確認 |
 | `editor_dialog_press` | unsafe | 表示中のダイアログのボタンを押してメインスレッドを再開する。`confirm: true` が必要。「Don't Save」系は未保存の作業を捨てるので、先に `editor_dialog_list` で本文を読む |
 | `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |

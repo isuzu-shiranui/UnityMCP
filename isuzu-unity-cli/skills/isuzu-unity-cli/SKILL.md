@@ -369,8 +369,12 @@ isuzu-unity-cli call editor_dialog_press --button "Cancel" --confirm true
 
 Read the dialog before pressing anything. `Don't Save` and `Discard` throw away unsaved work;
 `Cancel` is the safe answer, after which the cause can be fixed and the original call retried.
-Windows only — elsewhere `editor_dialog_list` answers `supported: false` and a person has to
-answer the dialog at the Editor.
+Windows and macOS native dialogs are supported. On macOS, pass the inspected `handle` to
+`editor_dialog_press`; no Accessibility permission is needed. Custom Unity windows are not
+covered. Check `available` and `inspectionError`: a frozen Cocoa loop cannot be inspected,
+even though a normal native modal loop can. A timed-out unstarted press is cancelled. If
+`dialog_action_pending` is reported, inspect again and do not blindly repeat the press.
+Other platforms return `supported: false` and require a person at the Editor.
 
 ## Jobs
 
