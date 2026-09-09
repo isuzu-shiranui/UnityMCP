@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Bắt đầu sử dụng Unity MCP</title>
+<meta name="description" content="Hướng dẫn cài Unity MCP và kết nối Unity Editor với tác nhân AI. Hai cách cài đặt: không dùng dòng lệnh hoặc dùng công cụ dòng lệnh.">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <a class="lang-link" href="../" hreflang="ja" lang="ja">日本語</a>
+    <a class="lang-link" href="../en/" hreflang="en" lang="en">English</a>
+  </div>
+
+  <header class="hero">
+    <h1>Bắt đầu sử dụng Unity MCP</h1>
+    <p class="tagline">Gói kết nối Unity Editor với tác nhân AI. Khi bạn đưa ra yêu cầu, tác nhân có thể đọc scene, thêm đối tượng và đọc lỗi trong Console. Gói hoạt động với Claude Code, Claude Desktop, Cursor, Codex, Gemini CLI và VS Code.</p>
+    <p class="headline">Một trong hai cách cài đặt hoàn toàn không dùng dòng lệnh. Bạn không cần mở terminal.</p>
+
+    <figure class="hero-shot">
+      <img src="../img/preferences.png" alt="Trang Unity MCP trong Preferences bằng tiếng Anh, với dòng đầu của mục Setup hiển thị Listening on port 27400 cùng dấu tích.">
+      <figcaption>Đây là màn hình khi thiết lập thành công; ảnh minh họa dùng giao diện tiếng Anh. Dấu <span class="live">✓</span> ở dòng đầu mục Setup (Thiết lập) cho biết Editor đang nhận kết nối.</figcaption>
+    </figure>
+  </header>
+
+  <section class="band">
+    <h2 class="band-label">Cần chuẩn bị</h2>
+    <div class="band-body">
+      <ul class="prereq">
+        <li>Unity Editor 2022.3 trở lên.</li>
+        <li>Git, tải từ <a href="https://git-scm.com/downloads">git-scm.com</a>. Unity dùng Git ở bước 1 để tải gói. Nếu thiếu Git, Package Manager sẽ dừng với lỗi "No 'git' executable was found". Bạn có thể giữ các tùy chọn mặc định của trình cài đặt. Nếu dùng VCC hoặc ALCOM theo hướng dẫn ở phần tiếp theo thì không cần Git.</li>
+        <li>Cách A dùng Claude Desktop vì định dạng tiện ích mở rộng này thuộc Claude Desktop. Ứng dụng có bản cho Windows và macOS. Trên Linux, hãy dùng cách B.</li>
+        <li>Dự án phải luôn mở trong Unity Editor khi sử dụng.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" id="vpm" aria-labelledby="vpm-title">
+    <h2 class="band-label" id="vpm-title">VCC và ALCOM</h2>
+    <div class="band-body">
+      <p>Nếu quản lý dự án bằng VRChat Creator Companion (VCC) hoặc ALCOM, hãy cài gói từ kho VPM. Cách này không cần Git. VCC và ALCOM tải gói dưới dạng zip, không gọi Git như Package Manager của Unity.</p>
+
+      <p>Liên kết bên dưới mở VCC hoặc ALCOM và yêu cầu bạn xác nhận thêm kho. Nếu dùng VCC, cần phiên bản 2.1.0 trở lên.</p>
+
+      <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Thêm kho Unity MCP</a></p>
+
+      <p class="code-label">Nếu liên kết không hoạt động, hãy thêm URL này thủ công</p>
+      <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
+
+      <p class="aside">Trong VCC, chọn nút Add Repository trên thẻ Packages của trang Settings. Trong ALCOM, chọn nút Add Repository trên thẻ Repositories của trang Packages. Sau khi thêm kho, Unity MCP xuất hiện trong danh sách gói của dự án. Nếu cài theo cách này, hãy bỏ qua bước đầu của cả cách A và cách B rồi bắt đầu từ bước thứ hai.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">Hai cách cài đặt</h2>
+    <div class="band-body">
+      <ul class="chooser">
+        <li>
+          <a href="#no-cli">
+            <span class="mark">A</span>
+            <span>
+              <strong>Cài đặt không dùng dòng lệnh</strong>
+              <span class="why">Chỉ cần Unity và Claude Desktop. Bạn không phải gõ lệnh.</span>
+            </span>
+          </a>
+        </li>
+        <li>
+          <a href="#cli">
+            <span class="mark">B</span>
+            <span>
+              <strong>Dùng dòng lệnh</strong>
+              <span class="why">Cài công cụ dòng lệnh để điều khiển Editor từ Claude Code, Cursor, Codex và các ứng dụng khác.</span>
+            </span>
+          </a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" id="no-cli" aria-labelledby="no-cli-title">
+    <h2 class="band-label" id="no-cli-title">A. Không dùng dòng lệnh</h2>
+    <div class="band-body">
+      <p>Tổng cộng năm bước, không bước nào cần gõ lệnh.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Thêm gói vào Unity</h3>
+          <p>Trong Unity Editor, mở Window &gt; Package Manager. Nhấn nút + ở góc trên bên trái, chọn Add package from git URL, dán URL bên dưới rồi nhấn Add.</p>
+          <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+          <figure class="shot">
+            <img src="../img/package-manager.png" alt="Package Manager của Unity với Unity MCP đã được thêm vào danh sách và đang được chọn.">
+            <figcaption>Sau khi thêm, Unity MCP xuất hiện trong danh sách của Package Manager.</figcaption>
+          </figure>
+          <p class="aside">Nếu đã cài bằng VCC hoặc ALCOM ở trên, bạn đã hoàn thành bước này. Hãy chuyển sang bước tiếp theo.</p>
+        </li>
+
+        <li>
+          <h3>Kiểm tra máy chủ đang chạy</h3>
+          <p>Mở cửa sổ Preferences của Editor và chọn Unity MCP trong danh sách bên trái. Trên Windows, Preferences nằm trong menu Edit. Khi dòng đầu của mục Setup hiển thị "✓ Listening on port", phía Unity đã sẵn sàng.</p>
+          <p class="aside">Để dùng tiếng Việt, mở Settings ngay trên trang này và chọn Tiếng Việt ở mục Language. Khi đó, dòng trạng thái trong mục Thiết lập sẽ là "✓ Đang lắng nghe trên cổng". Mô tả công cụ và đầu ra CLI vẫn dùng tiếng Anh.</p>
+          <p class="aside">Máy chủ tự khởi chạy khi mở dự án, bạn không cần khởi chạy thủ công. Cách cài đặt này không cần CLI ở dòng thứ hai.</p>
+        </li>
+
+        <li>
+          <h3>Tải tiện ích mở rộng</h3>
+          <p>Mở trang <a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases</a> trên GitHub và tải tệp <code>isuzu-unity-cli.mcpb</code>.</p>
+          <figure class="shot">
+            <img src="../img/releases-assets.png" alt="Danh sách Assets trên trang GitHub Releases, gồm mười một tệp, trong đó có isuzu-unity-cli.mcpb.">
+            <figcaption><code>isuzu-unity-cli.mcpb</code> nằm trong danh sách Assets trên trang Releases. Nhấp vào tên tệp để tải xuống.</figcaption>
+          </figure>
+        </li>
+
+        <li>
+          <h3>Nhấp đúp để cài vào Claude Desktop</h3>
+          <p>Nhấp đúp vào tệp đã tải để Claude Desktop mở màn hình cài tiện ích mở rộng. Để trống trường tên dự án Unity nếu chỉ có một dự án Unity đang mở.</p>
+          <p class="aside">Tiện ích dùng chữ ký tự ký. Khi cài đặt, Claude Desktop ghi thông báo về tiện ích chưa được ký vào nhật ký. Điều này không ảnh hưởng đến hoạt động của tiện ích. Bạn cũng có thể kéo tệp vào cửa sổ, hoặc chọn tệp tại Settings &gt; Extensions &gt; Advanced settings &gt; Install Extension.</p>
+          <p class="aside">Nếu nhấp đúp khiến cửa sổ đóng ngay, đây là hiện tượng đã ghi nhận ở bản Claude Desktop từ Microsoft Store. Đổi phần mở rộng của tệp thành <code>.zip</code> rồi giải nén. Sau đó chọn Install Unpacked Extension trên cùng màn hình và chọn thư mục đã giải nén.</p>
+        </li>
+
+        <li>
+          <h3>Đưa ra yêu cầu</h3>
+          <p>Giữ dự án mở trong Unity Editor và viết yêu cầu trong Claude Desktop. Các công cụ không hoạt động khi Editor đã đóng.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band" id="cli" aria-labelledby="cli-title">
+    <h2 class="band-label" id="cli-title">B. Dùng dòng lệnh</h2>
+    <div class="band-body">
+      <p>Cài công cụ dòng lệnh <code>isuzu-unity-cli</code>. Các tệp thực thi là mã máy, nên không cần Node.js hay môi trường chạy .NET.</p>
+
+      <ol class="steps">
+        <li>
+          <h3>Thêm gói vào Unity</h3>
+          <p>Giống bước đầu của cách A. Mở Window &gt; Package Manager và dán URL bên dưới vào Add package from git URL.</p>
+          <pre><code>https://github.com/isuzu-shiranui/UnityMCP.git?path=jp.shiranui-isuzu.unity-mcp</code></pre>
+          <p class="aside">Nếu đã cài bằng VCC hoặc ALCOM ở trên, bạn đã hoàn thành bước này. Bạn có thể bật giao diện tiếng Việt tại Preferences &gt; Unity MCP &gt; Settings &gt; Language.</p>
+        </li>
+
+        <li>
+          <h3>Cài công cụ dòng lệnh</h3>
+          <p>Chạy một dòng lệnh trong terminal.</p>
+          <p class="code-label">Windows (PowerShell)</p>
+          <pre><code>irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 | iex</code></pre>
+          <p class="code-label">macOS và Linux</p>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh</code></pre>
+          <p class="aside">Nếu đã cài .NET SDK, bạn cũng có thể chạy <code>dotnet tool install -g IsuzuUnityCli</code>. Hoặc tải trực tiếp tệp thực thi từ <a href="https://github.com/isuzu-shiranui/UnityMCP/releases">Releases</a>. Nút Install (Cài đặt) trong Preferences &gt; Unity MCP của Editor cũng thực hiện việc cài CLI.</p>
+        </li>
+
+        <li>
+          <h3>Cài skill cho tác nhân AI</h3>
+          <p>Lệnh này cài skill cho Claude Code và Codex.</p>
+          <pre><code>isuzu-unity-cli setup</code></pre>
+        </li>
+
+        <li>
+          <h3>Đăng ký ứng dụng khách</h3>
+          <p>Một dòng lệnh đăng ký cả điểm cuối lẫn token. Bạn không cần tự xử lý token.</p>
+          <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
+          <p class="aside"><code>--agent</code> chấp nhận <code>claude-code</code>, <code>claude-desktop</code>, <code>codex</code>, <code>cursor</code>, <code>gemini</code> hoặc <code>vscode</code>. Unity Editor phải đang chạy. Xem toàn bộ lệnh trong <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/cli.md">tài liệu CLI (tiếng Anh)</a>, và cấu hình từng ứng dụng trong <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">Kết nối ứng dụng khách MCP (tiếng Anh)</a>.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">Các khả năng</h2>
+    <div class="band-body">
+      <ul class="can-do">
+        <li>Đọc cấu trúc phân cấp scene và tìm GameObject bạn cần.</li>
+        <li>Tạo GameObject, thêm component và thay đổi vị trí, góc xoay, tỷ lệ.</li>
+        <li>Đọc và ghi các thuộc tính được tuần tự hóa hiển thị trong Inspector.</li>
+        <li>Đọc lỗi và cảnh báo trong Console, hoặc đọc trực tiếp Editor.log.</li>
+        <li>Chụp Game view hoặc Scene view.</li>
+        <li>Đọc và thay đổi giá trị hiện tại của material.</li>
+        <li>Bắt đầu và dừng Play Mode.</li>
+      </ul>
+      <p>Công cụ Timeline chỉ xuất hiện khi cài gói Timeline; công cụ Recorder cần cả Recorder lẫn Timeline; công cụ kiểm thử cần Test Framework. Xem danh sách đầy đủ trong <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/tools.md">tài liệu công cụ (tiếng Anh)</a>.</p>
+    </div>
+  </section>
+
+  <section class="band">
+    <h2 class="band-label">Nếu không hoạt động</h2>
+    <div class="band-body">
+      <ul class="trouble-list">
+        <li class="trouble-item">
+          <h3>Unity Editor chưa mở</h3>
+          <p>Mọi công cụ đều thao tác trên Unity Editor đang chạy, nên sẽ không có phản hồi khi Editor đã đóng. Mở lại dự án và kiểm tra dấu ✓ ở dòng đầu mục Setup (Thiết lập) trong Preferences &gt; Unity MCP.</p>
+        </li>
+        <li class="trouble-item">
+          <h3>Nhiều dự án đang mở</h3>
+          <p>Khi nhiều Unity Editor cùng chạy, tiện ích chưa biết cần kết nối dự án nào. Điền tên trên thanh tiêu đề của Editor vào trường tên dự án trong cài đặt tiện ích. Bạn cũng có thể dùng Product Name trong Player Settings. Nếu cả hai tên vẫn khớp nhiều Editor, hãy đóng các Editor còn lại để chọn đúng dự án.</p>
+          <a class="more" href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">Xem cấu hình từng ứng dụng khách (tiếng Anh)</a>
+        </li>
+        <li class="trouble-item">
+          <h3>Không thấy công cụ</h3>
+          <p>Thêm hoặc xóa gói làm thay đổi danh sách công cụ, nhưng ứng dụng khách không nhận được thông báo về thay đổi đó. Hãy kết nối lại ứng dụng khách đang dùng.</p>
+          <a class="more" href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/troubleshooting.md">Xem cách khắc phục sự cố (tiếng Anh)</a>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <ul>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP">Kho mã nguồn</a></li>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/README.vi.md">README</a></li>
+      <li><a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/troubleshooting.md">Khắc phục sự cố (tiếng Anh)</a></li>
+      <li><a href="../" hreflang="ja" lang="ja">日本語</a></li>
+      <li><a href="../en/" hreflang="en" lang="en">English</a></li>
+    </ul>
+    <p>Phân phối theo giấy phép MIT.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>
