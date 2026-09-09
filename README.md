@@ -5,7 +5,7 @@
 ![.NET](https://img.shields.io/badge/.NET-10-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
 
-[English Version](./README.en.md)
+[English Version](./README.en.md) | [Tiếng Việt](./README.vi.md)
 
 Unity Editor を AI エージェントに開放するフレームワークです。人が手で実行しても、スクリプトから呼んでも、同じ経路を通ります。
 

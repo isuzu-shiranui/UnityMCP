@@ -7,7 +7,7 @@
 ![.NET](https://img.shields.io/badge/.NET-10-purple.svg)
 ![GitHub Stars](https://img.shields.io/github/stars/isuzu-shiranui/UnityMCP?style=social)
 
-[日本語版](./README.md)
+[日本語版](./README.md) | [Tiếng Việt](./README.vi.md)
 
 This framework opens the Unity Editor to AI agents. Running a command by hand and calling it from a script go through the same path.
 
