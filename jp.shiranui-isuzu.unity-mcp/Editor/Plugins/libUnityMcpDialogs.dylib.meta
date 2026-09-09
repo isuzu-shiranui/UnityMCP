@@ -12,7 +12,7 @@ PluginImporter:
   validateReferences: 1
   platformData:
   - first:
-      Any: 
+      Any:
     second:
       enabled: 0
       settings: {}
@@ -24,6 +24,6 @@ PluginImporter:
         CPU: AnyCPU
         DefaultValueInitialized: true
         OS: OSX
-  userData: 
-  assetBundleName: 
-  assetBundleVariant: 
+  userData:
+  assetBundleName:
+  assetBundleVariant:
