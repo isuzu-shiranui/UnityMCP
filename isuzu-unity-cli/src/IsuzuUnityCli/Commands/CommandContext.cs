@@ -35,6 +35,14 @@ public sealed class CommandContext
     /// </summary>
     public bool Indented { get; init; }
 
+    /// <summary>
+    /// Where an inline image is written instead of being printed. A screenshot costs about 940
+    /// tokens as a picture and 89,000 as base64 in a terminal, and only the caller knows which
+    /// way the answer is travelling.
+    /// </summary>
+    public string CaptureDirectory { get; init; } =
+        Path.Combine(Path.GetTempPath(), "isuzu-unity-cli");
+
     public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
     {
         return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
@@ -60,7 +68,14 @@ public sealed class CommandContext
             return 1;
         }
 
+        var written = InlineImage.Externalise(envelope.Result, CaptureDirectory);
         JsonOutput.Print(Out, envelope.Result, Indented);
+
+        if (written is not null)
+        {
+            Err.WriteLine($"image written to {written}");
+        }
+
         ReportRunning(envelope);
         return 0;
     }

@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.1.2] - 2026-09-09
+
+### Fixed
+- A screenshot taken through the CLI is written to a file, and the reply carries the path.
+  It used to print the picture as base64. An MCP client turns that base64 into an image block,
+  which a model is charged for by the picture's dimensions — about 940 tokens for an 825x845
+  capture. Printed to a terminal the same bytes are read as text: 89,000 tokens, ninety-five
+  times the price for the same picture. The tool cannot tell which way its answer will travel,
+  so the CLI decides on the way out. The MCP path is unchanged and still carries the image.
+
 ## [4.1.1] - 2026-09-09
 
 ### Changed
