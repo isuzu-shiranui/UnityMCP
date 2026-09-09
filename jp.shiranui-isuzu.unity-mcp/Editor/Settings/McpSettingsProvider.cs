@@ -32,6 +32,7 @@ namespace UnityMCP.Editor.Settings
 
         private const string GuideUrlEnglish = "https://unity-mcp.shiranui-isuzu.dev/en/";
         private const string GuideUrlJapanese = "https://unity-mcp.shiranui-isuzu.dev/";
+        private const string GuideUrlVietnamese = "https://unity-mcp.shiranui-isuzu.dev/vi/";
         private const string RepositoryUrl = "https://github.com/isuzu-shiranui/UnityMCP";
         private const string TroubleshootingUrlEnglish = RepositoryUrl + "/blob/main/docs/en/troubleshooting.md";
         private const string TroubleshootingUrlJapanese = RepositoryUrl + "/blob/main/docs/troubleshooting.md";
@@ -589,7 +590,7 @@ namespace UnityMCP.Editor.Settings
             settings.uiLanguage = EditorGUILayout.Popup(
                 McpEditorText.Content("Language", "The language of this page. Tool descriptions and CLI output stay in English."),
                 settings.uiLanguage,
-                new[] { McpEditorText.Tr("Follow the Editor"), "English", "日本語" });
+                new[] { McpEditorText.Tr("Follow the Editor"), "English", "日本語", "Tiếng Việt" });
 
             EditorGUIUtility.labelWidth = previousWidth;
             EditorGUI.indentLevel--;
@@ -615,10 +616,11 @@ namespace UnityMCP.Editor.Settings
             }
 
             var japanese = McpEditorText.Resolve() == SystemLanguage.Japanese;
+            var vietnamese = McpEditorText.Resolve() == SystemLanguage.Vietnamese;
 
             EditorGUI.indentLevel++;
-            DrawLink(McpEditorText.Tr("Getting started"), japanese ? GuideUrlJapanese : GuideUrlEnglish);
-            DrawLink(McpEditorText.Tr("Documentation"), RepositoryUrl);
+            DrawLink(McpEditorText.Tr("Getting started"), vietnamese ? GuideUrlVietnamese : japanese ? GuideUrlJapanese : GuideUrlEnglish);
+            DrawLink(McpEditorText.Tr("Documentation"), vietnamese ? RepositoryUrl + "/blob/main/README.vi.md" : RepositoryUrl);
             DrawLink(McpEditorText.Tr("Troubleshooting"), japanese ? TroubleshootingUrlJapanese : TroubleshootingUrlEnglish);
             EditorGUI.indentLevel--;
         }

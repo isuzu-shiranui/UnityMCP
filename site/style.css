@@ -21,6 +21,10 @@
   --mono: "Cascadia Mono", "SF Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
 
+html:lang(vi) {
+  --sans: -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html { -webkit-text-size-adjust: 100%; }
@@ -67,6 +71,7 @@ code {
 .topbar {
   display: flex;
   justify-content: flex-end;
+  gap: 1rem;
   padding: 1.25rem 0 0;
 }
 
