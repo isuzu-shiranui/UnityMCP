@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - macOS dialog support (fork)
+## [Unreleased]
 
 - Inspect and answer native macOS modal dialogs and sheets while Unity's update
   dispatcher is blocked, using a bundled universal Editor-only Cocoa helper.

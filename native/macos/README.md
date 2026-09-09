@@ -32,7 +32,8 @@ The build produces an ad-hoc-signed universal arm64/x86_64 dylib, targeting macO
 Editor, never in players. Tests require a logged-in graphical desktop and briefly
 open harmless alerts. They test worker-thread access while the main thread is in
 a modal loop, Unicode, response-button filtering, exact matching, stale handles,
-and cancellation of a queued press during a deliberate main-loop stall.
+disabled and ambiguous buttons, content changes, bounded pending requests, and
+cancellation of a queued press during a deliberate main-loop stall.
 
 After rebuilding an already loaded native plugin, restart only the disposable
 test Editor before integration testing; native libraries cannot be hot-reloaded.

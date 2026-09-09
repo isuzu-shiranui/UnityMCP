@@ -44,6 +44,7 @@ namespace UnityMCP.Editor.Tests
             Assert.That(result.Property("error"), Is.Null);
             Assert.That(result.Property("available"), Is.Not.Null);
             Assert.That(result.Property("inspectionError"), Is.Not.Null);
+            Assert.That(HandlerErrorResult.Message(result), Is.Null);
         }
 
         [Test]

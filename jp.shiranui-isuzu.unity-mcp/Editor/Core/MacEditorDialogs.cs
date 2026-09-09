@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+
 using Newtonsoft.Json.Linq;
 
 namespace UnityMCP.Editor.Core
@@ -8,11 +9,20 @@ namespace UnityMCP.Editor.Core
     /// <summary>Bounded, in-process Cocoa modal inspection. No Accessibility grant is needed.</summary>
     internal static class MacEditorDialogs
     {
-        [DllImport("UnityMcpDialogs")] private static extern IntPtr UnityMcpDialogsList();
-        [DllImport("UnityMcpDialogs")] private static extern IntPtr UnityMcpDialogsPress(
+        private const string NativeLibrary = "UnityMcpDialogs";
+        private const string HandlePrefix = "mac:";
+        private const int MaxResponseBytes = 1024 * 1024;
+
+        [DllImport(NativeLibrary)]
+        private static extern IntPtr UnityMcpDialogsList();
+
+        [DllImport(NativeLibrary)]
+        private static extern IntPtr UnityMcpDialogsPress(
             [MarshalAs(UnmanagedType.LPUTF8Str)] string handle,
             [MarshalAs(UnmanagedType.LPUTF8Str)] string button);
-        [DllImport("UnityMcpDialogs")] private static extern void UnityMcpDialogsFree(IntPtr value);
+
+        [DllImport(NativeLibrary)]
+        private static extern void UnityMcpDialogsFree(IntPtr value);
 
         public static EditorDialogs.DialogInfo[] List(out string error)
         {
@@ -23,11 +33,23 @@ namespace UnityMCP.Editor.Core
 
         public static bool Press(string handle, string button)
         {
-            if (string.IsNullOrEmpty(handle) || !handle.StartsWith("mac:", StringComparison.Ordinal)) return false;
+            if (string.IsNullOrEmpty(handle) || !handle.StartsWith(HandlePrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
             var result = Invoke(() => UnityMcpDialogsPress(handle, button));
             var error = (string)result["error"];
-            if (error == "dialog_not_found" || error == "button_not_found") return false;
-            if (error != null) throw new McpToolException(error, Explanation(error), 503);
+            if (error == "dialog_not_found" || error == "button_not_found")
+            {
+                return false;
+            }
+
+            if (error != null)
+            {
+                throw new McpToolException(error, Explanation(error), 503);
+            }
+
             return (bool?)result["pressed"] == true;
         }
 
@@ -53,8 +75,16 @@ namespace UnityMCP.Editor.Core
                 try
                 {
                     var length = 0;
-                    while (length < 1024 * 1024 && Marshal.ReadByte(ptr, length) != 0) ++length;
-                    if (length == 1024 * 1024) return new JObject { ["error"] = "dialog_native_error" };
+                    while (length < MaxResponseBytes && Marshal.ReadByte(ptr, length) != 0)
+                    {
+                        ++length;
+                    }
+
+                    if (length == MaxResponseBytes)
+                    {
+                        return new JObject { ["error"] = "dialog_native_error" };
+                    }
+
                     var bytes = new byte[length];
                     Marshal.Copy(ptr, bytes, 0, length);
                     return JObject.Parse(Encoding.UTF8.GetString(bytes));

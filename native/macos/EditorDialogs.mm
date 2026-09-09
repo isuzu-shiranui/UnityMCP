@@ -6,13 +6,23 @@
 // Only this process's Cocoa modal windows/sheets are inspected. All AppKit access
 // runs on the main run loop, including NSModalPanelRunLoopMode (not Unity's pump).
 namespace {
+constexpr NSUInteger MaxTextLength = 4096;
+constexpr NSUInteger MaxDialogs = 16;
+constexpr int MaxSheetDepth = 8;
+constexpr int MaxViewDepth = 16;
+constexpr int MaxViewCount = 1024;
+constexpr int InspectTimeoutMs = 750;
+constexpr int PressTimeoutMs = 3000;
+
+enum class RequestState { Pending, Started, Completed, Cancelled };
+
 struct Request {
-    std::atomic<int> state{0}; // pending, started, completed, cancelled
+    std::atomic<RequestState> state{RequestState::Pending};
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
     __strong NSDictionary *result;
 };
 NSString *Trim(NSString *s) { return [(s ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]; }
-NSString *Bound(NSString *s) { return s.length <= 4096 ? s : [[s substringToIndex:4096] stringByAppendingString:@"…"]; }
+NSString *Bound(NSString *s) { return s.length <= MaxTextLength ? s : [[s substringToIndex:MaxTextLength] stringByAppendingString:@"…"]; }
 NSDictionary *Error(NSString *code) { return @{@"error":code}; }
 
 NSArray<NSWindow *> *Windows() {
@@ -20,16 +30,16 @@ NSArray<NSWindow *> *Windows() {
     if (NSApp.modalWindow.visible) [result addObject:NSApp.modalWindow];
     for (NSWindow *root in NSApp.orderedWindows) {
         NSWindow *sheet = root.attachedSheet;
-        for (int depth = 0; sheet && depth < 8; ++depth, sheet = sheet.attachedSheet)
+        for (int depth = 0; sheet && depth < MaxSheetDepth && result.count < MaxDialogs; ++depth, sheet = sheet.attachedSheet)
             if (sheet.visible && ![result containsObject:sheet]) [result addObject:sheet];
-        if (result.count >= 16) break;
+        if (result.count >= MaxDialogs) break;
     }
     return result;
 }
 
 void Walk(NSView *view, NSMutableArray<NSString *> *text, NSMutableArray<NSButton *> *buttons, int depth, int &budget) {
     if (!view || view.hidden || budget < 0) return;
-    if (depth > 16 || --budget < 0) { budget = -1; return; }
+    if (depth > MaxViewDepth || --budget < 0) { budget = -1; return; }
     if ([view isKindOfClass:NSButton.class]) {
         NSButton *button = (NSButton *)view;
         // Checkboxes/radios change options; they are not dialog response buttons.
@@ -50,7 +60,7 @@ void Walk(NSView *view, NSMutableArray<NSString *> *text, NSMutableArray<NSButto
 NSDictionary *Describe(NSWindow *window, NSArray<NSButton *> **buttonViews = nullptr) {
     NSMutableArray *text = [NSMutableArray array];
     NSMutableArray<NSButton *> *buttons = [NSMutableArray array];
-    int budget = 1024;
+    int budget = MaxViewCount;
     Walk(window.contentView, text, buttons, 0, budget);
     if (budget < 0) return Error(@"dialog_tree_too_large");
     NSMutableArray *titles = [NSMutableArray array];
@@ -111,21 +121,21 @@ NSDictionary *OnMain(NSDictionary *(^work)(), int timeoutMs) {
     if (!busy.compare_exchange_strong(idle, true)) return Error(@"dialog_inspection_busy");
     auto request = std::make_shared<Request>();
     CFRunLoopPerformBlock(CFRunLoopGetMain(), (__bridge CFTypeRef)@[NSDefaultRunLoopMode, NSModalPanelRunLoopMode, NSEventTrackingRunLoopMode], ^{
-        int pending = 0;
-        if (!request->state.compare_exchange_strong(pending, 1)) { busy.store(false); return; }
+        auto pending = RequestState::Pending;
+        if (!request->state.compare_exchange_strong(pending, RequestState::Started)) { busy.store(false); return; }
         @try { request->result = work(); }
         @catch (NSException *) { request->result = Error(@"dialog_native_error"); }
-        request->state.store(2);
+        request->state.store(RequestState::Completed);
         busy.store(false);
         dispatch_semaphore_signal(request->done);
     });
     CFRunLoopWakeUp(CFRunLoopGetMain());
     if (dispatch_semaphore_wait(request->done, dispatch_time(DISPATCH_TIME_NOW, int64_t(timeoutMs) * NSEC_PER_MSEC)) == 0)
         return request->result;
-    int pending = 0;
-    if (request->state.compare_exchange_strong(pending, 3))
+    auto pending = RequestState::Pending;
+    if (request->state.compare_exchange_strong(pending, RequestState::Cancelled))
         return Error(@"dialog_main_loop_unavailable"); // queued action is cancelled, never clicks later
-    if (request->state.load() == 2) return request->result;
+    if (request->state.load() == RequestState::Completed) return request->result;
     return Error(@"dialog_action_pending"); // action already started; must not retry blindly
 }
 
@@ -141,13 +151,13 @@ char *Encode(NSDictionary *result) {
 }
 
 extern "C" __attribute__((visibility("default"))) char *UnityMcpDialogsList() {
-    @autoreleasepool { return Encode(OnMain(^{ return List(); }, 750)); }
+    @autoreleasepool { return Encode(OnMain(^{ return List(); }, InspectTimeoutMs)); }
 }
 extern "C" __attribute__((visibility("default"))) char *UnityMcpDialogsPress(const char *handle, const char *button) {
     @autoreleasepool {
         NSString *h = handle ? [NSString stringWithUTF8String:handle] : @"";
         NSString *b = button ? [NSString stringWithUTF8String:button] : @"";
-        return Encode(OnMain(^{ return Press(h, b); }, 3000));
+        return Encode(OnMain(^{ return Press(h, b); }, PressTimeoutMs));
     }
 }
 extern "C" __attribute__((visibility("default"))) void UnityMcpDialogsFree(void *value) { free(value); }
