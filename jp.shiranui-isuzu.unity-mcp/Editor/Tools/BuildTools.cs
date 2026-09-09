@@ -71,7 +71,7 @@ namespace UnityMCP.Editor.Tools
             "stated rather than guessed.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject BuildPlayer(
-            [McpArg("output_path", "Where to write the build, including the executable's file name.")]
+            [McpArg("output_path", "Where to write the build, including the executable's file name.", Required = true)]
             string outputPath = null,
             [McpArg("platform", "Build target, e.g. StandaloneWindows64, Android, iOS, WebGL. Defaults to the active one.")]
             string platform = null,

@@ -70,6 +70,17 @@ namespace UnityMCP.Editor.Handlers
                     ?? 50;
                 var offset = parameters["offset"]?.Value<int>() ?? 0;
                 var typeFilter = parameters["type"]?.ToString() ?? "all";
+
+                // Checked here rather than in the loop: the loop compares against each name in
+                // turn, so one it does not know narrows nothing and every severity comes back.
+                if (typeFilter != "all" && typeFilter != "error"
+                    && typeFilter != "warning" && typeFilter != "log")
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"'{typeFilter}' is not a severity. Use all, error, warning or log.");
+                }
+
                 var fieldsParam = parameters["fields"]?.ToString();
                 var fieldsFilter = ListResponseBuilder.ParseFieldsParam(fieldsParam);
 
@@ -108,8 +119,7 @@ namespace UnityMCP.Editor.Handlers
                         var file = (string)FileField.GetValue(entry) ?? "";
                         var line = (int)LineField.GetValue(entry);
 
-                        if (message.Length > 500)
-                            message = message.Substring(0, 500) + "...";
+                        message = LogNoise.TrimStack(message);
 
                         allEntries.Add(new JObject
                         {
@@ -152,6 +162,13 @@ namespace UnityMCP.Editor.Handlers
                 {
                     EndGettingEntriesMethod.Invoke(null, null);
                 }
+            }
+            catch (McpToolException)
+            {
+                // A refusal is an answer about the request. Folded into the generic failure below
+                // it reads as the console being unreadable, and a caller retries instead of
+                // correcting what it sent.
+                throw;
             }
             catch (Exception e)
             {

@@ -260,7 +260,7 @@ namespace UnityMCP.Editor.Tools
             string objectPath = null,
             [McpArg("instance_id", "Instance id, instead of a path.")]
             long? instanceId = null,
-            [McpArg("component_type", "Type name of the component to add.")]
+            [McpArg("component_type", "Type name of the component to add.", Required = true)]
             string componentType = null)
         {
             var go = ObjectResolve.Object(objectPath, instanceId);
@@ -291,7 +291,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("instance_id", "Instance id, instead of a path.")]
             long? instanceId = null,
             [McpArg("component_type", "Type name of the component to remove. Short or fully " +
-                                      "qualified, and a base type matches a derived component.")]
+                                      "qualified, and a base type matches a derived component.", Required = true)]
             string componentType = null,
             [McpArg("index", "Which one, when the object carries several of the same type.")]
             int index = 0)

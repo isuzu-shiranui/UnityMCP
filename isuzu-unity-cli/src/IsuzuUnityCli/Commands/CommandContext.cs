@@ -35,6 +35,14 @@ public sealed class CommandContext
     /// </summary>
     public bool Indented { get; init; }
 
+    /// <summary>
+    /// Where an inline image is written instead of being printed. A screenshot costs about 940
+    /// tokens as a picture and 89,000 as base64 in a terminal, and only the caller knows which
+    /// way the answer is travelling.
+    /// </summary>
+    public string CaptureDirectory { get; init; } =
+        Path.Combine(Path.GetTempPath(), "isuzu-unity-cli");
+
     public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
     {
         return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
@@ -49,6 +57,9 @@ public sealed class CommandContext
     {
         if (raw)
         {
+            // The envelope carries the same picture the result does, so --raw needs the same
+            // treatment: printed, a screenshot costs about ninety times what it does as a file.
+            ReportWritten(InlineImage.Externalise(envelope.Raw, CaptureDirectory));
             JsonOutput.Print(Out, envelope.Raw, Indented);
             ReportRunning(envelope);
             return envelope.IsError ? 1 : 0;
@@ -60,9 +71,20 @@ public sealed class CommandContext
             return 1;
         }
 
+        var written = InlineImage.Externalise(envelope.Result, CaptureDirectory);
         JsonOutput.Print(Out, envelope.Result, Indented);
+        ReportWritten(written);
         ReportRunning(envelope);
         return 0;
+    }
+
+    /// <summary>Names the file a picture went to, on stderr so it stays out of the JSON.</summary>
+    private void ReportWritten(string? path)
+    {
+        if (path is not null)
+        {
+            Err.WriteLine($"image written to {path}");
+        }
     }
 
     /// <summary>The <c>message</c> of a running job or a 202 envelope, or null for anything else.</summary>

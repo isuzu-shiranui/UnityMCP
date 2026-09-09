@@ -21,6 +21,13 @@ namespace UnityMCP.Editor.Handlers
     internal static class ScreenshotCapture
     {
         /// <summary>
+        /// Largest edge an explicit width or height may ask for. A picture is priced by its area,
+        /// so a 4096-square capture already costs a model about twenty thousand tokens; past this
+        /// the call is refused rather than quietly shrunk.
+        /// </summary>
+        private const int MaxRequestedEdge = 4096;
+
+        /// <summary>
         /// Editor panel view to window type name. Owned by <see cref="EditorWindowLocator"/> so
         /// capture and input replay cannot disagree about what a view name refers to.
         /// </summary>
@@ -185,7 +192,20 @@ namespace UnityMCP.Editor.Handlers
                     return new JObject { ["error"] = "Invalid capture dimensions" };
                 }
 
-                if (captureWidth > maxSize || captureHeight > maxSize)
+                if (requestedWidth > MaxRequestedEdge || requestedHeight > MaxRequestedEdge)
+                {
+                    throw new McpScreenshotException(
+                        "invalid_params",
+                        $"width and height are capped at {MaxRequestedEdge}. A picture costs a "
+                        + "model by its area, and this one would be larger than any view of it needs.",
+                        400);
+                }
+
+                // max_size shapes what the caller did not ask for. Applying it to an explicit
+                // width or height contradicted their documented meaning and said nothing about it.
+                var sized = requestedWidth.HasValue || requestedHeight.HasValue;
+
+                if (!sized && (captureWidth > maxSize || captureHeight > maxSize))
                 {
                     var scale = Math.Min((float)maxSize / captureWidth, (float)maxSize / captureHeight);
                     captureWidth = Mathf.Max(1, Mathf.RoundToInt(captureWidth * scale));
@@ -277,7 +297,18 @@ namespace UnityMCP.Editor.Handlers
                         400);
                 }
 
-                if (targetWidth > maxSize || targetHeight > maxSize)
+                if (targetWidth > MaxRequestedEdge || targetHeight > MaxRequestedEdge)
+                {
+                    throw new McpScreenshotException(
+                        "invalid_params",
+                        $"width and height are capped at {MaxRequestedEdge}. A picture costs a "
+                        + "model by its area, and this one would be larger than any view of it needs.",
+                        400);
+                }
+
+                var askedForSize = requestedWidth.HasValue || requestedHeight.HasValue;
+
+                if (!askedForSize && (targetWidth > maxSize || targetHeight > maxSize))
                 {
                     var scale = Math.Min((float)maxSize / targetWidth, (float)maxSize / targetHeight);
                     targetWidth = Mathf.Max(1, Mathf.RoundToInt(targetWidth * scale));

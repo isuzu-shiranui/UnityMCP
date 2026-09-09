@@ -52,7 +52,7 @@ namespace UnityMCP.Editor.Tools
             "fresh instance. Read sharedMaterial and sharedMesh instead when you only want to look.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Read(
-            [McpArg("path", "Type name or instance root, then members: 'Namespace.Type/field/other[3]', '@selection/transform/position'.")]
+            [McpArg("path", "Type name or instance root, then members: 'Namespace.Type/field/other[3]', '@selection/transform/position'.", Required = true)]
             string path = null,
             [McpArg("depth", "How deep to serialise nested objects.")]
             int depth = 2,
@@ -95,7 +95,7 @@ namespace UnityMCP.Editor.Tools
             "Find loaded types by name, when the full name for reflect_read is not known.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject FindType(
-            [McpArg("name", "Name or fragment to match, case-insensitive.")]
+            [McpArg("name", "Name or fragment to match, case-insensitive.", Required = true)]
             string name = null,
             [McpArg("limit", "Maximum matches to return.")]
             int limit = 30)
@@ -538,15 +538,51 @@ namespace UnityMCP.Editor.Tools
 
         // ── serialisation ──
 
+        /// <summary>
+        /// Ceilings the caller cannot raise. depth bounds how deep the walk goes and max_items how
+        /// wide each level is, but they multiply, so a value either one allows can still be the
+        /// product of the two. The node budget is what actually bounds the reply.
+        /// </summary>
+        private const int MaxDepth = 4;
+        private const int MaxItemsCeiling = 200;
+        private const int MaxNodes = 2000;
+
+        /// <summary>
+        /// A string is returned ahead of every depth and collection check, so nothing else can
+        /// shorten a serialised blob or a shader's source held in a field.
+        /// </summary>
+        private const int MaxStringLength = 4000;
+
+        /// <summary>Fields read from one object. Their order is unspecified, so which ones survive is too.</summary>
+        private const int MaxFields = 60;
+
         internal static JToken Serialize(object value, int depth, int maxItems)
         {
+            var budget = MaxNodes;
+
+            return Serialize(
+                value,
+                Math.Min(Math.Max(depth, 0), MaxDepth),
+                Math.Min(Math.Max(maxItems, 0), MaxItemsCeiling),
+                ref budget);
+        }
+
+        private static JToken Serialize(object value, int depth, int maxItems, ref int budget)
+        {
+            if (budget-- <= 0)
+            {
+                return new JObject { ["truncated"] = "budget" };
+            }
+
             switch (value)
             {
                 case null:
                     return JValue.CreateNull();
 
                 case string s:
-                    return s;
+                    return s.Length <= MaxStringLength
+                        ? s
+                        : s.Substring(0, MaxStringLength) + $"… ({s.Length} characters)";
 
                 case bool b:
                     return b;
@@ -618,7 +654,7 @@ namespace UnityMCP.Editor.Tools
                         break;
                     }
 
-                    o[entry.Key?.ToString() ?? "null"] = Serialize(entry.Value, depth - 1, maxItems);
+                    o[entry.Key?.ToString() ?? "null"] = Serialize(entry.Value, depth - 1, maxItems, ref budget);
                 }
 
                 return o;
@@ -638,7 +674,7 @@ namespace UnityMCP.Editor.Tools
                         break;
                     }
 
-                    a.Add(Serialize(item, depth - 1, maxItems));
+                    a.Add(Serialize(item, depth - 1, maxItems, ref budget));
                 }
 
                 if (!more)
@@ -650,12 +686,18 @@ namespace UnityMCP.Editor.Tools
             }
 
             var result = new JObject { ["__type"] = type.FullName };
+            var fields = type.GetFields(AllInstance);
 
-            foreach (var field in type.GetFields(AllInstance).Take(60))
+            if (fields.Length > MaxFields)
+            {
+                result["__truncated"] = $"{fields.Length} fields";
+            }
+
+            foreach (var field in fields.Take(MaxFields))
             {
                 try
                 {
-                    result[field.Name] = Serialize(field.GetValue(value), depth - 1, maxItems);
+                    result[field.Name] = Serialize(field.GetValue(value), depth - 1, maxItems, ref budget);
                 }
                 catch (Exception e)
                 {

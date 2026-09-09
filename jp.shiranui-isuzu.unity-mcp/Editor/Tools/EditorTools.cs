@@ -24,7 +24,9 @@ namespace UnityMCP.Editor.Tools
             "everywhere. A screen-read view returns whatever is drawn in that rectangle, so the call " +
             "is refused when another application is in front of the Editor. It also focuses the " +
             "window first, which raises a docked tab over whatever the person at the Editor was " +
-            "looking at.",
+            "looking at. An MCP client receives the picture as an image; the CLI writes it to " +
+            "a file and prints the path, because the same picture costs about ninety times as " +
+            "much read out of a terminal as base64 than it does as an image.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject CaptureScreenshot(
             [McpArg("view", "What to capture. 'game' and 'scene' render through the camera. " +

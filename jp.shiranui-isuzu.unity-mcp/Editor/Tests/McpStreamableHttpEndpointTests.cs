@@ -35,6 +35,19 @@ namespace UnityMCP.Editor.Tests
                 ["image"] = "iVBORw0KGgpyZXN0",
             };
 
+            [McpTool("ep_shot_nested", "A capture beside other work.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject ShotNested() => new JObject
+            {
+                ["sent"] = 2,
+                ["window"] = "Game",
+                ["capture"] = new JObject
+                {
+                    ["view"] = "game",
+                    ["width"] = 2,
+                    ["image"] = "iVBORw0KGgpyZXN0",
+                },
+            };
+
             [McpTool("ep_refused", "Reports failure the handler way.", Idempotency = McpIdempotency.Safe, MainThread = false)]
             public static JObject Refused() => new JObject { ["error"] = "No active scene view found" };
 
@@ -105,8 +118,38 @@ namespace UnityMCP.Editor.Tests
             Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
             Assert.That(content[1]["mimeType"].Value<string>(), Is.EqualTo("image/png"));
 
-            Assert.That(result["structuredContent"]["image"], Is.Not.Null,
-                "the structured copy keeps it for callers that read the field");
+            Assert.That(result["structuredContent"]["image"], Is.Null,
+                "keeping it here sent the same picture twice, once priced by size and once by area");
+            Assert.That(result["structuredContent"]["width"], Is.Not.Null,
+                "everything else about the capture still belongs in the structured copy");
+        }
+
+        /// <summary>
+        /// A tool that captures alongside other work puts the PNG under its own key. Looking only
+        /// at the top and at "result" meant input_replay shipped a screenshot as a text block.
+        /// </summary>
+        [Test]
+        public void ACaptureIsFoundWhereverTheToolPutIt()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject
+            {
+                ["name"] = "ep_shot_nested",
+                ["arguments"] = new JObject(),
+            }));
+
+            var result = response.Body["result"];
+            var content = (JArray)result["content"];
+
+            Assert.That(content.Count, Is.EqualTo(2));
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("iVBORw0KGgpyZXN0"));
+            Assert.That(content[0]["text"].Value<string>(), Does.Contain("sent"),
+                "the rest of the reply is what the caller asked for");
+            Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
+            Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
+
+            Assert.That(result["structuredContent"]["capture"]["image"], Is.Null);
+            Assert.That(result["structuredContent"]["capture"]["view"].Value<string>(),
+                Is.EqualTo("game"));
         }
 
         /// <summary>
@@ -305,7 +348,7 @@ namespace UnityMCP.Editor.Tests
             var response = this.Post(Request(1, "tools/list"));
 
             var tools = ToolsOf(response);
-            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_refused", "ep_job_detail", "ep_shot_job" }));
+            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_shot_nested", "ep_refused", "ep_job_detail", "ep_shot_job" }));
 
             var echo = tools.Single(t => t["name"].Value<string>() == "ep_echo");
             Assert.That(echo["annotations"]["readOnlyHint"].Value<bool>(), Is.True);

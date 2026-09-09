@@ -63,7 +63,7 @@ namespace UnityMCP.Editor.Tools
                                    "controller, instead of naming the asset.")]
             string objectPath = null,
             [McpArg("name", "Name for the new layer. Nothing stops two layers sharing a name; " +
-                            "animator_audit reports it when they do.")]
+                            "animator_audit reports it when they do.", Required = true)]
             string name = null,
             [McpArg("weight", "Default weight, 0 to 1.")]
             float weight = 1f,
@@ -148,7 +148,7 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer to remove, by name or by index.")]
+            [McpArg("layer", "Layer to remove, by name or by index.", Required = true)]
             string layer = null)
         {
             var controller = AnimatorResolve.Controller(path, objectPath);
@@ -191,9 +191,9 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer to add to, by name or by index.")]
+            [McpArg("layer", "Layer to add to, by name or by index.", Required = true)]
             string layer = null,
-            [McpArg("name", "Name for the new state.")]
+            [McpArg("name", "Name for the new state.", Required = true)]
             string name = null,
             [McpArg("motion", "AnimationClip asset path for the state to play. Omit for an empty state.")]
             string motion = null,
@@ -269,10 +269,10 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer holding the state, by name or by index.")]
+            [McpArg("layer", "Layer holding the state, by name or by index.", Required = true)]
             string layer = null,
             [McpArg("state", "State to remove, by name, or by path when it sits in a sub-state " +
-                             "machine, e.g. 'Gestures/Point'.")]
+                             "machine, e.g. 'Gestures/Point'.", Required = true)]
             string state = null)
         {
             var controller = AnimatorResolve.Controller(path, objectPath);
@@ -315,9 +315,9 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer holding the state, by name or by index.")]
+            [McpArg("layer", "Layer holding the state, by name or by index.", Required = true)]
             string layer = null,
-            [McpArg("state", "State to change, by name or by path within the layer.")]
+            [McpArg("state", "State to change, by name or by path within the layer.", Required = true)]
             string state = null,
             [McpArg("motion", "AnimationClip asset path to play. Pass an empty string to clear the " +
                               "motion and leave the state empty.")]
@@ -516,12 +516,12 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer holding both states, by name or by index.")]
+            [McpArg("layer", "Layer holding both states, by name or by index.", Required = true)]
             string layer = null,
             [McpArg("from_state", "Source state, by name or by path. Omit to make it an Any State " +
                                   "transition, which can fire from anywhere in the layer.")]
             string fromState = null,
-            [McpArg("to_state", "Destination state, by name or by path.")]
+            [McpArg("to_state", "Destination state, by name or by path.", Required = true)]
             string toState = null,
             [McpArg("conditions", "Array of {parameter, mode, threshold}. Modes: If and IfNot for a " +
                                   "bool or trigger, Greater and Less for a float or int, Equals and " +
@@ -608,7 +608,7 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("layer", "Layer holding the transition, by name or by index.")]
+            [McpArg("layer", "Layer holding the transition, by name or by index.", Required = true)]
             string layer = null,
             [McpArg("from_state", "Source state, by name or by path. Omit to remove one of the layer's " +
                                   "Any State transitions.")]
@@ -676,7 +676,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
             [McpArg("name", "Parameter name. Names are case sensitive and a condition matches on the " +
-                            "exact string.")]
+                            "exact string.", Required = true)]
             string name = null,
             [McpArg("type", "'Float', 'Int', 'Bool' or 'Trigger'.")]
             string type = "Float",
@@ -736,7 +736,7 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("object_path", "Hierarchy path of a GameObject that points at the controller.")]
             string objectPath = null,
-            [McpArg("name", "Parameter to remove. Case sensitive.")]
+            [McpArg("name", "Parameter to remove. Case sensitive.", Required = true)]
             string name = null)
         {
             if (string.IsNullOrWhiteSpace(name))

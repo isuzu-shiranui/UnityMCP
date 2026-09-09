@@ -80,6 +80,8 @@ namespace UnityMCP.Editor.Tools
 
                     if (messages.Count >= Math.Max(limit, 0))
                     {
+                        // Counting continues so `truncated` stays honest; only the message list
+                        // stops growing.
                         continue;
                     }
 

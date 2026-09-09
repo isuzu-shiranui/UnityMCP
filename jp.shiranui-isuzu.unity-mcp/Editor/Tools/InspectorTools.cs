@@ -63,7 +63,11 @@ namespace UnityMCP.Editor.Tools
             int? limit = null,
             [McpArg("fields", "Comma-separated field whitelist, to keep responses small.")]
             string fields = null,
-            [McpArg("detail", "Level of per-property detail: standard or full.")]
+            [McpArg("detail", "How much to say about each component: summary is the type and " +
+                              "index alone, standard adds whether it is enabled, full adds its " +
+                              "serialized properties. Applies only when 'component_type' is " +
+                              "omitted; naming a component returns that component's properties, " +
+                              "which this does not change.")]
             string detail = "standard")
         {
             return InspectorAccess.Access(ToolArgs.Of(

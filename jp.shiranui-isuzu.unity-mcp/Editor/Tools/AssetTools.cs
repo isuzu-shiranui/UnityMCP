@@ -24,6 +24,9 @@ namespace UnityMCP.Editor.Tools
     /// </remarks>
     internal static class AssetTools
     {
+        /// <summary>Dependencies listed. A production scene points at thousands.</summary>
+        private const int MaxDependencies = 200;
+
         [McpTool(
             "asset_find",
             "Search the project for assets. Combine a type filter with a folder to keep the search " +
@@ -111,7 +114,7 @@ namespace UnityMCP.Editor.Tools
             "out unless include_dependencies is set.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Info(
-            [McpArg("path", "Project path of the asset, e.g. Assets/Art/Wood.mat.")]
+            [McpArg("path", "Project path of the asset, e.g. Assets/Art/Wood.mat.", Required = true)]
             string path = null,
             [McpArg("include_dependencies", "List the assets this one references.")]
             bool includeDependencies = false)
@@ -132,8 +135,18 @@ namespace UnityMCP.Editor.Tools
 
             if (includeDependencies)
             {
+                // Not recursive, but a scene's direct references are every material, texture,
+                // prefab and mesh its objects point at.
+                var dependencies = AssetDatabase.GetDependencies(path, false);
+
                 result["dependencies"] = new JArray(
-                    AssetDatabase.GetDependencies(path, false).Cast<object>().ToArray());
+                    dependencies.Take(MaxDependencies).Cast<object>().ToArray());
+                result["dependencyCount"] = dependencies.Length;
+
+                if (dependencies.Length > MaxDependencies)
+                {
+                    result["truncated"] = $"{dependencies.Length} dependencies";
+                }
             }
 
             return result;
@@ -147,7 +160,7 @@ namespace UnityMCP.Editor.Tools
             "not an error; the reply says created false.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject CreateFolder(
-            [McpArg("path", "Folder to create, e.g. Assets/Art/Materials.")]
+            [McpArg("path", "Folder to create, e.g. Assets/Art/Materials.", Required = true)]
             string path = null)
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -197,9 +210,9 @@ namespace UnityMCP.Editor.Tools
             "Move or rename an asset, keeping its GUID so references survive.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Move(
-            [McpArg("path", "Current project path of the asset.")]
+            [McpArg("path", "Current project path of the asset.", Required = true)]
             string path = null,
-            [McpArg("destination", "New path, including the file name and extension.")]
+            [McpArg("destination", "New path, including the file name and extension.", Required = true)]
             string destination = null)
         {
             Require(path);
@@ -244,7 +257,7 @@ namespace UnityMCP.Editor.Tools
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Delete(
             [McpArg("path", "Project path of the asset to remove. A folder is accepted and removes " +
-                            "the whole tree beneath it.")]
+                            "the whole tree beneath it.", Required = true)]
             string path = null)
         {
             Require(path);
@@ -265,7 +278,7 @@ namespace UnityMCP.Editor.Tools
             "Editor, and after changing importer settings.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Reimport(
-            [McpArg("path", "Asset or folder to reimport.")]
+            [McpArg("path", "Asset or folder to reimport.", Required = true)]
             string path = null,
             [McpArg("recursive", "For a folder, reimport everything inside it.")]
             bool recursive = true)

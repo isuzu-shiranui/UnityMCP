@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Handlers;
 
 namespace UnityMCP.Editor.Tests
@@ -47,5 +48,22 @@ namespace UnityMCP.Editor.Tests
                     $"bit {bit} ({mode}) is classified differently from the Editor's own set");
             }
         }
+
+        /// <summary>
+        /// The filter compares against four names. One that matches none of them narrows nothing,
+        /// so a caller asking for "ERROR" is handed every log line and reads it as the errors.
+        /// </summary>
+        [TestCase("ERROR")]
+        [TestCase("errors")]
+        [TestCase("fatal")]
+        public void ASeverityTheFilterDoesNotKnowIsRefused(string severity)
+        {
+            var thrown = Assert.Throws<McpToolException>(
+                () => LogReader.ReadLogs(ToolArgs.Of(("type", severity))));
+
+            Assert.That(thrown.Code, Is.EqualTo("invalid_params"));
+            Assert.That(thrown.Message, Does.Contain("all, error, warning or log"));
+        }
+
     }
 }

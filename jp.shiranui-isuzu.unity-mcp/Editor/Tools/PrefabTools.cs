@@ -28,7 +28,7 @@ namespace UnityMCP.Editor.Tools
             string objectPath = null,
             [McpArg("instance_id", "Instance id of that scene object, instead of object_path.")]
             long? instanceId = null,
-            [McpArg("path", "Project path of the prefab asset to write, e.g. Assets/Prefabs/Enemy.prefab.")]
+            [McpArg("path", "Project path of the prefab asset to write, e.g. Assets/Prefabs/Enemy.prefab.", Required = true)]
             string path = null,
             [McpArg("connect", "Leave the scene object linked to the new prefab.")]
             bool connect = true,
@@ -77,7 +77,7 @@ namespace UnityMCP.Editor.Tools
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Instantiate Prefab")]
         public static JObject Instantiate(
-            [McpArg("path", "Project path of the prefab asset.")]
+            [McpArg("path", "Project path of the prefab asset.", Required = true)]
             string path = null,
             [McpArg("parent_path", "Hierarchy path of the parent; omit for the scene root.")]
             string parentPath = null,

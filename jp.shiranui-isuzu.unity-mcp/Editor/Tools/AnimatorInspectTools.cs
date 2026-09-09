@@ -21,6 +21,19 @@ namespace UnityMCP.Editor.Tools
     /// </remarks>
     internal static class AnimatorInspectTools
     {
+        /// <summary>
+        /// States reported from one layer. A layer holds its sub-state machines too, and each
+        /// state brings its transitions and their conditions, so a rig's FX layer runs to hundreds.
+        /// </summary>
+        private const int MaxStates = 120;
+
+        /// <summary>
+        /// Transitions reported per state, and from Any State. A layer's size has two axes, and
+        /// capping the states alone leaves this one free: six transitions on each of a hundred
+        /// states is six hundred entries.
+        /// </summary>
+        private const int MaxTransitions = 24;
+
         [McpTool(
             "animator_inspect",
             "Read an Animator Controller. Name the asset with 'path', or name a scene object with " +
@@ -153,9 +166,17 @@ namespace UnityMCP.Editor.Tools
             var defaultState = machine.defaultState;
 
             var states = new JArray();
+            var stateTotal = 0;
 
             foreach (var entry in AnimatorResolve.States(machine))
             {
+                // A layer is not a small unit: sub-state machines are walked too, and every state
+                // carries its transitions and their conditions.
+                if (++stateTotal > MaxStates)
+                {
+                    continue;
+                }
+
                 var state = entry.State;
 
                 var projected = new JObject
@@ -188,16 +209,33 @@ namespace UnityMCP.Editor.Tools
                 }
 
                 projected["transitions"] = new JArray(
-                    state.transitions.Select((t, i) => (object)AnimatorResolve.Transition(t, i, addressOf)).ToArray());
+                    state.transitions.Take(MaxTransitions)
+                        .Select((t, i) => (object)AnimatorResolve.Transition(t, i, addressOf)).ToArray());
+
+                if (state.transitions.Length > MaxTransitions)
+                {
+                    projected["transitionCount"] = state.transitions.Length;
+                }
 
                 states.Add(projected);
             }
 
-            result["stateCount"] = states.Count;
+            result["stateCount"] = stateTotal;
             result["states"] = states;
 
+            if (stateTotal > MaxStates)
+            {
+                result["truncated"] = $"{stateTotal} states in this layer";
+            }
+
             result["anyStateTransitions"] = new JArray(
-                machine.anyStateTransitions.Select((t, i) => (object)AnimatorResolve.Transition(t, i, addressOf)).ToArray());
+                machine.anyStateTransitions.Take(MaxTransitions)
+                    .Select((t, i) => (object)AnimatorResolve.Transition(t, i, addressOf)).ToArray());
+
+            if (machine.anyStateTransitions.Length > MaxTransitions)
+            {
+                result["anyStateTransitionCount"] = machine.anyStateTransitions.Length;
+            }
 
             result["entryTransitions"] = new JArray(
                 machine.entryTransitions.Select((t, i) => (object)AnimatorResolve.Transition(t, i, addressOf)).ToArray());

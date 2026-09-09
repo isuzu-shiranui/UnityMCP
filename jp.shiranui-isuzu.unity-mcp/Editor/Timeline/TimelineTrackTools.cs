@@ -43,7 +43,7 @@ namespace UnityMCP.Editor.Timeline
             string objectPath = null,
             [McpArg("instance_id", "Address the director's GameObject by instance id instead.")]
             long? instanceId = null,
-            [McpArg("track", "Track path, as timeline_inspect reports it, e.g. 'Cameras/CamFront'.")]
+            [McpArg("track", "Track path, as timeline_inspect reports it, e.g. 'Cameras/CamFront'.", Required = true)]
             string track = null,
             [McpArg("muted", "Mute or unmute the track. A muted track is left out of the timeline's length.")]
             bool? muted = null,
@@ -173,7 +173,7 @@ namespace UnityMCP.Editor.Timeline
             string objectPath = null,
             [McpArg("instance_id", "Address the director's GameObject by instance id instead.")]
             long? instanceId = null,
-            [McpArg("track", "Track path. Without a clip argument, the track itself is deleted.")]
+            [McpArg("track", "Track path. Without a clip argument, the track itself is deleted.", Required = true)]
             string track = null,
             [McpArg("clip", "Display name of a clip to delete, leaving the track in place.")]
             string clip = null,
