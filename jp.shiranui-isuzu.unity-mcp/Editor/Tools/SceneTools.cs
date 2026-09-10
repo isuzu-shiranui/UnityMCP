@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 
@@ -78,8 +78,11 @@ namespace UnityMCP.Editor.Tools
                              "own place and nobody else's call moves it; a reply that never " +
                              "arrives leaves the last id usable. It covers the whole filtered " +
                              "set, so 'limit' and 'offset' are refused with it. A " +
-                             "snapshot the Editor no longer holds is an error asking for a " +
-                             "fresh read; it does not survive the Editor reloading its scripts. " +
+                             "snapshot does not survive the Editor reloading its scripts, and " +
+                             "one it no longer holds is answered with the tree under a " +
+                             "'sinceExpired' naming it, rather than an error: the walk that " +
+                             "answers it has already happened, so asking again would cost a " +
+                             "round trip for a reply already in hand. " +
                              "Ask with the same filters the snapshot was taken under: comparing " +
                              "across two different walks is refused, because everything the " +
                              "narrower one leaves out would otherwise read as removed. " +

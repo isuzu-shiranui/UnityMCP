@@ -1,6 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
+
+using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
@@ -226,5 +228,35 @@ namespace UnityMCP.Editor.Timeline.Tests
 
             Assert.That(error.Code, Is.EqualTo("invalid_params"));
         }
+        /// <summary>
+        /// A track nested under another is still a track the caller has to know about.
+        /// </summary>
+        /// <remarks>
+        /// GetOutputTracks answers "which tracks produce output", and a track under an
+        /// AnimationTrack overrides its parent rather than getting an output of its own. Listed
+        /// that way, a production timeline reported five tracks while holding sixteen, and the
+        /// eleven it left out carried three hundred clips. timeline_create_track takes a parent,
+        /// so the tool could make a track it would never show.
+        /// </remarks>
+        [Test]
+        public void ATrackNestedUnderAnotherIsListedWithIt()
+        {
+            var timeline = this.Timeline("Nesting");
+            var parent = timeline.CreateTrack<AnimationTrack>(null, "Body");
+            timeline.CreateTrack<AnimationTrack>(parent, "Facial");
+
+            this.root = new GameObject("NestingDirector");
+            DirectorFor(this.root, timeline);
+
+            var report = TimelineTools.Inspect(instanceId: EntityIdCompat.IdOf(this.root));
+            var tracks = (JArray)report["tracks"];
+            var nested = tracks.FirstOrDefault(t => t["name"]?.ToString() == "Facial");
+
+            Assert.That(nested, Is.Not.Null, "the child track has to appear in the list");
+            Assert.That(nested["parentTrack"]?.ToString(), Is.EqualTo("Body"),
+                "and say which track it sits under, because that changes what its clips do");
+            Assert.That(report["trackCount"].Value<int>(), Is.EqualTo(tracks.Count));
+        }
+
     }
 }

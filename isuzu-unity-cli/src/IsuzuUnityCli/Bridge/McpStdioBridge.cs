@@ -31,18 +31,21 @@ public sealed class McpStdioBridge : IDisposable
     private InstanceDescriptor? _descriptor;
     private string? _lastKnownProject;
     private string? _sessionId;
+    private readonly string? _groups;
 
     public McpStdioBridge(
         TextReader input,
         TextWriter output,
         Func<InstanceDescriptor> resolve,
         string? projectOption = null,
-        HttpMessageHandler? handler = null)
+        HttpMessageHandler? handler = null,
+        string? groups = null)
     {
         _input = input;
         _output = output;
         _resolve = resolve;
         _projectOption = projectOption;
+        _groups = string.IsNullOrWhiteSpace(groups) ? null : groups;
         _ownsHttp = handler is null;
 
         // The target is always loopback, so a system proxy would only turn every call into a
@@ -107,6 +110,18 @@ public sealed class McpStdioBridge : IDisposable
         }
     }
 
+    /// <summary>The endpoint to post to, narrowed to the groups this bridge was started for.</summary>
+    /// <remarks>
+    /// The endpoint has always taken <c>?group=</c>; without it a client is handed every tool and
+    /// pays for their descriptions on every request of the conversation.
+    /// </remarks>
+    private string Target(InstanceDescriptor descriptor)
+    {
+        var url = descriptor.McpUrlOrDefault;
+
+        return _groups is null ? url : url + "?group=" + Uri.EscapeDataString(_groups);
+    }
+
     private async Task HandleAsync(string message, CancellationToken cancellation)
     {
         try
@@ -116,7 +131,7 @@ public sealed class McpStdioBridge : IDisposable
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(RequestTimeout);
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, descriptor.McpUrlOrDefault);
+            using var request = new HttpRequestMessage(HttpMethod.Post, Target(descriptor));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", descriptor.Token);
             request.Headers.Accept.ParseAdd("application/json, text/event-stream");
 

@@ -64,6 +64,40 @@ public sealed class ArgParserTests
         Assert.Equal(command, parsed.Command);
     }
 
+    /// <summary>
+    /// A name another command owns is still an argument when a tool declares it.
+    /// </summary>
+    /// <remarks>
+    /// 'setup --scope project' put scope on the list of names the CLI keeps to itself, so
+    /// 'call asset_broken_references --scope assets' reached the tool as nothing. The tool ran
+    /// its default and answered "scope": "scene" as a success, and the only way to notice was to
+    /// read the reply and see it disagree with the request.
+    /// </remarks>
+    [Fact]
+    public void AnotherCommandsOptionNameIsStillAToolArgument()
+    {
+        var parsed = ArgParser.Parse(
+            ["call", "asset_broken_references", "--project", "Bench", "--scope", "assets"]);
+
+        var args = ToolArguments.Build("asset_broken_references", parsed);
+
+        Assert.Equal("assets", args["scope"]!.GetValue<string>());
+        Assert.False(args.ContainsKey("project"), "the CLI picks the Editor with that one");
+    }
+
+    [Fact]
+    public void TheOptionsACallItselfConsumesDoNotReachTheTool()
+    {
+        var parsed = ArgParser.Parse(
+            ["call", "scene_browse_hierarchy", "--project", "Bench", "--raw", "--compact"]);
+
+        var args = ToolArguments.Build("scene_browse_hierarchy", parsed);
+
+        Assert.False(args.ContainsKey("project"));
+        Assert.False(args.ContainsKey("raw"));
+        Assert.False(args.ContainsKey("compact"));
+    }
+
     [Fact]
     public void AnOptionThatTakesAValueStillTakesTheNextToken()
     {

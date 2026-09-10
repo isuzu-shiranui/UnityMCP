@@ -68,6 +68,8 @@ GitHub Releases から実行ファイルを直接ダウンロードすること�
 isuzu-unity-cli setup
 ```
 
+MCP クライアントの登録は、Editor の Preferences > Unity MCP からでも行えます。Setup のチェックリストに「この Editor を指している MCP クライアントがありません」と出ているときは、その行の「登録」ボタンが `setup --mcp` を実行します。登録済みなら、どの設定ファイルに入っているかが同じ行に出ます。
+
 ## 最初のコマンド
 
 Editor がプロジェクトを開くとサーバーが起動し、descriptor ファイルを公開します。CLI はそれを読むので、ポートやトークンの指定は要りません。
@@ -110,7 +112,7 @@ Claude Desktop には拡張機能バンドルもあります。[Releases](https:
 
 ## ツール
 
-Editor は最大で 88 個のツールを公開します。Timeline の 9 個と Recorder の 2 個は、`com.unity.timeline` と `com.unity.recorder` があるときだけ現れます。`test_run` と `test_results` は `com.unity.test-framework` があるときだけです。どれも入っていないプロジェクトが公開するのは 75 個のツールです。
+Editor は最大で 98 個のツールを公開します。Timeline の 9 個と Recorder の 2 個は、`com.unity.timeline` と `com.unity.recorder` があるときだけ現れます。`test_run` と `test_results` は `com.unity.test-framework` があるときだけです。どれも入っていないプロジェクトが公開するのは 85 個のツールです。
 
 一覧と注意点は [ツール一覧](docs/tools.md) にあります。
 
@@ -190,7 +192,7 @@ CLI の 1 呼び出しは、プロセスの生成から出力までで 24.0 ms �
 
 ## ドキュメント
 
-- [ツール一覧](docs/tools.md): 88 個のツールの表と注意点
+- [ツール一覧](docs/tools.md): 98 個のツールの表と注意点
 - [MCP クライアントの接続](docs/mcp-clients.md): クライアントごとの設定、Claude Desktop ブリッジ、プロトコルの性質
 - [CLI リファレンス](docs/cli.md): 全コマンド、プロジェクトの選択、終了コード、マシン上に置くもの
 - [定義ツール](docs/defined-tools.md): JSON ファイルで `probe` / `script` / `sequence` ツールを追加する

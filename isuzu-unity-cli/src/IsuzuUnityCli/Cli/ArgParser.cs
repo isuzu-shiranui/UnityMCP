@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace IsuzuUnityCli.Cli;
 
@@ -17,11 +17,27 @@ public sealed class ParsedArgs
 
 public static class ArgParser
 {
+    /// <summary>
+    /// Options a tool call consumes itself. Everything else on the command line is an argument
+    /// for the tool.
+    /// </summary>
+    /// <remarks>
+    /// Narrower than <see cref="CliOnlyOptions"/> on purpose. That set covers every command, so
+    /// a name another command owns used to swallow a tool argument spelled the same way:
+    /// 'setup --scope' meant 'call --scope assets' reached the tool as nothing, and the tool ran
+    /// its default and answered 'scope: scene' as a success. A silently different answer is
+    /// worse than a refusal.
+    /// </remarks>
+    public static readonly IReadOnlySet<string> CallReservedOptions = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "json", "project", "file", "raw", "help", "version", "compact",
+    };
+
     /// <summary>Options the CLI consumes itself; they are never forwarded to a tool.</summary>
     public static readonly IReadOnlySet<string> CliOnlyOptions = new HashSet<string>(StringComparer.Ordinal)
     {
         "json", "project", "file", "raw", "help", "agent", "client", "yes", "no-skill", "mcp", "scope", "fix", "version",
-        "group", "compact",
+        "group", "compact", "release",
     };
 
     /// <summary>

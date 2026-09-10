@@ -139,6 +139,8 @@ namespace UnityMCP.Editor.Core
                 {
                     var plan = descriptor.BindPlan;
 
+                    RefuseUnknownArguments(descriptor, plan, arguments);
+
                     returnValue = plan.Compiled != null
                         ? plan.Compiled(arguments)
                         : descriptor.Method.Invoke(null, BindArguments(plan, arguments));
@@ -569,6 +571,68 @@ namespace UnityMCP.Editor.Core
         /// <summary>
         /// Maps the JSON argument object onto the method's parameter array.
         /// </summary>
+        /// <summary>Refuses an argument the tool does not declare.</summary>
+        /// <remarks>
+        /// A dropped argument is worse than a refused one. A caller who writes 'nmae' asks
+        /// scene_browse_hierarchy to narrow, is handed the whole scene, and nothing in the reply
+        /// says the filter never ran — so they read a complete answer as a filtered one. Argument
+        /// names are guessed constantly, which makes this a routine mistake rather than a rare one.
+        /// </remarks>
+        private static void RefuseUnknownArguments(
+            McpToolDescriptor descriptor, ToolBindPlan plan, JObject arguments)
+        {
+            if (arguments == null || arguments.Count == 0)
+            {
+                return;
+            }
+
+            List<string> unknown = null;
+
+            foreach (var supplied in arguments.Properties())
+            {
+                // confirm, dry_run and target are put in by the invoker rather than by the tool,
+                // so they are in the schema without being in the signature.
+                if (ToolCatalog.ReservedParameterNames.Contains(supplied.Name))
+                {
+                    continue;
+                }
+
+                var declared = false;
+
+                foreach (var binding in plan.Parameters)
+                {
+                    if (string.Equals(binding.Name, supplied.Name, StringComparison.Ordinal))
+                    {
+                        declared = true;
+                        break;
+                    }
+                }
+
+                if (!declared)
+                {
+                    if (unknown == null)
+                    {
+                        unknown = new List<string>();
+                    }
+
+                    unknown.Add(supplied.Name);
+                }
+            }
+
+            if (unknown == null)
+            {
+                return;
+            }
+
+            var takes = plan.Parameters.Length == 0
+                ? "no arguments"
+                : string.Join(", ", plan.Parameters.Select(binding => binding.Name));
+
+            throw new McpToolException(
+                "invalid_params",
+                $"'{descriptor.Name}' does not take {string.Join(", ", unknown)}. It takes {takes}.");
+        }
+
         private static object[] BindArguments(ToolBindPlan plan, JObject arguments)
         {
             var bindings = plan.Parameters;

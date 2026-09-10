@@ -11,6 +11,7 @@ isuzu-unity-cli projects                 # Editors currently running
 isuzu-unity-cli health                   # server state, queue depth, running jobs
 isuzu-unity-cli tools                    # what this Editor publishes, with argument names
 isuzu-unity-cli tools --group <name>     # filter by group (comma-separated for several)
+isuzu-unity-cli mcp-stdio --group <name> # narrow what the MCP client is offered
 isuzu-unity-cli call <tool> [...]        # invoke a tool
 isuzu-unity-cli verify [...]             # recompile, test and summarise in one call
 isuzu-unity-cli jobs [id]                # list jobs, or report one by id

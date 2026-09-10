@@ -1,4 +1,4 @@
-# Runs the package's EditMode tests in a real Unity Editor and records the result.
+﻿# Runs the package's EditMode tests in a real Unity Editor and records the result.
 #
 # No runner has a Unity licence, so nothing automated compiles the Editor assemblies. This is
 # what makes them releasable: run it, and it writes an attestation naming the sources it ran
@@ -154,6 +154,14 @@ if (-not (Test-Path $link)) {
     $source = Join-Path $repo $package
     cmd /c mklink /J "`"$link`"" "`"$source`"" | Out-Null
     if (-not (Test-Path $link)) { throw "Could not link the package into $link." }
+}
+
+# The reference pages, linked the same way so the test that checks every tool has a row can
+# find them. Without this that test has nowhere to look and passes by skipping, which is the
+# one outcome a guard must not have.
+$docsLink = Join-Path $ProjectPath 'docs'
+if (-not (Test-Path $docsLink)) {
+    cmd /c mklink /J "`"$docsLink`"" "`"$(Join-Path $repo 'docs')`"" | Out-Null
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────

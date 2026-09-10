@@ -1,4 +1,4 @@
-namespace IsuzuUnityCli.Cli;
+﻿namespace IsuzuUnityCli.Cli;
 
 public static class Usage
 {
@@ -40,9 +40,12 @@ public static class Usage
           --version                      Show the version
           -h, --help                     Show this help
 
-        TOOLS OPTIONS
-          --group <g>[,<g>]              Only list these groups: diagnostics, authoring,
-                                         rendering, timeline, build, code, input
+        TOOLS AND MCP-STDIO OPTIONS
+          --group <g>[,<g>]              Only these groups: diagnostics, authoring, rendering,
+                                         timeline, build, code, input. On mcp-stdio it narrows
+                                         what the client is offered, which it otherwise pays for
+                                         on every request: all 95 tools are about 40,000 tokens
+                                         and diagnostics alone is about 9,500
 
         VERIFY OPTIONS
           --no-compile                   Skip the compile step
@@ -94,12 +97,13 @@ public static class Usage
         DOCTOR OPTIONS
           --fix                          Reinstall stale skills and rewrite stale MCP entries
 
+        UPGRADE OPTIONS
+          --release <tag>                Install this release instead of the newest, e.g. v4.1.1.
+                                         The way back when a new one turns out to be broken.
+
         UNINSTALL OPTIONS
           --yes                          Actually remove, rather than listing what would be removed
           --no-skill                     Leave installed skills alone
-
-        UPGRADE OPTIONS
-          --version <tag>                Install a specific release, e.g. v4.0.0
 
         EXAMPLES
           isuzu-unity-cli setup

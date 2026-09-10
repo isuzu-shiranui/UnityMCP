@@ -1,4 +1,4 @@
-using IsuzuUnityCli.Commands;
+﻿using IsuzuUnityCli.Commands;
 using IsuzuUnityCli.Http;
 using Xunit;
 
@@ -24,6 +24,47 @@ public sealed class CommandContextTests
         var output = new StringWriter();
         var error = new StringWriter();
         return (new CommandContext { Out = output, Err = error, Indented = indented }, output, error);
+    }
+
+    // The Editor hoists these onto the envelope, so the printed result carries neither unless
+    // something puts them back.
+    private const string Cut = """
+        {"status":"success","result":{"scenes":[],"total":523},
+         "truncated":true,"next":{"offset":3,"limit":3}}
+        """;
+
+    // A tool may say what to do about the cut rather than only that there was one.
+    private const string CutWithAdvice = """
+        {"status":"success","result":{"section":"player","properties":[]},
+         "truncated":"stopped at 200; narrow it with 'property'"}
+        """;
+
+    /// <summary>
+    /// A listing that stopped early has to print differently from a complete one. Only --raw shows
+    /// the envelope, so without this the caller reads a partial answer as the whole answer.
+    /// </summary>
+    [Fact]
+    public void APrintedListingSaysThatItStoppedEarly()
+    {
+        var (context, output, _) = Context();
+
+        Assert.Equal(0, context.Report(Envelope.Parse(200, Cut), raw: false));
+
+        var printed = output.ToString();
+
+        Assert.Contains("\"truncated\"", printed);
+        Assert.Contains("\"offset\"", printed);
+    }
+
+    [Fact]
+    public void AdviceAboutTheCutSurvivesInsteadOfBecomingTrue()
+    {
+        var (context, output, _) = Context();
+
+        Assert.Equal(0, context.Report(Envelope.Parse(200, CutWithAdvice), raw: false));
+
+        Assert.Contains("narrow it with", output.ToString());
+        Assert.True(Envelope.Parse(200, CutWithAdvice).Truncated);
     }
 
     [Fact]

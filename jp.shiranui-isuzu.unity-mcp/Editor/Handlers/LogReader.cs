@@ -140,7 +140,13 @@ namespace UnityMCP.Editor.Handlers
                     var result = new JObject
                     {
                         ["logs"] = page["items"],
-                        ["total"] = totalCount,
+
+                        // What the request matched, the way every other paged reply counts, and
+                        // beside it what the console holds. One number cannot be both: asking for
+                        // errors in a console of thirteen plain logs answered "total 13" with an
+                        // empty list, which reads as thirteen errors withheld.
+                        ["total"] = allEntries.Count,
+                        ["inConsole"] = totalCount,
                         ["errors"] = errorCount,
                         ["warnings"] = warningCount,
                         ["truncated"] = page["truncated"],

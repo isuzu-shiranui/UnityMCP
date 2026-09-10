@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace IsuzuUnityCli.Http;
@@ -25,7 +25,10 @@ public sealed class Envelope
         var obj = raw as JsonObject;
         Status = StringOf(obj?["status"]) ?? "success";
         Result = obj is null ? raw : obj["result"] ?? (Status == "error" ? null : raw);
-        Truncated = obj?["truncated"] is JsonValue t && t.TryGetValue<bool>(out var flag) && flag;
+        // Not a bool test: a tool may say what to do about it instead of just that it happened,
+        // and reading only `true` reports every such listing as complete.
+        Truncated = obj?["truncated"] is JsonNode truncated
+            && !(truncated is JsonValue t && t.TryGetValue<bool>(out var flag) && !flag);
         Next = obj?["next"];
 
         var error = obj?["error"] as JsonObject;
@@ -51,6 +54,18 @@ public sealed class Envelope
 
         if (node is null)
         {
+            // A domain reload answers the connection it inherited and writes nothing into it.
+            // Folded into the case below, that came out as a sentence ending at its colon, which
+            // reads as an error the tool failed to print rather than as a reload to wait out.
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                throw new UnityError(
+                    "non_json",
+                    $"Unity answered HTTP {httpStatus} with an empty body. The Editor was most "
+                    + "likely reloading its domain, which drops whatever it was answering; try again.",
+                    httpStatus);
+            }
+
             var excerpt = body.Length > 200 ? body.Substring(0, 200) : body;
             throw new UnityError("non_json", $"Unity returned a non-JSON response (HTTP {httpStatus}): {excerpt}", httpStatus);
         }

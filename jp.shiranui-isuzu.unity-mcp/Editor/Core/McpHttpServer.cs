@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -33,7 +33,7 @@ namespace UnityMCP.Editor.Core
         /// answer for an assembly that is not loaded from a package, and CI checks that it too
         /// stays in step.
         /// </remarks>
-        private const string FallbackVersion = "4.2.0";
+        private const string FallbackVersion = "4.3.0";
 
         private static string ProtocolVersion
         {
@@ -1078,6 +1078,11 @@ namespace UnityMCP.Editor.Core
             var body = this.BuildHealthResponse();
             this.WriteEnvelope(response, 200, body);
         }
+
+        /// <summary>
+        /// The health payload, for the tool that answers the same question over MCP.
+        /// </summary>
+        public JObject HealthPayload() => this.BuildHealthResponse();
 
         /// <summary>
         /// Builds the /health response payload (goes under the envelope's `result`).

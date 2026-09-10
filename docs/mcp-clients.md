@@ -137,3 +137,5 @@ Codex は Streamable HTTP にも直接つなげます。`isuzu-unity-cli setup -
 - GET と DELETE は 405 を返します。`Origin` が別ドメインなら 403 を返します。
 - `tools/list_changed` は送られません。パッケージの追加・削除や定義ツールの変更で、ツールが増減することがあります。その場合はクライアントを再接続してください。
 - MCP の URL には `?group=diagnostics,authoring` のようにグループを付けられます。付けると `tools/list` がそのグループだけを返します。呼び出し自体は絞り込みの影響を受けません。
+- Preferences の「Tool groups」で選ぶと、生成される設定に URL ごと入ります。選んだ本数がその場に出ます。stdio ブリッジなら `isuzu-unity-cli mcp-stdio --group diagnostics` です。
+- **クライアントはツールの説明文を毎回の要求で払います。** 全95本で約 40,000 トークン、`diagnostics` だけなら約 9,500 トークンです。

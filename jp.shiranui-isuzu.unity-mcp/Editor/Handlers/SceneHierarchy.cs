@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 using Newtonsoft.Json.Linq;
@@ -45,10 +45,22 @@ namespace UnityMCP.Editor.Handlers
                 var walk = WalkOf(nameFilter, componentFilter, tagFilter, maxDepth,
                     activeOnly, missingScriptsOnly, sceneIndex, fieldsFilter);
 
+                string expired = null;
+
                 if (diffing)
                 {
                     var takenUnder = SceneHierarchyBaseline.WalkOf(since);
-                    if (takenUnder != null && !string.Equals(takenUnder, walk, StringComparison.Ordinal))
+
+                    if (takenUnder == null)
+                    {
+                        // The snapshot is gone, and a snapshot goes on every domain reload, which
+                        // is every compile and every play-mode transition. The walk about to
+                        // happen is the same one a fresh read would do, so refusing here would
+                        // spend a round trip to be asked for a reply already in hand.
+                        expired = since;
+                        diffing = false;
+                    }
+                    else if (!string.Equals(takenUnder, walk, StringComparison.Ordinal))
                     {
                         return new JObject
                         {
@@ -166,6 +178,13 @@ namespace UnityMCP.Editor.Handlers
                     ["truncated"] = page["truncated"],
                     ["next"] = page["next"]
                 };
+
+                if (expired != null)
+                {
+                    // Why this is a tree when a difference was asked for. Without it the reply
+                    // reads as the caller having forgotten to pass 'since'.
+                    result["sinceExpired"] = expired;
+                }
 
                 return result;
             }
@@ -400,8 +419,16 @@ namespace UnityMCP.Editor.Handlers
                 node["tag"] = go.tag;
             }
 
+            // An unnamed layer has no name to give, and reporting the empty string tells the
+            // caller only that it is not Default — which is the moment they most need to know
+            // which one it is, because an object on an unnamed layer is usually one nothing draws.
             var layer = LayerMask.LayerToName(go.layer);
-            if (!string.Equals(layer, "Default", StringComparison.Ordinal))
+
+            if (string.IsNullOrEmpty(layer))
+            {
+                node["layer"] = go.layer;
+            }
+            else if (!string.Equals(layer, "Default", StringComparison.Ordinal))
             {
                 node["layer"] = layer;
             }

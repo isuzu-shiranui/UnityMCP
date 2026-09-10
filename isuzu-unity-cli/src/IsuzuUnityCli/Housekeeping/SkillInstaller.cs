@@ -16,17 +16,90 @@ public static class SkillInstaller
     /// <summary>The v3 skill, installed by the npm package this tool replaces.</summary>
     public const string LegacySkillName = "isuzu-unity-mcp";
 
-    private const string ResourceName = "skills/isuzu-unity-cli/SKILL.md";
+    private const string ResourcePrefix = "skills/isuzu-unity-cli/";
+
+    private const string ResourceName = ResourcePrefix + "SKILL.md";
 
     public static string Content()
     {
-        using var stream = typeof(SkillInstaller).Assembly.GetManifestResourceStream(ResourceName)
+        return TextOf(ResourceName);
+    }
+
+    /// <summary>
+    /// Every file of the skill, by its path under the skill folder.
+    /// </summary>
+    /// <remarks>
+    /// The guide points at reference pages beside it, so installing SKILL.md alone leaves those
+    /// links pointing at files that are not there.
+    /// </remarks>
+    public static IEnumerable<(string Relative, string Text)> Files()
+    {
+        foreach (var name in typeof(SkillInstaller).Assembly.GetManifestResourceNames()
+                     .Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal))
+                     .OrderBy(n => n, StringComparer.Ordinal))
+        {
+            yield return (name.Substring(ResourcePrefix.Length), TextOf(name));
+        }
+    }
+
+    private static string TextOf(string resource)
+    {
+        using var stream = typeof(SkillInstaller).Assembly.GetManifestResourceStream(resource)
             ?? throw new InvalidOperationException(
-                $"The skill is missing from this build. It is embedded as {ResourceName}; " +
+                $"The skill is missing from this build. It is embedded as {resource}; " +
                 "this executable was not built from a complete checkout.");
 
         using var reader = new StreamReader(stream, new UTF8Encoding(false));
         return reader.ReadToEnd();
+    }
+
+    /// <summary>Skills any agent on the machine reads, whoever installed them.</summary>
+    /// <remarks>
+    /// Not somewhere this tool writes. It is looked at because a guide left there is read
+    /// alongside the installed one, and an agent following an obsolete guide fails in ways the
+    /// current one cannot explain.
+    /// </remarks>
+    public static string SharedSkillsDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agents", "skills");
+
+    /// <summary>
+    /// Guides directly under <paramref name="skillsDirectory"/> that describe the HTTP interface
+    /// this server replaced.
+    /// </summary>
+    /// <remarks>
+    /// Matched on content rather than on the folder name. Other Unity MCP servers install under
+    /// names like "unity-mcp" too, and calling one of those an old copy of this guide would be
+    /// wrong; the fixed port range together with the endpoint paths belongs to this project's
+    /// HTTP interface, and the current guide carries neither.
+    /// </remarks>
+    public static IEnumerable<string> ObsoleteGuides(string skillsDirectory)
+    {
+        if (!Directory.Exists(skillsDirectory))
+        {
+            yield break;
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(skillsDirectory))
+        {
+            var file = Path.Combine(directory, "SKILL.md");
+            string? text;
+
+            try
+            {
+                text = File.Exists(file) ? File.ReadAllText(file) : null;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            if (text is not null
+                && text.Contains("27182", StringComparison.Ordinal)
+                && text.Contains("/execute_code", StringComparison.Ordinal))
+            {
+                yield return file;
+            }
+        }
     }
 
     public static string DirectoryFor(string skillsDirectory) => Path.Combine(skillsDirectory, SkillName);
@@ -36,21 +109,27 @@ public static class SkillInstaller
     /// <summary>True when the installed copy differs from the one in this executable, or is missing.</summary>
     public static bool IsStale(string skillsDirectory)
     {
-        var file = FileFor(skillsDirectory);
-
-        if (!File.Exists(file))
-        {
-            return true;
-        }
+        var directory = DirectoryFor(skillsDirectory);
 
         try
         {
-            return !Digest(File.ReadAllBytes(file)).SequenceEqual(Digest(Encoding.UTF8.GetBytes(Content())));
+            foreach (var (relative, text) in Files())
+            {
+                var file = Path.Combine(directory, relative.Replace('/', Path.DirectorySeparatorChar));
+
+                if (!File.Exists(file)
+                    || !Digest(File.ReadAllBytes(file)).SequenceEqual(Digest(Encoding.UTF8.GetBytes(text))))
+                {
+                    return true;
+                }
+            }
         }
         catch (IOException)
         {
             return true;
         }
+
+        return false;
     }
 
     public static bool IsInstalled(string skillsDirectory) => File.Exists(FileFor(skillsDirectory));
@@ -71,7 +150,13 @@ public static class SkillInstaller
 
         try
         {
-            File.WriteAllText(Path.Combine(staging, "SKILL.md"), Content(), new UTF8Encoding(false));
+            foreach (var (relative, text) in Files())
+            {
+                var file = Path.Combine(staging, relative.Replace('/', Path.DirectorySeparatorChar));
+
+                Directory.CreateDirectory(Path.GetDirectoryName(file) ?? staging);
+                File.WriteAllText(file, text, new UTF8Encoding(false));
+            }
         }
         catch
         {

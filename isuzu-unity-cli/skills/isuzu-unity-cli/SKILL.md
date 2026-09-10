@@ -50,8 +50,16 @@ isuzu-unity-cli call <tool> --project MyGame               # when several Editor
 isuzu-unity-cli call <tool> --raw                          # whole envelope, not just the result
 ```
 
-Values are typed automatically. `--limit 20` sends a number and `--active_only true` sends a boolean.
+Values are typed automatically. `--limit 20` sends a number and `--active_only true` sends a boolean,
+and a value that parses as JSON is sent as JSON, which is how a list or an object gets in.
 Errors print to stderr and set a non-zero exit code, so the commands can be used in scripts.
+
+On Windows PowerShell, escape the double quotes inside a list or an object. PowerShell removes
+them on the way to a program, so `--paths '["a","b"]'` arrives as `[a,b]` and is refused:
+
+```powershell
+isuzu-unity-cli call reflect_read --paths '[\"@scene:/Player/Transform/position\"]'
+```
 
 Run `isuzu-unity-cli tools` for the authoritative list. It comes from the Editor, so it always
 matches the version you are talking to.
@@ -99,278 +107,87 @@ uses `await` returns no value. The Editor does not block its main thread on an i
 Identical snippets are compiled once and reused. Each distinct snippet loads an assembly that
 cannot be unloaded, so a long session of one-off snippets grows the domain until the next reload.
 
-## Common tools
+## The rest of it
 
-| Tool | Purpose |
-|---|---|
-| `console_read_logs --type error --limit 30` | Console entries; types: `all`, `error`, `warning`, `log` |
-| `console_get_count` | Error / warning / log counts, cheap |
-| `console_clear` | Clear before an action so later entries are known to come from it |
-| `editor_log_tail --pattern "Shader" --lines 50` | `Editor.log` from disk; works while the Editor is wedged |
-| `compile_status` | `isCompiling`, `succeeded`, and the error messages |
-| `compile_request` | Trigger a recompile (`AssetDatabase.Refresh` alone does not) |
-| `test_run --mode edit --assembly MyGame.Tests` | Start a test run; returns immediately |
-| `test_results` | Counts and failures; answers while the run holds the main thread |
-| `scene_browse_hierarchy --name Player --limit 20` | Hierarchy; also filters `component`, `tag`, `active_only`, `max_depth` |
-| `scene_browse_hierarchy --missing_scripts true` | Only objects carrying a component Unity cannot resolve, which is what a removed package leaves behind |
-| `inspect_list --object_path Player --component_type Transform` | Discover property paths |
-| `inspect_read --object_path Player --component_type Transform --property_path m_LocalPosition` | Read one property |
-| `inspect_write ... --json '{"property_path":"m_LocalScale","value":{"x":2,"y":2,"z":2}}'` | Write one property; a single Undo step |
-| `capture_screenshot --view scene --max_size 512` | base64 PNG |
-| `play_mode_status` / `play_mode_play` / `play_mode_stop` | Play mode |
-| `menu_execute --menu_item "File/Save"` | Invoke a menu item |
-| `project_packages` / `project_assemblies` | Project metadata |
-| `definitions_list` | What JSON-defined tools loaded, and why one did not |
+Two files sit beside this one. Read the one the task calls for rather than both:
 
-### Authoring
+- `reference/tools.md` - what each tool is for, by area: authoring, animator controllers,
+  rendering and shaders, timeline and recorder.
+- `reference/workflows.md` - the sequences that come up: chasing an error to the object that
+  raised it, editing a script and confirming it built, running the tests, proving a rendering
+  change did something, reproducing an interaction, recovering a connection that stopped
+  answering.
 
-One call is a single undo step for the eight `gameobject_` tools, `inspect_write`,
-`prefab_create` and `prefab_instantiate`. The rest are not: `asset_delete` goes to the OS trash
-instead, `prefab_apply` rewrites the asset, the `scene_` tools act on files, `menu_execute`
-depends on the item it invokes, and the `play_mode_` tools are outside Undo entirely. Two tools
-ask for `confirm: true` before they run, `prefab_apply` and `editor_dialog_press`, because
-neither can be undone.
+## Ask for more in one call
 
-| Tool | Purpose |
-|---|---|
-| `gameobject_create --primitive Cube --name Enemy --parent_path /Root` | Create; returns the `path` to address it by |
-| `gameobject_delete` / `gameobject_duplicate` / `gameobject_reparent` | Undoable, so no confirmation is asked for |
-| `gameobject_set_transform --object_path /Root/Enemy --json '{"position":{"y":2}}'` | Only the axes given are changed |
-| `gameobject_add_component --component_type Rigidbody` / `gameobject_remove_component` | Returns the component list |
-| `asset_find --type Material --folder Assets/Art --limit 20` | Then `asset_info`, `asset_move`, `asset_delete` (to the OS trash) |
-| `asset_create_folder --path Assets/Art/Materials` | Creates parents too; calling it twice is not an error |
-| `scene_list` / `scene_open` / `scene_save` / `scene_create` | `scene_open` refuses over unsaved changes |
-| `prefab_create` / `prefab_instantiate` / `prefab_apply` | `prefab_apply` needs `confirm: true`; it is not undoable and changes every instance |
-| `build_settings` then `build_player --output_path C:/out/Game.exe` | A cold build returns a job id; poll `jobs <id>` |
-
-Two things to know before editing:
-
-- The `path` these tools take is the one `scene_browse_hierarchy` returns. It resolves
-  inactive objects, and carries an index only when a sibling name repeats: `/Canvas/Button[1]/Text`.
-- A scene edit during Play Mode succeeds and is reverted when Play Mode stops. The response
-  carries `playModeWarning` in that case. Asset edits made during Play Mode do survive.
-
-### Animator Controllers
-
-`animator_inspect` reads a controller by asset path, or through any component on a scene object
-that points at one, which is how a character with one controller per body layer is reached.
-Without a `layer` it reports the parameters and one line per layer and no states, because a
-twenty-layer controller has hundreds of them.
-
-| Tool | Purpose |
-|---|---|
-| `animator_inspect --object_path /Avatar --layer 0` | Parameters, layers, and one layer's states and transitions |
-| `animator_audit --path Assets/Anim/Body.controller` | Unreferenced parameters, states with no motion, states unreachable from the default, empty layers, duplicate layer names, transitions with neither a condition nor an exit time, and Write Defaults mixed within a layer |
-| `animator_add_layer` / `animator_remove_layer` | Removing a layer destroys its sub-assets |
-| `animator_add_state` / `animator_remove_state` / `animator_set_state` | One undo step each |
-| `animator_add_transition` / `animator_remove_transition` | Conditions are passed as JSON |
-| `animator_add_parameter` / `animator_remove_parameter` | |
-| `animator_set_write_defaults` | Applies across a whole layer |
-
-A controller is a shared asset, so a write reaches every scene and character using it, and the
-`.controller` file is written before the call returns. Undo restores the controller in memory,
-not the file. Run `animator_audit` before editing: it names the states nothing can reach, which
-is usually what the person actually wanted fixed.
-
-### Rendering and shader debugging
-
-| Tool | Purpose |
-|---|---|
-| `shader_errors` | Compilation errors. A broken shader renders magenta and never says so. Run this after every shader edit. Without `--path` the sweep covers Assets only, never packages |
-| `shader_info` / `material_read` / `material_set` | The values a frame is actually drawn with, not the shader's defaults |
-| `render_pipeline_info` | The pipeline actually in force. The quality level overrides graphics settings |
-| `render_camera_info` | View, projection and GPU projection matrices, for checking a value against a CPU replica |
-| `render_compare --before a.png --after b.png` | Differences as numbers |
-| `reflect_read --path "MyPipeline.Manager/ByCamera[0]/levels[2]"` | Live private state without writing a snippet. A getter such as `Renderer.material` instantiates, so read `sharedMaterial` |
-| `gpu_readback --path "MyPipeline.Manager/pool" --format uint` | `allZero` answers "did the pass write anything" in one line |
-
-### Timeline and Recorder
-
-These tools are present only when `com.unity.timeline` / `com.unity.recorder` are installed.
-
-| Tool | Purpose |
-|---|---|
-| `timeline_inspect --object_path /StageDirector --nest_depth 2` | Tracks, clips and bindings. Follows Control tracks into the child timelines they drive |
-| `timeline_evaluate --object_path /StageDirector --time 3.5` | Scrub a director to a time or frame without Play Mode |
-| `recorder_add_track --object_path /StageDirector --type movie --format mp4 --width 1920 --height 1080` | Add a Recorder track, so playing the director records it |
-| `recorder_list --object_path /StageDirector` | What a timeline records, and where it lands |
-| `timeline_edit_clip --object_path /StageDirector --track Cameras/Front --clip "Wide" --start 2 --duration 3` | Retime or rename one clip |
-| `timeline_shift_clips --object_path /StageDirector --from_time 3 --by 0.5` | Ripple: move everything at or after a time together |
-| `timeline_set_track --object_path /StageDirector --track Motion --binding /Cube` | Mute, lock, rename, or bind a track |
-| `timeline_delete --object_path /StageDirector --track Shots --clip "Wide"` | Delete a clip, or the whole track |
-| `timeline_create --asset_path Assets/Stage/Stage.playable --object_path /Stage` | New timeline, with a director |
-| `timeline_create_track --object_path /Stage --type control --name Drive` | Add a track |
-| `timeline_create_clip --object_path /Stage --track Drive --control_source /ChildDirector` | Add a clip; nests a child timeline in one call |
-
-Two things to know about the editing tools before trusting a result:
-
-- They report the value that was applied, not the one you asked for. Timeline silently discards
-  writes a clip type does not support; an Activation clip accepts a speed multiplier and keeps
-  1.0. Anything that was not applied is listed in `ignored` with the reason. Read it.
-- Create the timeline before adding tracks to it. `timeline_create_track` refuses on a timeline
-  that is not yet an asset, because Timeline would build the track in memory only and drop it at
-  the next domain reload. `timeline_create` performs the steps in the right order.
-
-Recording is a track on the timeline, so the frame rate comes from the timeline and is not an
-argument here. Sources: `game_view`, `active_camera`, `main_camera`, `tagged_camera`
-(`--camera_tag`), `render_texture` (`--render_texture_path`). Omitting `output_path` writes to a
-`Recording` folder beside `Assets`, named after the timeline.
-
-### Rendering a timeline, and checking it actually rendered
+Reading and writing one thing at a time is the largest cost here, and every one of these numbers
+came from watching a real task:
 
 ```bash
-isuzu-unity-cli call recorder_add_track --object_path /StageDirector --type movie --format mp4 \
-  --source game_view --width 1920 --height 1080
-isuzu-unity-cli call play_mode_play
-sleep 12                      # the timeline's length, plus encoder flush
-isuzu-unity-cli call play_mode_stop
+# Several paths in one read: three objects' bounds took fourteen calls without this
+isuzu-unity-cli call reflect_read --json '{"paths":[
+  "@scene:/A/MeshRenderer/bounds","@scene:/A/BoxCollider/bounds",
+  "@scene:/B/MeshRenderer/bounds"],"depth":2}'
+
+# Every component on an object, with its properties, in one call rather than one call each
+isuzu-unity-cli call inspect_list --object_path /Player --detail full
+
+# Several properties on one component: one ConfigurableJoint took twenty-one calls without this
+isuzu-unity-cli call inspect_write --json '{"object_path":"/Hair","component_type":"ConfigurableJoint",
+  "values":{"m_XMotion":0,"m_YMotion":0,"m_ZMotion":0}}'
+
+# The same edit across many objects, the way the Inspector edits a multi-selection:
+# swapping a material across three hundred objects took two hundred and ninety-nine calls
+isuzu-unity-cli call inspect_write --json '{"object_paths":["/Brick_0","/Brick_1","/Brick_2"],
+  "component_type":"MeshRenderer","property_path":"m_ReceiveShadows","value":false}'
+
+# Frames, not one frame: watching an animation a frame at a time cost 1,255 calls.
+# 'paths' reads while the frame is still that one, so a step and the look that always
+# follows it are one call: twenty-one steps once came with forty-six reads behind them.
+isuzu-unity-cli call play_mode_step --json '{"count":120,"paths":[
+  "@scene:/Turnstile/Transform/localEulerAngles"]}'
 ```
 
-Check the content, not the container. Resolution, fps and frame count come from the mp4 header
-and say nothing about whether anything moved. A frozen render still reports the full frame count.
-Decode the frames and count the distinct ones:
+Both `values` and `object_paths` write nothing at all if any path fails to resolve, so a refusal
+costs a round trip rather than leaving something half configured.
+
+`paths` is also how to ask what a set of objects has in common. Reading each renderer's
+`sharedMaterial` tells the materials apart by the `instanceId` every reference carries, so two
+materials with the same name still count as two:
 
 ```bash
-ffmpeg -v error -i out.mp4 -vf scale=160:90 f_%03d.png   # distinct ≈ frames → moving
+# 360 renderers in batches of 50: 8 calls and 104 KB, and it found 301 distinct materials.
+# Asking a material tool once per object took 361 calls and 886 KB for the same answer.
+isuzu-unity-cli call reflect_read --json '{"paths":[
+  "@scene:/HeavyScene/Brick_0/MeshRenderer/sharedMaterial",
+  "@scene:/HeavyScene/Brick_1/MeshRenderer/sharedMaterial"],"depth":1}'
 ```
 
-One failure mode looks like "the tool did nothing": Play Mode defers script compilation. Unity
-postpones the domain reload until Play Mode exits, so an edited script keeps running its old
-build and `isCompiling` stays true. `play_mode_stop` is itself deferred to the next frame, and a
-backgrounded Editor never draws that frame. Check `play_mode_status` first.
+`search_query` has a `ref:` token that goes the other way - `h: ref:Assets/Art/Stone.mat` names
+the scene objects using that material. It works on assets only, so a material created at run time
+and never saved has no path to search by; `sharedMaterial` through `paths` reaches those too.
 
-## Common workflows
+A picture is the other end of the scale: one screenshot at the default size is around 40,000
+tokens, so four of them outweigh every other call of a session. Read the numbers with
+`inspect_read` or `reflect_read` when a number would answer the question.
 
-### Debug: find errors, then the object they name
+## Finding what a reply cannot show
 
 ```bash
-isuzu-unity-cli call console_read_logs --type error --limit 10
-isuzu-unity-cli call scene_browse_hierarchy --name ObjectName
-isuzu-unity-cli call inspect_list --object_path ObjectName --component_type Transform
+# Fields whose target was deleted: the id is still there and the object is gone. A field nobody
+# filled in has neither, so an empty slot is not reported as damage.
+isuzu-unity-cli call asset_broken_references --scope scene
+isuzu-unity-cli call asset_broken_references --scope assets --folder Assets/Prefabs --max_seconds 30
+
+# The Editor's own search, for conditions the hierarchy walk cannot express
+isuzu-unity-cli call search_query --json '{"query":"h: t:meshrenderer p(castshadows)!=\"Off\""}'
+isuzu-unity-cli call search_query --json '{"query":"p: t:Material"}'
 ```
 
-### Edit a script and confirm it built
-
-```bash
-isuzu-unity-cli call compile_request
-sleep 3
-isuzu-unity-cli call compile_status          # check succeeded, not just isCompiling
-```
-
-`isuzu-unity-cli verify` does the same, waits out the domain reload, and returns an exit code.
-
-### Run the tests
-
-```bash
-isuzu-unity-cli call test_run --mode edit --assembly MyGame.Tests
-isuzu-unity-cli call test_results            # poll; status goes running -> completed
-```
-
-`test_run` does not wait for the outcome, because the run occupies the main thread for its
-whole duration. During that window `test_results` is the only tool that answers. Poll it
-instead of retrying `test_run`. A `status` of `interrupted` means a domain reload happened
-mid-run and the outcome was lost. Start the run again.
-
-### Prove a rendering change did something
-
-```bash
-isuzu-unity-cli call capture_screenshot --view game --save_path /tmp/before.png
-# toggle the thing under test
-isuzu-unity-cli call render_compare --before /tmp/before.png --after /tmp/after.png
-```
-
-Compare the images instead of looking at them. Screenshot colours are post-tonemap, so absolute
-values are not reliable. Changed-pixel counts and their locations are. Passing `save_path` keeps
-both images out of the conversation.
-
-### Reproducing an interaction
-
-Record a human drag, replay it under a fix, then compare:
-
-```bash
-isuzu-unity-cli call input_record --action start --view scene_view_window --name look
-isuzu-unity-cli call input_record --action stop
-isuzu-unity-cli call input_replay --name look --then_capture scene
-```
-
-Pass the capture to `render_compare`, or wrap all three calls as one `sequence` defined tool.
-
-Without a recording to replay, `input_pointer` and `input_key` send the events directly:
-
-```bash
-isuzu-unity-cli call input_pointer --view scene_view_window --action drag --json '{"from":[200,200],"to":[400,200],"button":1}'
-isuzu-unity-cli call input_key --view inspector --key A --character a
-```
-
-A right-drag is FPS Look and Alt+left-drag is Orbit. A drag is spread over `steps` frames by
-default, which matters: anything that reacts to time passing does not reproduce when the whole
-drag arrives in one frame. Coordinates are points, not pixels; divide a screenshot pixel by the
-`pixelsPerPoint` in the reply.
-
-### Turning a repeated read into a named tool
-
-A `probe` defined tool turns a reflection path into a one-word call. One JSON file under `%LOCALAPPDATA%\UnityMCP\tools\<projectHash>\`:
-
-```json
-{ "name": "camera_probe", "kind": "probe", "description": "Scene View camera position.",
-  "reads": [{ "id": "camera", "path": "@sceneview:camera/transform/position" }] }
-```
-
-```bash
-isuzu-unity-cli call camera_probe
-```
-
-### Save a screenshot to a file
-
-```bash
-isuzu-unity-cli call capture_screenshot --view scene --max_size 512 \
-  | python -c "import sys,json,base64; d=json.load(sys.stdin); open('scene.png','wb').write(base64.b64decode(d['image']))"
-```
-
-### The connection was refused
-
-A call that comes back "unable to connect", `ECONNREFUSED`, or with the MCP server reported as
-disconnected is almost always the Editor rebuilding its domain. Changing a `.cs` file starts
-that, and the server is gone for the few seconds it takes.
-
-Wait and call again. Do not fall back to reading the code statically, and do not re-run setup:
-the registration is fine and the Editor is coming back.
-
-```bash
-isuzu-unity-cli verify                       # edits, waits out the reload, returns the errors
-isuzu-unity-cli call compile_status          # or just call again after a few seconds
-```
-
-It is worth knowing that this reaches every client at once. Two agents on one project both lose
-the connection when either of them edits a script, so the one that did nothing sees it too.
-
-If calls still fail after half a minute, the Editor is closed, or the server was stopped on the
-Preferences page.
-
-### The Editor stopped responding
-
-```bash
-isuzu-unity-cli health                       # queueDepth climbing with reqCount flat = wedged main thread
-isuzu-unity-cli call editor_log_tail --lines 50
-isuzu-unity-cli jobs                         # what is queued or running
-```
-
-`health`, `jobs` and `editor_log_tail` are answered off the main thread, so they keep working
-when nothing else does.
-
-Most often the Editor is not wedged but waiting: a modal dialog holds the main thread inside its
-own message loop until someone answers it. `health` reports it under `mainThread` as `stalledMs`
-with the dialog's title, message and buttons, and a job that is waiting for one says so.
-
-```bash
-isuzu-unity-cli call editor_dialog_list      # title, message, buttons
-isuzu-unity-cli call editor_dialog_press --button "Cancel" --confirm true
-```
-
-Read the dialog before pressing anything. `Don't Save` and `Discard` throw away unsaved work;
-`Cancel` is the safe answer, after which the cause can be fixed and the original call retried.
-Windows only — elsewhere `editor_dialog_list` answers `supported: false` and a person has to
-answer the dialog at the Editor.
+`search_query` is Unity's query language, not one this package defines: a term Unity does not
+understand narrows nothing rather than failing, so check the count against what you expected. A
+project query can also come back empty the first time it is asked in a session - ask again before
+concluding it found nothing.
 
 ## Jobs
 

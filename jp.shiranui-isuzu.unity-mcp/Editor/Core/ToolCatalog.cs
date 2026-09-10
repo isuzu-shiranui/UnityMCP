@@ -31,9 +31,10 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Parameter names the invoker injects itself. A tool method that declares one of
-        /// these would be shadowed at call time, so the catalog rejects it at discovery.
+        /// these would be shadowed at call time, so the catalog rejects it at discovery, and
+        /// the invoker lets them through the check for arguments no tool declares.
         /// </summary>
-        private static readonly HashSet<string> ReservedParameterNames = new(StringComparer.Ordinal)
+        internal static readonly HashSet<string> ReservedParameterNames = new(StringComparer.Ordinal)
         {
             "confirm",
             "dry_run",

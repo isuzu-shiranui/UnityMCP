@@ -19,6 +19,7 @@ isuzu-unity-cli doctor [--fix]           # 何がどこに入っているかの�
 isuzu-unity-cli upgrade [--version vX]   # CLI の更新
 isuzu-unity-cli uninstall [--yes]        # 消す対象の一覧表示と削除
 isuzu-unity-cli mcp-stdio --project <n>  # Claude Desktop 向け stdio ブリッジ
+isuzu-unity-cli mcp-stdio --group <g>    # クライアントに渡すツールをグループで絞る
 ```
 
 ## call

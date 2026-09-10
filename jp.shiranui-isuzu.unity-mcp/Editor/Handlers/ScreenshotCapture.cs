@@ -42,7 +42,8 @@ namespace UnityMCP.Editor.Handlers
         /// render_compare keeps the pixels out of the transcript entirely, which is the whole
         /// point of having a comparison tool rather than asking a model to eyeball two images.
         /// </remarks>
-        private static JObject Deliver(byte[] pngBytes, string view, int width, int height, string savePath)
+        private static JObject Deliver(
+            byte[] pngBytes, string view, int width, int height, string savePath, string cameraName = null)
         {
             var result = new JObject
             {
@@ -51,6 +52,13 @@ namespace UnityMCP.Editor.Handlers
                 ["height"] = height,
                 ["bytes"] = pngBytes.Length,
             };
+
+            // Which camera drew this. Camera.main is not necessarily the one the caller just
+            // made, and without the name a picture of the wrong view looks like a broken scene.
+            if (cameraName != null)
+            {
+                result["camera"] = cameraName;
+            }
 
             if (string.IsNullOrWhiteSpace(savePath))
             {
@@ -109,7 +117,9 @@ namespace UnityMCP.Editor.Handlers
             // Camera-based views: "game" / "scene" only.
             if (view == "game" || view == "scene")
             {
-                return CaptureCameraView(view, maxSize, requestedWidth, requestedHeight, savePath);
+                return CaptureCameraView(
+                    view, maxSize, requestedWidth, requestedHeight, savePath,
+                    parameters["camera"]?.ToString());
             }
 
             // Unknown view name — surface as invalid_params so clients get a proper error envelope.
@@ -132,7 +142,9 @@ namespace UnityMCP.Editor.Handlers
         //  Camera-based capture (existing path, preserved)
         // ──────────────────────────────────────────────
 
-        private static JObject CaptureCameraView(string view, int maxSize, int? requestedWidth, int? requestedHeight, string savePath)
+        private static JObject CaptureCameraView(
+            string view, int maxSize, int? requestedWidth, int? requestedHeight,
+            string savePath, string named = null)
         {
             try
             {
@@ -154,10 +166,27 @@ namespace UnityMCP.Editor.Handlers
                 }
                 else
                 {
-                    camera = Camera.main;
-                    if (camera == null && Camera.allCameras.Length > 0)
+                    if (!string.IsNullOrWhiteSpace(named))
                     {
-                        camera = Camera.allCameras[0];
+                        camera = Tools.ObjectResolve.Object(named, null, "camera", null)
+                            .GetComponent<Camera>();
+
+                        if (camera == null)
+                        {
+                            return new JObject
+                            {
+                                ["error"] = $"'{named}' carries no Camera.",
+                            };
+                        }
+                    }
+                    else
+                    {
+                        camera = Camera.main;
+
+                        if (camera == null && Camera.allCameras.Length > 0)
+                        {
+                            camera = Camera.allCameras[0];
+                        }
                     }
 
                     if (camera == null)
@@ -229,7 +258,9 @@ namespace UnityMCP.Editor.Handlers
                     tex2d.Apply();
                     RenderTexture.active = previousActiveRT;
 
-                    return Deliver(tex2d.EncodeToPNG(), view, captureWidth, captureHeight, savePath);
+                    return Deliver(
+                        tex2d.EncodeToPNG(), view, captureWidth, captureHeight, savePath,
+                        Tools.ObjectResolve.PathOf(camera.gameObject));
                 }
                 finally
                 {
@@ -326,7 +357,8 @@ namespace UnityMCP.Editor.Handlers
                     finalTex = resized;
                 }
 
-                var delivered = Deliver(finalTex.EncodeToPNG(), view, finalTex.width, finalTex.height, savePath);
+                var delivered = Deliver(
+                    finalTex.EncodeToPNG(), view, finalTex.width, finalTex.height, savePath);
                 delivered["windowTitle"] = window.titleContent.text;
                 return delivered;
             }

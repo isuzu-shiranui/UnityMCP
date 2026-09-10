@@ -1,3 +1,5 @@
+using Newtonsoft.Json.Linq;
+
 using NUnit.Framework;
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Handlers;
@@ -65,5 +67,29 @@ namespace UnityMCP.Editor.Tests
             Assert.That(thrown.Message, Does.Contain("all, error, warning or log"));
         }
 
+        /// <summary>
+        /// The count beside the list describes the list, not the console behind it.
+        /// </summary>
+        /// <remarks>
+        /// Asking for errors in a console holding thirteen plain logs answered
+        /// <c>logs: [], total: 13</c>, which reads as thirteen entries the reply declined to
+        /// show. Every other paged tool counts what the request matched, and the page's own
+        /// truncated/next describe the filtered list, so this was the one field that ignored the
+        /// filter.
+        /// </remarks>
+        [Test]
+        public void TheTotalCountsWhatTheFilterMatchedRatherThanTheWholeConsole()
+        {
+            UnityEngine.Debug.Log("LogReaderTests: a plain log, so one entry is not an error.");
+
+            var everything = LogReader.ReadLogs(ToolArgs.Of(("type", "all"), ("limit", 1)));
+            var errorsOnly = LogReader.ReadLogs(ToolArgs.Of(("type", "error"), ("limit", 1)));
+
+            Assert.That(everything["total"].Value<int>(), Is.GreaterThan(errorsOnly["total"].Value<int>()),
+                "the entry just written matches 'all' and not 'error', so the two totals differ");
+
+            Assert.That(everything["inConsole"].Value<int>(), Is.EqualTo(errorsOnly["inConsole"].Value<int>()),
+                "what the console holds is the same for both reads");
+        }
     }
 }

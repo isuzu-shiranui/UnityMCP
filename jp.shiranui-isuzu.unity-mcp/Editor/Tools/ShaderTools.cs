@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 
 using Newtonsoft.Json.Linq;
@@ -167,11 +167,14 @@ namespace UnityMCP.Editor.Tools
             "with 'object_path' to read what its Renderer actually draws with, one entry per material " +
             "slot; that is the short way in from 'why is this object magenta', because it does not need " +
             "the material asset path dug out of the renderer first. Reading every slot reports each " +
-            "material's 'propertyCount' rather than its values, since a renderer can carry dozens of " +
-            "materials of a few hundred properties each; name a 'slot' to get that one slot's " +
-            "properties. A slot whose shader is missing, unsupported, or Unity's stand-in error " +
+            "material's 'propertyCount' rather than its values; name a 'slot' to get that one " +
+            "slot's properties. A slot whose shader is missing, unsupported, or Unity's stand-in error " +
             "shader is called out in 'shaderProblem', which is the magenta case. A material that is " +
-            "not an asset is reported with a null path rather than left out.",
+            "not an asset is reported with a null path rather than left out. Reading many objects " +
+            "goes in 'object_paths' rather than a call each. Which objects share one material is a " +
+            "different question, and reflect_read with 'paths' over each renderer's sharedMaterial " +
+            "answers it in a fraction of the bytes, telling two materials apart by instanceId when " +
+            "their names are the same.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject MaterialRead(
             [McpArg("path", "Material asset path, e.g. Assets/Art/Wood.mat. Omit when reading through " +
@@ -182,8 +185,23 @@ namespace UnityMCP.Editor.Tools
             string objectPath = null,
             [McpArg("slot", "With 'object_path', read one material slot by index instead of all of " +
                             "them, which is also what returns that material's property values.")]
-            int? slot = null)
+            int? slot = null,
+            [McpArg("property", "Only report properties whose name contains this text, ignoring " +
+                                "case.")]
+            string property = null,
+            [McpArg("object_paths", "Several objects to read in one call, up to 50. Each is read " +
+                                    "the way 'object_path' reads one, and the reply is keyed by " +
+                                    "the path given; an object that cannot be read carries its own " +
+                                    "error and the rest still come back. Comparing three hundred " +
+                                    "objects' materials one at a time cost three hundred calls and " +
+                                    "744 KB. Alternative to 'object_path'.")]
+            string[] objectPaths = null)
         {
+            if (objectPaths != null && objectPaths.Length > 0)
+            {
+                return ReadObjects(objectPaths, path, objectPath, slot, property);
+            }
+
             if (string.IsNullOrWhiteSpace(objectPath))
             {
                 if (slot.HasValue)
@@ -193,7 +211,7 @@ namespace UnityMCP.Editor.Tools
                         "'slot' only means something with 'object_path': a material asset has no slots.");
                 }
 
-                return Describe(RequireMaterial(path), null, true);
+                return Describe(RequireMaterial(path), null, true, property);
             }
 
             if (!string.IsNullOrWhiteSpace(path))
@@ -204,6 +222,65 @@ namespace UnityMCP.Editor.Tools
                     "scene object whose renderer holds materials.");
             }
 
+            return ReadObject(objectPath, slot, property);
+        }
+
+        /// <summary>The most objects one call reads.</summary>
+        /// <remarks>
+        /// The same cap reflect_read's 'paths' takes, for the same reason: each one resolves an
+        /// object and reads its renderer on the main thread.
+        /// </remarks>
+        private const int MaxObjects = 50;
+
+        /// <summary>
+        /// Several objects' materials in one reply, keyed by the path each was asked for.
+        /// </summary>
+        /// <remarks>
+        /// One object at a time is what a comparison across a scene actually costs: three hundred
+        /// bricks went out as three hundred calls and 744 KB. Saying so in the description did not
+        /// change that; an argument does.
+        /// </remarks>
+        private static JObject ReadObjects(
+            string[] objectPaths, string path, string objectPath, int? slot, string property)
+        {
+            if (!string.IsNullOrWhiteSpace(path) || !string.IsNullOrWhiteSpace(objectPath))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'object_paths' replaces 'object_path' and cannot be combined with 'path'.");
+            }
+
+            if (objectPaths.Length > MaxObjects)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'object_paths' takes at most {MaxObjects} at a time; {objectPaths.Length} " +
+                    "were given. Each one resolves an object and reads its renderer on the " +
+                    "Editor's main thread.");
+            }
+
+            var reads = new JObject();
+
+            foreach (var one in objectPaths)
+            {
+                try
+                {
+                    reads[one] = ReadObject(one, slot, property);
+                }
+                catch (McpToolException e)
+                {
+                    // The one that failed says why, and the rest of the batch still answers. A
+                    // whole reply lost to one bad path is a batch that cannot be trusted with a
+                    // list the caller did not hand-check.
+                    reads[one] = new JObject { ["objectPath"] = one, ["error"] = e.Message };
+                }
+            }
+
+            return new JObject { ["reads"] = reads };
+        }
+
+        private static JObject ReadObject(string objectPath, int? slot, string property)
+        {
             var go = ObjectResolve.Object(objectPath, null, "object_path", null);
             var renderer = RequireRenderer(go);
             var materials = renderer.sharedMaterials;
@@ -227,7 +304,7 @@ namespace UnityMCP.Editor.Tools
                     broken.Add(i);
                 }
 
-                slots.Add(Describe(materials[i], i, slot.HasValue));
+                slots.Add(Describe(materials[i], i, slot.HasValue, property));
             }
 
             return new JObject
@@ -413,7 +490,13 @@ namespace UnityMCP.Editor.Tools
         /// Whether to read every property's value. A shader like lilToon declares a few hundred, so
         /// a renderer with many slots answers with the count alone until one slot is asked for.
         /// </param>
-        private static JObject Describe(Material material, int? slotIndex, bool includeProperties)
+        /// <param name="nameFilter">
+        /// Reports only the properties whose name contains this, ignoring case. Matched as a
+        /// substring rather than exactly, because a caller after "_Color" also wants
+        /// "_ShadowColor" and cannot know the spelling a shader chose.
+        /// </param>
+        private static JObject Describe(
+            Material material, int? slotIndex, bool includeProperties, string nameFilter = null)
         {
             var problem = ShaderProblem(material);
 
@@ -446,9 +529,18 @@ namespace UnityMCP.Editor.Tools
             var propertyCount = shader == null ? 0 : shader.GetPropertyCount();
             var properties = new JArray();
 
+            var filtering = !string.IsNullOrWhiteSpace(nameFilter);
+
             for (var i = 0; includeProperties && i < propertyCount; i++)
             {
                 var propertyName = shader.GetPropertyName(i);
+
+                if (filtering
+                    && propertyName.IndexOf(nameFilter, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
                 var type = shader.GetPropertyType(i);
 
                 JToken value;
@@ -518,6 +610,15 @@ namespace UnityMCP.Editor.Tools
             if (includeProperties)
             {
                 described["properties"] = properties;
+
+                // The total stays in a narrowed reply: without it a caller cannot tell an empty
+                // filter from a material that has nothing.
+                // The total is what a narrowed reply cannot be read without; the number
+                // returned is the length of the array beside it.
+                if (filtering)
+                {
+                    described["propertyCount"] = propertyCount;
+                }
             }
             else
             {
@@ -760,6 +861,134 @@ namespace UnityMCP.Editor.Tools
             }
 
             return shader;
+        }
+
+        [McpTool(
+            "material_create",
+            "Create a material asset. Without this the only way in is the Assets/Create menu, " +
+            "which lands an unnamed material in whatever folder the Project window happens to be " +
+            "showing and finishes only once the rename field is dismissed. Set its properties " +
+            "afterwards with material_set, and hang it on a renderer with inspect_write.",
+            Idempotency = McpIdempotency.Unsafe,
+            Group = "rendering")]
+        public static JObject MaterialCreate(
+            [McpArg("path", "Where to write the .mat, e.g. Assets/Art/Wood.mat. Missing folders " +
+                            "under Assets/ are created. '.mat' is added when it is left off.",
+                    Required = true)]
+            string path = null,
+            [McpArg("shader", "Shader name as shader_info reports it, e.g. 'Standard' or " +
+                              "'Universal Render Pipeline/Lit'. Omit for the render pipeline's own.")]
+            string shader = null,
+            [McpArg("overwrite", "Replace an existing material at this path rather than refusing.")]
+            bool overwrite = false)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new McpToolException("invalid_params", "'path' is required.");
+            }
+
+            var target = path.Replace('\\', '/');
+
+            if (!target.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
+            {
+                target += ".mat";
+            }
+
+            if (!target.StartsWith("Assets/", StringComparison.Ordinal))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{target}' is outside Assets/. A material has to live in the project.");
+            }
+
+            if (!overwrite && AssetDatabase.LoadAssetAtPath<Material>(target) != null)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{target}' already exists. Pass overwrite to replace it, or use material_set "
+                    + "to change the one that is there.");
+            }
+
+            var chosen = Resolve(shader);
+
+            EnsureFolder(target);
+
+            var material = new Material(chosen);
+
+            if (overwrite && AssetDatabase.LoadAssetAtPath<Material>(target) != null)
+            {
+                AssetDatabase.DeleteAsset(target);
+            }
+
+            AssetDatabase.CreateAsset(material, target);
+            AssetDatabase.SaveAssetIfDirty(material);
+
+            return new JObject
+            {
+                ["path"] = target,
+                ["shader"] = chosen.name,
+                ["created"] = true,
+            };
+        }
+
+        /// <summary>The shader a caller named, or the one this project's pipeline draws with.</summary>
+        private static Shader Resolve(string name)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                var found = Shader.Find(name);
+
+                if (found == null)
+                {
+                    throw new McpToolException(
+                        "not_found",
+                        $"No shader named '{name}'. shader_info lists what a project has, and the "
+                        + "name is the one inside the shader rather than its file name.");
+                }
+
+                return found;
+            }
+
+            // A URP or HDRP project has no working Standard, and a Built-in one has no Lit, so
+            // the pipeline is asked before either name is guessed at.
+            var pipeline = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline;
+            var fromPipeline = pipeline == null ? null : pipeline.defaultShader;
+
+            if (fromPipeline != null)
+            {
+                return fromPipeline;
+            }
+
+            var standard = Shader.Find("Standard");
+
+            if (standard == null)
+            {
+                throw new McpToolException(
+                    "not_found",
+                    "This project has neither a render pipeline default shader nor 'Standard'. "
+                    + "Name a shader explicitly.");
+            }
+
+            return standard;
+        }
+
+        /// <summary>Creates the folders a path needs, the way the Project window would.</summary>
+        private static void EnsureFolder(string assetPath)
+        {
+            var parts = assetPath.Split('/');
+            var built = parts[0];
+
+            for (var i = 1; i < parts.Length - 1; i++)
+            {
+                var next = built + "/" + parts[i];
+
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(built, parts[i]);
+                }
+
+                built = next;
+            }
         }
 
         private static Material RequireMaterial(string path)

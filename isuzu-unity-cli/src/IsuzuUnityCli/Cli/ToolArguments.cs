@@ -39,7 +39,7 @@ public static class ToolArguments
 
         foreach (var pair in parsed.Options)
         {
-            if (!ArgParser.CliOnlyOptions.Contains(pair.Key))
+            if (!ArgParser.CallReservedOptions.Contains(pair.Key))
             {
                 args[pair.Key] = ScalarCoercion.ToJsonNode(pair.Value);
             }
@@ -47,7 +47,7 @@ public static class ToolArguments
 
         foreach (var flag in parsed.Flags)
         {
-            if (!ArgParser.CliOnlyOptions.Contains(flag))
+            if (!ArgParser.CallReservedOptions.Contains(flag))
             {
                 args[flag] = true;
             }

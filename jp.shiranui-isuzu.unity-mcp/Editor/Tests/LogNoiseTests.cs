@@ -26,6 +26,66 @@ namespace UnityMCP.Editor.Tests
             "UnityEditor.EditorApplication:Internal_CallUpdateFunctions ()",
         };
 
+        /// <summary>
+        /// A line a snippet logged is the whole entry: the way it reached the console is not.
+        /// </summary>
+        /// <remarks>
+        /// Every frame of this server's own call path names source, so the four kept frames were
+        /// always these and never the caller's own. Sixteen characters of message arrived with
+        /// three hundred and seventy of delivery behind them, on every entry of every read.
+        /// </remarks>
+        [Test]
+        public void ThePathAToolCallArrivesThroughIsNotKeptAsTheTrace()
+        {
+            var logged = new[]
+            {
+                "仕込み完了",
+                "UnityMCP.Editor.Handlers.CodeExecutor:Run (System.Reflection.MethodInfo,object[]) "
+                + "(at Editor/Handlers/CodeExecutor.cs:326)",
+                "UnityMCP.Editor.Handlers.CodeExecutor:Execute (Newtonsoft.Json.Linq.JObject) "
+                + "(at Editor/Handlers/CodeExecutor.cs:118)",
+                "UnityMCP.Editor.Tools.EditorTools:ExecuteCode (string,string) "
+                + "(at Editor/Tools/EditorTools.cs:92)",
+                "UnityMCP.Editor.Core.ToolInvoker:Invoke (UnityMCP.Editor.Core.McpToolDescriptor,"
+                + "Newtonsoft.Json.Linq.JObject) (at Editor/Core/ToolInvoker.cs:144)",
+
+                // A compiler-generated closure sits between two of these, so the type a frame
+                // names is not always the type the pattern is looking for.
+                "UnityMCP.Editor.Core.ToolCallRunner/<>c__DisplayClass4_0:<Run>b__0 () "
+                + "(at Editor/Core/ToolCallRunner.cs:70)",
+                "UnityMCP.Editor.Core.McpMainThreadDispatcher/WorkItem:Run () "
+                + "(at Editor/Core/McpMainThreadDispatcher.cs:300)",
+                "UnityEditor.EditorApplication:Internal_CallUpdateFunctions ()",
+            };
+
+            var kept = LogNoise.TrimStacks(logged);
+
+            Assert.That(kept[0], Is.EqualTo("仕込み完了"), "the message is the whole entry here");
+            Assert.That(kept, Has.Count.EqualTo(2), "the message and a count of what was dropped");
+            Assert.That(kept[1], Does.Match(@"^\s*\(\+7 frames via "));
+        }
+
+        /// <summary>
+        /// A failure inside a tool still names the tool, which the delivery path around it does not.
+        /// </summary>
+        [Test]
+        public void AFrameInsideAToolSurvivesTheDeliveryCut()
+        {
+            var thrown = new[]
+            {
+                "NullReferenceException while reading the timeline",
+                "UnityMCP.Editor.Timeline.TimelineTools:Describe (string) "
+                + "(at Editor/Timeline/TimelineTools.cs:88)",
+                "UnityMCP.Editor.Core.ToolInvoker:Invoke (UnityMCP.Editor.Core.McpToolDescriptor,"
+                + "Newtonsoft.Json.Linq.JObject) (at Editor/Core/ToolInvoker.cs:144)",
+            };
+
+            var kept = LogNoise.TrimStacks(thrown);
+
+            Assert.That(kept[1], Does.Contain("TimelineTools:Describe"));
+            Assert.That(kept[1], Does.Contain(":88"));
+        }
+
         [Test]
         public void TheFrameNamingSourceSurvivesAndTheMachineryIsCounted()
         {

@@ -506,6 +506,14 @@ namespace UnityMCP.Editor.Tools
                 ["index"] = index,
                 ["name"] = layer.name,
                 ["weight"] = Math.Round(layer.defaultWeight, 4),
+
+                // The base layer's stored weight is 0 in almost every controller and means
+                // nothing: Unity runs layer 0 at full weight whatever the asset says. Read as a
+                // weight, it says the layer is off, which is the opposite of what happens.
+                ["weightNote"] = index == 0 && layer.defaultWeight == 0f
+                    ? "The base layer always runs at weight 1; this stored 0 is not a weight the "
+                      + "Animator uses. The runtime block reports what the layer is actually at."
+                    : null,
                 ["blending"] = layer.blendingMode.ToString(),
                 ["mask"] = layer.avatarMask == null ? null : (JToken)layer.avatarMask.name,
                 ["ikPass"] = layer.iKPass,

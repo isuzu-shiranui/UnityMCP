@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using IsuzuUnityCli.Cli;
 
@@ -36,7 +36,10 @@ public static class UpgradeCommand
             return 1;
         }
 
-        var exit = await RunScript(script, parsed.Option("version"), windows, context);
+        // Not --version: that one is read before any command runs and prints this executable's
+        // own version, so 'upgrade --version v4.0.0' printed 4.2.0 and exited 0 without
+        // upgrading anything. The way back from a bad release has to be reachable.
+        var exit = await RunScript(script, parsed.Option("release"), windows, context);
 
         try
         {

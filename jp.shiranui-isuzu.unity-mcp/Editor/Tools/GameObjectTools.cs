@@ -311,7 +311,7 @@ namespace UnityMCP.Editor.Tools
             return Describe(go, components: true);
         }
 
-        private static Type FindComponentType(string typeName)
+        internal static Type FindComponentType(string typeName)
         {
             if (string.IsNullOrWhiteSpace(typeName))
             {

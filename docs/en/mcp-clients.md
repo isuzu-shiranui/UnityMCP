@@ -137,3 +137,5 @@ There are third-party tunnels as well, such as ngrok or cloudflared. Exposing th
 - GET and DELETE answer 405. A request with a foreign `Origin` answers 403.
 - There is no `tools/list_changed`. If a package change or a defined-tool change adds or removes tools, reconnect the client.
 - Append `?group=diagnostics,authoring` to the MCP URL and `tools/list` returns only those groups. Calls themselves are never filtered.
+- Preferences > Tool groups writes it into the generated configuration for you, and shows how many tools the selection offers. For the stdio bridge it is `isuzu-unity-cli mcp-stdio --group diagnostics`.
+- **A client pays for every tool's description on every request.** All 95 come to about 40,000 tokens; `diagnostics` alone is about 9,500.

@@ -35,6 +35,21 @@ namespace UnityMCP.Editor.Core
         private static readonly Regex LoggingCall =
             new Regex(@"^UnityEngine\.(Debug|Logger):Log", RegexOptions.Compiled);
 
+        /// <summary>
+        /// The path a tool call arrives through, which is on every entry a snippet logged.
+        /// </summary>
+        /// <remarks>
+        /// It names only the request the caller has just sent, and every frame of it names source,
+        /// so it fills the four kept frames and pushes out whatever the entry was about: a
+        /// one-line log came back as four frames of this and a count of the rest.
+        /// </remarks>
+        private static readonly Regex Delivery = new Regex(
+            @"^UnityMCP\.Editor\.(Core\.(ToolInvoker|ToolCallRunner|McpHttpServer"
+            + @"|McpStreamableHttpEndpoint|McpMainThreadDispatcher|FrameSequencer)"
+            + @"|Handlers\.CodeExecutor)[\w<>/`+$.]*:"
+            + @"|^UnityMCP\.Editor\.Tools\.EditorTools:ExecuteCode\b",
+            RegexOptions.Compiled);
+
         /// <summary>What makes two otherwise identical lines differ: ids, times, counts.</summary>
         private static readonly Regex Varying =
             new Regex(@"[0-9a-f]{8,}|\d+\.\d+|\d+", RegexOptions.Compiled);
@@ -118,14 +133,16 @@ namespace UnityMCP.Editor.Core
                         break;
                     }
 
-                    if (Located.IsMatch(frame) && !LoggingCall.IsMatch(frame))
+                    if (Located.IsMatch(frame) && !LoggingCall.IsMatch(frame) && !Delivery.IsMatch(frame))
                     {
                         kept.Add(frame);
                     }
                 }
 
                 // Nothing named source, so there is no better frame to choose than the first few.
-                if (kept.Count == 0)
+                // Where frames did name source and none survived the cut, they were all machinery
+                // the caller already knows about, and standing them back in undoes the cut.
+                if (kept.Count == 0 && !AnyLocated(run))
                 {
                     for (var i = 0; i < run.Count && i < KeepWhenNoneLocated; i++)
                     {
@@ -241,6 +258,19 @@ namespace UnityMCP.Editor.Core
 
             return frame.Substring(0, match.Index)
                    + "(at " + tail + ":" + match.Groups["line"].Value + ")";
+        }
+
+        private static bool AnyLocated(List<string> run)
+        {
+            foreach (var frame in run)
+            {
+                if (Located.IsMatch(frame))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool Foldable(string line)

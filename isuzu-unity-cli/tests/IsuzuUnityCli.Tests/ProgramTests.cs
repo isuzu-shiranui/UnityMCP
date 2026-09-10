@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Commands;
@@ -23,6 +23,93 @@ public sealed class ProgramTests
         };
 
         return (context, output, error);
+    }
+
+    /// <summary>
+    /// upgrade has to be able to install a named release, because that is the way back from one
+    /// that turns out to be broken.
+    /// </summary>
+    /// <remarks>
+    /// It cannot be --version: that is read before any command runs and prints this executable's
+    /// own version, so 'upgrade --version v4.0.0' printed the current version and exited 0 having
+    /// upgraded nothing. Refusing --releaze here is what proves --release is still wired up; the
+    /// command itself is not run because it would reach out to GitHub and replace this binary.
+    /// </remarks>
+    [Fact]
+    public async Task UpgradeTakesAReleaseToInstall()
+    {
+        var (context, _, error) = Context();
+
+        Assert.Equal(1, await Program.Run(new[] { "upgrade", "--releaze", "v4.0.0" }, context));
+        Assert.Contains("--release", error.ToString());
+    }
+
+    /// <summary>
+    /// A mistyped option has to be refused, and named back with what the command does take.
+    /// </summary>
+    /// <remarks>
+    /// setup is the one that hurts: --agent decides which agents get written to, and a
+    /// misspelling reads as "not given", which defaults to every installed agent. The command
+    /// then edits configs the caller never named and reports success.
+    /// </remarks>
+    [Fact]
+    public async Task AMistypedOptionIsRefusedRatherThanDropped()
+    {
+        var (context, output, error) = Context();
+
+        Assert.Equal(1, await Program.Run(new[] { "setup", "--agnet", "codex" }, context));
+        Assert.Contains("--agnet", error.ToString());
+        Assert.Contains("--agent", error.ToString());
+        Assert.Equal("", output.ToString());
+    }
+
+    /// <summary>
+    /// The refusal names the command's own options. Listing every option the CLI has would send
+    /// someone who mistyped a doctor option towards --group, which doctor does not take.
+    /// </summary>
+    [Fact]
+    public async Task TheRefusalNamesOnlyWhatThatCommandTakes()
+    {
+        var (context, _, error) = Context();
+
+        Assert.Equal(1, await Program.Run(new[] { "doctor", "--group", "rendering" }, context));
+
+        var reported = error.ToString();
+
+        Assert.Contains("--fix", reported);
+        Assert.DoesNotContain("--agent", reported);
+        Assert.DoesNotContain("--test-mode", reported);
+    }
+
+    /// <summary>
+    /// verify carries eight options of its own that no other command has, and they are not in the
+    /// set that decides what is forwarded to a tool. Checking against that set refused them all.
+    /// </summary>
+    [Fact]
+    public async Task ACommandsOwnOptionsAreNotRefused()
+    {
+        foreach (var option in new[] { "--no-compile", "--raw" })
+        {
+            var (context, _, error) = Context();
+
+            await Program.Run(new[] { "verify", option }, context);
+
+            Assert.DoesNotContain("Unknown option", error.ToString());
+        }
+    }
+
+    /// <summary>
+    /// 'call' forwards what it does not own to the tool, which refuses what it does not declare.
+    /// Refusing here as well would block every tool argument.
+    /// </summary>
+    [Fact]
+    public async Task CallStillForwardsItsToolArguments()
+    {
+        var (context, _, error) = Context();
+
+        await Program.Run(new[] { "call", "some_tool", "--some_argument", "x" }, context);
+
+        Assert.DoesNotContain("Unknown option", error.ToString());
     }
 
     [Fact]

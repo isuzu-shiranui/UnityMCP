@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 using Newtonsoft.Json.Linq;
 
@@ -147,15 +148,22 @@ namespace UnityMCP.Editor.Tools
                     // A grid of counts is a picture of where the change is, in a few dozen numbers
                     // rather than a few hundred kilobytes. Rows run top to bottom.
                     var rows = new JArray();
-                    var cellPixels = Math.Max(1, (a.width / cells) * (a.height / cells));
 
                     for (var row = cells - 1; row >= 0; row--)
                     {
                         var cols = new JArray();
+                        var high = Span(row, a.height, cells);
 
                         for (var col = 0; col < cells; col++)
                         {
-                            cols.Add(Math.Round((double)cellCounts[row * cells + col] / cellPixels, 3));
+                            // Each cell's own pixel count. A single floor(w/cells)*floor(h/cells)
+                            // is the smallest cell, and the pixels left over by that division are
+                            // spread across the others by the binning above — so every larger cell
+                            // divided by it came out above 1, which a ratio cannot be.
+                            var wide = Span(col, a.width, cells);
+                            var pixels = Math.Max(1, wide * high);
+
+                            cols.Add(Math.Round((double)cellCounts[row * cells + col] / pixels, 3));
                         }
 
                         rows.Add(cols);
@@ -171,6 +179,164 @@ namespace UnityMCP.Editor.Tools
                 UnityEngine.Object.DestroyImmediate(a);
                 UnityEngine.Object.DestroyImmediate(b);
             }
+        }
+
+        /// <summary>How many pixels fall in one row or column of the grid.</summary>
+        /// <remarks>
+        /// The same split the binning does: a pixel lands in cell <c>index</c> when
+        /// <c>index == pixel * cells / total</c>, so the cell starts at the first pixel for which
+        /// that holds. Derived from the binning rather than assumed, because a denominator that
+        /// disagrees with it is what produced ratios above 1.
+        /// </remarks>
+        private static int Span(int index, int total, int cells)
+        {
+            var start = (index * total + cells - 1) / cells;
+            var end = ((index + 1) * total + cells - 1) / cells;
+
+            return end - start;
+        }
+
+        [McpTool(
+            "render_stats",
+            "Report what the last drawn frame cost: draw calls, SetPass calls, triangles, " +
+            "vertices, shadow casters and how much batching collapsed. This is the number to " +
+            "take before and after a change that is meant to make a scene cheaper, so the claim " +
+            "rests on a measurement rather than on the shape of the fix. It covers the whole " +
+            "Game view across every open scene, not one object, and it is the last frame Unity " +
+            "drew: nothing redraws a Game view that is closed, or one sitting behind another tab, " +
+            "which 'gameView' in the reply says. A first reading after bringing one forward can " +
+            "still predate the change, so take two. A reading taken after advancing several " +
+            "frames can cover more than one of them: stepping five frames and reading gave 80 " +
+            "draw calls where a single step gives 16, so two readings are only comparable when " +
+            "the same number of frames was stepped before each. Step one frame before reading " +
+            "when the figure has to mean one frame. " +
+            "Frame and render times are not reported; Unity marks them obsolete and they read as " +
+            "nonsense in the Editor.",
+            Idempotency = McpIdempotency.Safe,
+            Group = "rendering")]
+        public static JObject RenderStats()
+        {
+            return new JObject
+            {
+                ["drawCalls"] = UnityStats.drawCalls,
+                ["setPassCalls"] = UnityStats.setPassCalls,
+                ["triangles"] = UnityStats.triangles,
+                ["vertices"] = UnityStats.vertices,
+                ["shadowCasters"] = UnityStats.shadowCasters,
+
+                // What batching took off the draw call count, and by which route. A scene whose
+                // cost sits in draw calls is usually one where none of these moved.
+                ["batching"] = Batching(),
+
+                ["renderTextures"] = new JObject
+                {
+                    ["count"] = UnityStats.renderTextureCount,
+                    ["bytes"] = UnityStats.renderTextureBytes,
+                    ["changes"] = UnityStats.renderTextureChanges,
+                },
+
+                ["screen"] = UnityStats.screenRes,
+
+                // Whether these figures can be current at all. Nothing redraws a Game view that
+                // is not there, and nothing redraws one sitting behind another tab either: a
+                // reading taken then was 24 draw calls where bringing the view forward gave 592.
+                // Open was not enough to say, so both are said.
+                ["gameView"] = GameViewState(),
+            };
+        }
+
+        /// <summary>Whether a Game view is there, and whether it is the one being drawn.</summary>
+        /// <remarks>
+        /// Frontmost is read off the dock rather than from focus: a docked view keeps focus while
+        /// another tab covers it, so focus says yes for a view that has not repainted in minutes.
+        /// The dock's own field is internal, so a version that moves it leaves 'frontmost' out
+        /// rather than guessing.
+        /// </remarks>
+        private static JObject GameViewState()
+        {
+            foreach (var window in UnityEngine.Resources.FindObjectsOfTypeAll<EditorWindow>())
+            {
+                if (window == null || window.GetType().Name != "GameView")
+                {
+                    continue;
+                }
+
+                var state = new JObject { ["open"] = true };
+                var frontmost = Frontmost(window);
+
+                if (frontmost.HasValue)
+                {
+                    state["frontmost"] = frontmost.Value;
+
+                    if (!frontmost.Value)
+                    {
+                        state["note"] = "The Game view is behind another tab, so it is not being "
+                                        + "redrawn and these figures are from whenever it last was. "
+                                        + "Bring it forward and read again.";
+                    }
+                }
+
+                return state;
+            }
+
+            return new JObject
+            {
+                ["open"] = false,
+                ["note"] = "No Game view is open, so nothing is being drawn and these figures are "
+                           + "left over from whenever one last was.",
+            };
+        }
+
+        /// <summary>Whether this window is the visible tab of its dock, or null when unknowable.</summary>
+        private static bool? Frontmost(EditorWindow window)
+        {
+            try
+            {
+                var parent = typeof(EditorWindow)
+                    .GetField("m_Parent", BindingFlags.NonPublic | BindingFlags.Instance)
+                    ?.GetValue(window);
+
+                var actual = parent?.GetType()
+                    .GetProperty("actualView", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+                    ?.GetValue(parent) as EditorWindow;
+
+                return actual == null ? (bool?)null : actual == window;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>The batching counters this Unity version has.</summary>
+        /// <remarks>
+        /// Read by name rather than compiled against: srpBatcherDrawCalls is on UnityStats in
+        /// 6000.5 and not in 6000.0, and naming it directly stops the package building on the
+        /// older one. A version without a counter simply does not report it.
+        /// </remarks>
+        private static JObject Batching()
+        {
+            var batching = new JObject();
+
+            foreach (var name in new[]
+                     {
+                         "dynamicBatches", "dynamicBatchedDrawCalls",
+                         "staticBatches", "staticBatchedDrawCalls",
+                         "instancedBatches", "instancedBatchedDrawCalls",
+                         "srpBatcherDrawCalls",
+                     })
+            {
+                var property = typeof(UnityStats).GetProperty(
+                    name,
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+                if (property != null && property.GetValue(null) is int count)
+                {
+                    batching[name] = count;
+                }
+            }
+
+            return batching;
         }
 
         [McpTool(

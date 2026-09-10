@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -92,6 +92,12 @@ namespace UnityMCP.Editor.Tests
         }
 
         /// <summary>
+        /// <summary>The JSON a client reads back out of the text block.</summary>
+        private static JObject Answered(JToken result)
+        {
+            return JObject.Parse(result["content"][0]["text"].Value<string>());
+        }
+
         /// A capture's PNG has to travel as image content. Left in the JSON it is a wall of text
         /// a model cannot look at, and one small screenshot fills a reply on its own.
         /// </summary>
@@ -118,10 +124,10 @@ namespace UnityMCP.Editor.Tests
             Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
             Assert.That(content[1]["mimeType"].Value<string>(), Is.EqualTo("image/png"));
 
-            Assert.That(result["structuredContent"]["image"], Is.Null,
+            Assert.That(Answered(result)["image"], Is.Null,
                 "keeping it here sent the same picture twice, once priced by size and once by area");
-            Assert.That(result["structuredContent"]["width"], Is.Not.Null,
-                "everything else about the capture still belongs in the structured copy");
+            Assert.That(Answered(result)["width"], Is.Not.Null,
+                "everything else about the capture still travels with it");
         }
 
         /// <summary>
@@ -147,8 +153,8 @@ namespace UnityMCP.Editor.Tests
             Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
             Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
 
-            Assert.That(result["structuredContent"]["capture"]["image"], Is.Null);
-            Assert.That(result["structuredContent"]["capture"]["view"].Value<string>(),
+            Assert.That(Answered(result)["capture"]["image"], Is.Null);
+            Assert.That(Answered(result)["capture"]["view"].Value<string>(),
                 Is.EqualTo("game"));
         }
 
@@ -169,8 +175,8 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(result["content"][0]["text"].Value<string>(),
                 Does.Contain("No active scene view found"));
-            Assert.That(result["structuredContent"], Is.Null,
-                "a failure carries no structured result");
+            Assert.That(result["isError"].Value<bool>(), Is.True,
+                "a handler that refused is not a successful call");
         }
 
         /// <summary>
@@ -191,10 +197,12 @@ namespace UnityMCP.Editor.Tests
             var result = response.Body["result"];
 
             Assert.That(result["isError"], Is.Null, "fetching a failed job's detail succeeded");
-            Assert.That(result["structuredContent"], Is.Not.Null);
-            Assert.That(result["structuredContent"]["status"].Value<string>(), Is.EqualTo("failed"));
-            Assert.That(result["structuredContent"]["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
-            Assert.That(result["structuredContent"]["error"].Value<string>(), Is.EqualTo("the tool threw"));
+
+            var detail = Answered(result);
+
+            Assert.That(detail["status"].Value<string>(), Is.EqualTo("failed"));
+            Assert.That(detail["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
+            Assert.That(detail["error"].Value<string>(), Is.EqualTo("the tool threw"));
         }
 
         /// <summary>
@@ -385,7 +393,7 @@ namespace UnityMCP.Editor.Tests
             Assert.That(result["isError"], Is.Null);
             Assert.That(result["content"][0]["type"].Value<string>(), Is.EqualTo("text"));
             Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain("\"hi\""));
-            Assert.That(result["structuredContent"]["result"].Value<string>(), Is.EqualTo("hi"));
+            Assert.That(Answered(result)["result"].Value<string>(), Is.EqualTo("hi"));
         }
 
         [Test]
@@ -445,11 +453,14 @@ namespace UnityMCP.Editor.Tests
 
             var response = slowEndpoint.Handle("POST", Headers(), Request(1, "tools/call", new JObject { ["name"] = "ep_main" }));
 
-            var result = response.Body["result"];
-            var jobId = result["structuredContent"]["jobId"].Value<string>();
-            Assert.That(result["structuredContent"]["state"].Value<string>(), Is.EqualTo("running"));
-            Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain(jobId).And.Contain("job_status"));
-            Assert.That(this.jobs.TryGet(jobId, out _), Is.True);
+            var text = response.Body["result"]["content"][0]["text"].Value<string>();
+
+            Assert.That(text, Does.Contain("Still running").And.Contain("job_status"));
+
+            var named = System.Text.RegularExpressions.Regex.Match(text, "\"([^\"]+)\"");
+
+            Assert.That(named.Success, Is.True, "the text names the job to poll");
+            Assert.That(this.jobs.TryGet(named.Groups[1].Value, out _), Is.True);
         }
 
         [Test]
@@ -464,7 +475,6 @@ namespace UnityMCP.Editor.Tests
 
             var result = response.Body["result"];
             Assert.That(result["content"][0]["text"].Value<string>(), Does.EndWith(" The Editor is showing a dialog \"Probe\"."));
-            Assert.That(result["structuredContent"]["message"].Value<string>(), Is.EqualTo("The Editor is showing a dialog \"Probe\"."));
         }
 
         private static class MainThreadTools

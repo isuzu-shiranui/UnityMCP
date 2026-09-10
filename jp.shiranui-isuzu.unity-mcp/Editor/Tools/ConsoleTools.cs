@@ -26,7 +26,10 @@ namespace UnityMCP.Editor.Tools
             "console_read_logs",
             "Read entries from the Unity console, newest first, with optional severity filtering. " +
             "Reflects what the Editor console currently holds; if it reports zero entries but you " +
-            "expect output, confirm with editor_log_tail before concluding nothing was logged.",
+            "expect output, confirm with editor_log_tail before concluding nothing was logged. " +
+            "'total' counts what the severity filter matched, so it goes with 'logs'; 'inConsole' " +
+            "counts every entry the console holds, and 'errors' and 'warnings' count by severity " +
+            "regardless of the filter.",
             Idempotency = McpIdempotency.Safe,
             // Reading the console is the first step of nearly every diagnosis here, so paying a
             // tool-search round trip for it every time costs more than the context it occupies.

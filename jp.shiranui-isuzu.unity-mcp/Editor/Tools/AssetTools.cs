@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 
@@ -32,7 +32,11 @@ namespace UnityMCP.Editor.Tools
             "Search the project for assets. Combine a type filter with a folder to keep the search " +
             "meaningful — an unfiltered search matches every asset in the project, which is rarely " +
             "the question. The reply is capped at limit and carries the full match count in total, " +
-            "so a broad search is slow and uninformative rather than large.",
+            "so a broad search is slow and uninformative rather than large. With no folder the " +
+            "search covers the installed packages as well as Assets, and they outnumber a small " +
+            "project's own files heavily: one answered 4,384 with no folder and 6 for " +
+            "folder 'Assets'. Pass folder 'Assets' whenever the question is about this project's " +
+            "own content.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Find(
             [McpArg("type", "Unity type to filter by, e.g. Material, Texture2D, MonoScript, Prefab.")]
@@ -300,6 +304,135 @@ namespace UnityMCP.Editor.Tools
                 ["reimported"] = true,
                 ["note"] = "Reimporting a script does not recompile it; use compile_request for that.",
             };
+        }
+
+        [McpTool(
+            "asset_export_package",
+            "Export assets to a .unitypackage. Unity writes each asset together with its .meta, so " +
+            "importing the file back restores the GUIDs and the references that pointed at them " +
+            "survive. That makes this the rollback point to take before a bulk edit that rewrites " +
+            "materials, re-slices sprites or rewrites import settings, on a project with no version " +
+            "control or one whose assets are not committed. It is also how to hand part of a project " +
+            "to someone who does not have the repository. The file lands outside the project, so " +
+            "'file' has to be stated rather than guessed, and one that is already there is kept " +
+            "unless overwrite is set. include_dependencies follows the whole reference graph, where " +
+            "one character prefab can reach most of the project, so the reply reports the size that " +
+            "was actually written.",
+            Idempotency = McpIdempotency.Unsafe)]
+        public static JObject ExportPackage(
+            [McpArg("paths", "Project paths to export. A folder brings what is under it unless " +
+                             "recurse is false.", Required = true)]
+            string[] paths = null,
+            [McpArg("file", "Where to write the .unitypackage, including the file name.", Required = true)]
+            string file = null,
+            [McpArg("recurse", "For a folder, include the assets inside it.")]
+            bool recurse = true,
+            [McpArg("include_dependencies", "Also include every asset the listed ones reference.")]
+            bool includeDependencies = false,
+            [McpArg("overwrite", "Replace the file if one is already there.")]
+            bool overwrite = false)
+        {
+            if (paths == null || paths.Length == 0)
+            {
+                throw new McpToolException(
+                    "invalid_params", "'paths' is required and needs at least one entry.");
+            }
+
+            var assets = paths
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => p.Replace('\\', '/').TrimEnd('/'))
+                .ToArray();
+
+            if (assets.Length == 0)
+            {
+                throw new McpToolException("invalid_params", "'paths' held no usable path.");
+            }
+
+            foreach (var asset in assets)
+            {
+                if (!AssetDatabase.IsValidFolder(asset) &&
+                    AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(asset) == null)
+                {
+                    throw new McpToolException(
+                        "not_found",
+                        $"No asset or folder at '{asset}'. Paths are project-relative and start at " +
+                        "'Assets/' or 'Packages/'; asset_find will give you exact ones.");
+                }
+            }
+
+            // The same reasoning as build_player: the file goes outside the project, and guessing
+            // where is how an agent fills someone's desktop.
+            if (string.IsNullOrWhiteSpace(file))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'file' is required. The package is written outside the project, so the " +
+                    "destination has to be stated rather than assumed.");
+            }
+
+            var target = file.Replace('\\', '/');
+
+            if (!target.EndsWith(".unitypackage", StringComparison.OrdinalIgnoreCase))
+            {
+                target += ".unitypackage";
+            }
+
+            if (File.Exists(target) && !overwrite)
+            {
+                throw new McpToolException(
+                    "already_exists",
+                    $"'{target}' is already there. Pass overwrite true to replace it, or choose " +
+                    "another name.");
+            }
+
+            var directory = Path.GetDirectoryName(target);
+
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var options = ExportPackageOptions.Default;
+
+            if (recurse)
+            {
+                options |= ExportPackageOptions.Recurse;
+            }
+
+            if (includeDependencies)
+            {
+                options |= ExportPackageOptions.IncludeDependencies;
+            }
+
+            // ExportPackageOptions.Interactive is deliberately absent. It runs the export
+            // asynchronously and opens a file browser window when it finishes, so the call would
+            // return before the file exists and leave a window open on the Editor.
+            AssetDatabase.ExportPackage(assets, target, options);
+
+            if (!File.Exists(target))
+            {
+                throw new McpToolException(
+                    "tool_failed",
+                    $"Unity reported no error but nothing was written to '{target}'.");
+            }
+
+            var result = new JObject
+            {
+                ["file"] = target,
+                ["bytes"] = new FileInfo(target).Length,
+                ["paths"] = new JArray(assets.Cast<object>().ToArray()),
+                ["recurse"] = recurse,
+                ["includeDependencies"] = includeDependencies,
+            };
+
+            if (includeDependencies)
+            {
+                // The closure the flag reached, counting the listed assets themselves, so a
+                // package that came out larger than expected says why.
+                result["includedAssetCount"] = AssetDatabase.GetDependencies(assets, true).Length;
+            }
+
+            return result;
         }
 
         private static UnityEngine.Object Require(string path)

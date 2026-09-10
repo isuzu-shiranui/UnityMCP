@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using IsuzuUnityCli.Cli;
 using Xunit;
 
@@ -32,5 +34,53 @@ public sealed class ScalarCoercionTests
         Assert.Equal("16", ScalarCoercion.ToJsonNode("0x10").ToJsonString());
         Assert.Equal("true", ScalarCoercion.ToJsonNode("true").ToJsonString());
         Assert.Equal("\"2Player\"", ScalarCoercion.ToJsonNode("2Player").ToJsonString());
+    }
+
+    /// <summary>
+    /// An argument that takes a list or an object gets one.
+    /// </summary>
+    /// <remarks>
+    /// A tool taking several paths at once has no other way to be called from a command line:
+    /// sent as a string, the whole line arrived as one path and the tool answered about a type
+    /// named after the opening bracket.
+    /// </remarks>
+    [Fact]
+    public void AnArrayOrObjectArrivesAsOne()
+    {
+        Assert.Equal("[\"a\",\"b\"]", ScalarCoercion.ToJsonNode("[\"a\",\"b\"]").ToJsonString());
+        Assert.Equal("{\"x\":1}", ScalarCoercion.ToJsonNode("{\"x\":1}").ToJsonString());
+        Assert.Equal("[1,[2]]", ScalarCoercion.ToJsonNode(" [1,[2]] ").ToJsonString());
+    }
+
+    /// <summary>Text that only looks like the start of JSON stays the string it was typed as.</summary>
+    [Theory]
+    [InlineData("[unclosed")]
+    [InlineData("[Header] Stats")]
+    [InlineData("{ not closed")]
+    public void TextThatDoesNotParseIsStillAString(string value)
+    {
+        var node = ScalarCoercion.ToJsonNode(value);
+
+        Assert.Equal(JsonValueKind.String, node.GetValueKind());
+        Assert.Equal(value, node.GetValue<string>());
+    }
+
+    /// <summary>
+    /// A bracketed list that does not parse is refused rather than sent on as one long string.
+    /// </summary>
+    /// <remarks>
+    /// Windows PowerShell removes the double quotes from an argument on its way to a native
+    /// program, so ["a","b"] arrives as [a,b]. Passed through as a string it reached the Editor
+    /// as a single path named after the whole line, and the reply was an error about a type
+    /// called '["a' - which sends the reader after the wrong thing entirely.
+    /// </remarks>
+    [Theory]
+    [InlineData("[UnityEngine.Time/frameCount,UnityEngine.Application/isPlaying]")]
+    [InlineData("{paths:[a,b]}")]
+    public void SomethingShapedLikeJsonThatDoesNotParseIsRefused(string value)
+    {
+        var thrown = Assert.Throws<CliException>(() => ScalarCoercion.ToJsonNode(value));
+
+        Assert.Contains("PowerShell", thrown.Message);
     }
 }

@@ -48,11 +48,29 @@ namespace UnityMCP.Editor.Tools
         {
             if (instanceId.HasValue)
             {
-                var byId = EntityIdCompat.Find(instanceId.Value) as GameObject;
+                var found = EntityIdCompat.Find(instanceId.Value);
 
-                if (byId != null)
+                if (found is GameObject byId)
                 {
                     return byId;
+                }
+
+                // A live id for something else is not an expired id, and saying so sends the
+                // caller to re-read a hierarchy that will never contain it. A material's id was
+                // answered with "ids do not survive a domain reload" while the material was open
+                // in front of them.
+                if (found is Component component)
+                {
+                    return component.gameObject;
+                }
+
+                if (found != null)
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"Instance id {instanceId.Value} is a {found.GetType().Name} named "
+                        + $"'{found.name}', not a GameObject. This argument takes an object in the "
+                        + "scene; an asset is named by its path under Assets/ or Packages/.");
                 }
 
                 throw new McpToolException(

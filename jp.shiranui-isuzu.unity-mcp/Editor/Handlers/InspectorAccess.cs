@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -7,6 +7,7 @@ using UnityEditor;
 using UnityEngine;
 
 using UnityMCP.Editor.Core;
+
 
 namespace UnityMCP.Editor.Handlers
 {
@@ -26,25 +27,18 @@ namespace UnityMCP.Editor.Handlers
                 var propertyPath = parameters["propertyPath"]?.ToString();
                 var value = parameters["value"];
 
-                // Find GameObject
-                GameObject go = null;
-                if (instanceId.HasValue)
+                // The shared resolver rather than GameObject.Find: Find skips anything switched
+                // off, does not take the /Name[1] form the hierarchy reports for repeated
+                // siblings, and does not see into an open prefab stage. These three tools are
+                // the ones most often pointed at something the caller has just deactivated.
+                var acrossPaths = ManyPaths(parameters["objectPaths"]);
+
+                if (acrossPaths != null)
                 {
-                    var obj = EntityIdCompat.Find(instanceId.Value);
-                    go = obj as GameObject;
+                    return WriteAcross(acrossPaths, componentType, componentIndex, parameters);
                 }
 
-                if (go == null && !string.IsNullOrEmpty(objectPath))
-                {
-                    go = GameObject.Find(objectPath);
-                }
-
-                if (go == null)
-                {
-                    if (!instanceId.HasValue && string.IsNullOrEmpty(objectPath))
-                        return new JObject { ["error"] = "Either instance_id or object_path is required" };
-                    return new JObject { ["error"] = "GameObject not found" };
-                }
+                var go = Tools.ObjectResolve.Object(objectPath, instanceId);
 
                 var offset = parameters["offset"]?.Value<int>() ?? 0;
                 var limit = parameters["limit"]?.Value<int>() ?? 0;
@@ -85,7 +79,9 @@ namespace UnityMCP.Editor.Handlers
 
                 if (mode == "write")
                 {
-                    return WriteProperty(serializedObject, propertyPath, value, target);
+                    return parameters["values"] is JObject many
+                        ? WriteProperties(serializedObject, many, target)
+                        : WriteProperty(serializedObject, propertyPath, value, target);
                 }
 
                 // Read mode
@@ -108,6 +104,95 @@ namespace UnityMCP.Editor.Handlers
                 return new JObject { ["error"] = $"InspectorAccess error: {e.Message}" };
             }
         }
+
+        /// <summary>The paths a caller named, or null when it named one object as usual.</summary>
+        private static string[] ManyPaths(JToken token)
+        {
+            if (token is not JArray array || array.Count == 0)
+            {
+                return null;
+            }
+
+            return array.Select(t => t.ToString()).ToArray();
+        }
+
+        /// <summary>
+        /// The same edit across several objects, the way the Inspector edits a multi-selection.
+        /// </summary>
+        /// <remarks>
+        /// One SerializedObject over many targets is Unity's own answer to this, so the write
+        /// lands on all of them in a single undo step rather than one call and one step each.
+        /// Swapping a material on three hundred objects cost two hundred and ninety-nine calls
+        /// that differed only in which object they named.
+        /// <para>
+        /// Every object is resolved before anything is written: an unresolvable path costs a
+        /// refusal, not a scene where some of the selection changed and the rest did not.
+        /// </para>
+        /// </remarks>
+        private static JObject WriteAcross(
+            string[] paths, string componentType, int componentIndex, JObject parameters)
+        {
+            if (parameters["mode"]?.ToString() != "write")
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'object_paths' writes to several objects at once; it has no meaning for a read.");
+            }
+
+            if (paths.Length > MaxTargets)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'object_paths' takes at most {MaxTargets} objects at a time; "
+                    + $"{paths.Length} were given.");
+            }
+
+            var targets = new List<UnityEngine.Object>(paths.Length);
+
+            foreach (var path in paths)
+            {
+                var go = Tools.ObjectResolve.Object(path, null);
+
+                if (string.IsNullOrEmpty(componentType))
+                {
+                    targets.Add(go);
+                    continue;
+                }
+
+                var component = FindComponent(go, componentType, componentIndex);
+
+                if (component == null)
+                {
+                    throw new McpToolException(
+                        "not_found",
+                        $"'{path}' has no '{componentType}' at index {componentIndex}. "
+                        + "Nothing was written.");
+                }
+
+                targets.Add(component);
+            }
+
+            var serialized = new SerializedObject(targets.ToArray());
+            var label = string.IsNullOrEmpty(componentType) ? "GameObject" : componentType;
+
+            var written = parameters["values"] is JObject set
+                ? WriteProperties(serialized, set, label)
+                : WriteProperty(serialized, parameters["propertyPath"]?.ToString(), parameters["value"], label);
+
+            if (written["error"] == null)
+            {
+                written["objects"] = paths.Length;
+            }
+
+            return written;
+        }
+
+        /// <summary>The most objects one write will reach.</summary>
+        /// <remarks>
+        /// A cap rather than a limit anyone should hit: it exists so a mistyped filter that
+        /// selected the whole scene is a refusal instead of an edit to every object in it.
+        /// </remarks>
+        private const int MaxTargets = 500;
 
         private static int MissingScriptCount(Component[] components)
         {
@@ -198,15 +283,20 @@ namespace UnityMCP.Editor.Handlers
                     {
                         var so = new SerializedObject(comp);
                         var properties = new JArray();
-                        var iterator = so.GetIterator();
-                        var enterChildren = true;
-                        var count = 0;
-                        while (iterator.NextVisible(enterChildren) && count < MaxProperties)
+
+                        // The same walk the narrowed listing uses. Left on visibility, this view
+                        // dropped a HingeJoint's m_ConnectedBody while the other one showed it,
+                        // so the same question got two answers depending on how it was asked.
+                        foreach (var property in SerializedValues.TopLevel(so))
                         {
-                            enterChildren = false;
-                            properties.Add(BuildPropertyInfo(iterator));
-                            count++;
+                            if (properties.Count >= MaxProperties)
+                            {
+                                break;
+                            }
+
+                            properties.Add(SerializedValues.Describe(property));
                         }
+
                         entry["properties"] = properties;
                     }
                     catch
@@ -260,13 +350,15 @@ namespace UnityMCP.Editor.Handlers
             SerializedObject serializedObject, string componentType, int offset, int limit, string[] fields)
         {
             var all = new List<JObject>();
-            var iterator = serializedObject.GetIterator();
-            var enterChildren = true;
 
-            while (iterator.NextVisible(enterChildren) && all.Count < MaxProperties)
+            foreach (var property in SerializedValues.TopLevel(serializedObject))
             {
-                enterChildren = false;
-                all.Add(BuildPropertyInfo(iterator));
+                if (all.Count >= MaxProperties)
+                {
+                    break;
+                }
+
+                all.Add(SerializedValues.Describe(property));
             }
 
             var page = ListResponseBuilder.Build(all, offset, limit, item => item, fields);
@@ -296,8 +388,68 @@ namespace UnityMCP.Editor.Handlers
             return new JObject
             {
                 ["component"] = componentType,
-                ["property"] = BuildPropertyInfo(prop)
+                ["property"] = SerializedValues.Describe(prop)
             };
+        }
+
+        /// <summary>Writes several properties on the one component, or none of them.</summary>
+        /// <remarks>
+        /// All or nothing, which one SerializedObject makes free: nothing reaches the object
+        /// until ApplyModifiedProperties, so a path that does not resolve costs the caller a
+        /// refusal rather than a component half configured. Setting up a single
+        /// ConfigurableJoint took twenty-one calls before this, one property at a time.
+        /// </remarks>
+        private static JObject WriteProperties(
+            SerializedObject serializedObject, JObject values, string componentType)
+        {
+            if (values.Count == 0)
+            {
+                return new JObject { ["error"] = "'values' is empty; name at least one property." };
+            }
+
+            var written = new JObject();
+
+            foreach (var pair in values)
+            {
+                var prop = serializedObject.FindProperty(pair.Key);
+
+                if (prop == null)
+                {
+                    return new JObject
+                    {
+                        ["error"] = $"Property '{pair.Key}' not found on component "
+                                    + $"'{componentType}'. Nothing was written; inspect_list "
+                                    + "names the paths this component takes.",
+                    };
+                }
+
+                var failed = SerializedValues.Write(prop, pair.Value);
+
+                if (failed != null)
+                {
+                    return new JObject
+                    {
+                        ["error"] = $"'{pair.Key}': {failed} Nothing was written.",
+                    };
+                }
+            }
+
+            serializedObject.ApplyModifiedProperties();
+
+            foreach (var pair in values)
+            {
+                var prop = serializedObject.FindProperty(pair.Key);
+                written[pair.Key] = SerializedValues.Read(prop);
+            }
+
+            return Tools.EditorNotes.SceneChange(
+                new JObject
+                {
+                    ["component"] = componentType,
+                    ["written"] = written,
+                    ["count"] = written.Count,
+                },
+                serializedObject.targetObject);
         }
 
         private static JObject WriteProperty(SerializedObject serializedObject, string propertyPath,
@@ -322,7 +474,7 @@ namespace UnityMCP.Editor.Handlers
                 };
             }
 
-            var writeError = SetPropertyValue(prop, value);
+            var writeError = SerializedValues.Write(prop, value);
             if (writeError != null)
             {
                 return new JObject { ["error"] = writeError };
@@ -334,218 +486,17 @@ namespace UnityMCP.Editor.Handlers
             serializedObject.Update();
             prop = serializedObject.FindProperty(propertyPath);
 
-            return new JObject
+            var written = new JObject
             {
                 ["component"] = componentType,
-                ["property"] = BuildPropertyInfo(prop),
+                ["property"] = SerializedValues.Describe(prop),
                 ["written"] = true
             };
+
+            // The same key every other editing tool uses, and the one both docs and the skill
+            // already name. A second key for the same fact would have to be learnt twice.
+            return Tools.EditorNotes.SceneChange(written, serializedObject.targetObject);
         }
 
-        private static JObject BuildPropertyInfo(SerializedProperty prop)
-        {
-            return new JObject
-            {
-                ["path"] = prop.propertyPath,
-                ["type"] = prop.propertyType.ToString(),
-                ["value"] = GetPropertyValue(prop)
-            };
-        }
-
-        private static JToken GetPropertyValue(SerializedProperty prop)
-        {
-            switch (prop.propertyType)
-            {
-                case SerializedPropertyType.Integer:
-                    return prop.intValue;
-
-                case SerializedPropertyType.Float:
-                    return prop.floatValue;
-
-                case SerializedPropertyType.Boolean:
-                    return prop.boolValue;
-
-                case SerializedPropertyType.String:
-                    return prop.stringValue;
-
-                case SerializedPropertyType.Enum:
-                    var enumNames = prop.enumDisplayNames;
-                    var enumIndex = prop.enumValueIndex;
-                    return new JObject
-                    {
-                        ["index"] = enumIndex,
-                        ["name"] = enumIndex >= 0 && enumIndex < enumNames.Length
-                            ? enumNames[enumIndex]
-                            : "Unknown"
-                    };
-
-                case SerializedPropertyType.Vector2:
-                    var v2 = prop.vector2Value;
-                    return new JObject { ["x"] = v2.x, ["y"] = v2.y };
-
-                case SerializedPropertyType.Vector3:
-                    var v3 = prop.vector3Value;
-                    return new JObject { ["x"] = v3.x, ["y"] = v3.y, ["z"] = v3.z };
-
-                case SerializedPropertyType.Vector4:
-                    var v4 = prop.vector4Value;
-                    return new JObject { ["x"] = v4.x, ["y"] = v4.y, ["z"] = v4.z, ["w"] = v4.w };
-
-                case SerializedPropertyType.Color:
-                    var c = prop.colorValue;
-                    return new JObject { ["r"] = c.r, ["g"] = c.g, ["b"] = c.b, ["a"] = c.a };
-
-                case SerializedPropertyType.Quaternion:
-                    var q = prop.quaternionValue;
-                    return new JObject { ["x"] = q.x, ["y"] = q.y, ["z"] = q.z, ["w"] = q.w };
-
-                case SerializedPropertyType.Rect:
-                    var r = prop.rectValue;
-                    return new JObject
-                    {
-                        ["x"] = r.x, ["y"] = r.y, ["width"] = r.width, ["height"] = r.height
-                    };
-
-                case SerializedPropertyType.Bounds:
-                    var b = prop.boundsValue;
-                    return new JObject
-                    {
-                        ["center"] = new JObject
-                        {
-                            ["x"] = b.center.x, ["y"] = b.center.y, ["z"] = b.center.z
-                        },
-                        ["size"] = new JObject
-                        {
-                            ["x"] = b.size.x, ["y"] = b.size.y, ["z"] = b.size.z
-                        }
-                    };
-
-                case SerializedPropertyType.ObjectReference:
-                    var objRef = prop.objectReferenceValue;
-                    return new JObject
-                    {
-                        ["instanceId"] = EntityIdCompat.WireObjectReferenceId(prop),
-                        ["name"] = objRef != null ? objRef.name : null,
-                        ["type"] = objRef != null ? objRef.GetType().Name : null
-                    };
-
-                case SerializedPropertyType.ArraySize:
-                    return prop.intValue;
-
-                default:
-                    return new JObject { ["type"] = prop.propertyType.ToString() };
-            }
-        }
-
-        private static string SetPropertyValue(SerializedProperty prop, JToken value)
-        {
-            switch (prop.propertyType)
-            {
-                case SerializedPropertyType.Integer:
-                    prop.intValue = value.Value<int>();
-                    return null;
-
-                case SerializedPropertyType.Float:
-                    prop.floatValue = value.Value<float>();
-                    return null;
-
-                case SerializedPropertyType.Boolean:
-                    prop.boolValue = value.Value<bool>();
-                    return null;
-
-                case SerializedPropertyType.String:
-                    prop.stringValue = value.Value<string>();
-                    return null;
-
-                case SerializedPropertyType.Enum:
-                    if (value.Type == JTokenType.Integer)
-                    {
-                        prop.enumValueIndex = value.Value<int>();
-                    }
-                    else
-                    {
-                        var name = value.Value<string>();
-                        var names = prop.enumDisplayNames;
-                        var found = false;
-                        for (var i = 0; i < names.Length; i++)
-                        {
-                            if (string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
-                            {
-                                prop.enumValueIndex = i;
-                                found = true;
-                                break;
-                            }
-                        }
-                        if (!found)
-                        {
-                            return $"Enum value '{name}' not found. Valid values: {string.Join(", ", names)}";
-                        }
-                    }
-                    return null;
-
-                case SerializedPropertyType.Vector2:
-                    prop.vector2Value = new Vector2(
-                        value["x"].Value<float>(),
-                        value["y"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Vector3:
-                    prop.vector3Value = new Vector3(
-                        value["x"].Value<float>(),
-                        value["y"].Value<float>(),
-                        value["z"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Vector4:
-                    prop.vector4Value = new Vector4(
-                        value["x"].Value<float>(),
-                        value["y"].Value<float>(),
-                        value["z"].Value<float>(),
-                        value["w"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Color:
-                    prop.colorValue = new Color(
-                        value["r"].Value<float>(),
-                        value["g"].Value<float>(),
-                        value["b"].Value<float>(),
-                        value["a"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Quaternion:
-                    prop.quaternionValue = new Quaternion(
-                        value["x"].Value<float>(),
-                        value["y"].Value<float>(),
-                        value["z"].Value<float>(),
-                        value["w"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Rect:
-                    prop.rectValue = new Rect(
-                        value["x"].Value<float>(),
-                        value["y"].Value<float>(),
-                        value["width"].Value<float>(),
-                        value["height"].Value<float>());
-                    return null;
-
-                case SerializedPropertyType.Bounds:
-                    prop.boundsValue = new Bounds(
-                        new Vector3(
-                            value["center"]["x"].Value<float>(),
-                            value["center"]["y"].Value<float>(),
-                            value["center"]["z"].Value<float>()),
-                        new Vector3(
-                            value["size"]["x"].Value<float>(),
-                            value["size"]["y"].Value<float>(),
-                            value["size"]["z"].Value<float>()));
-                    return null;
-
-                case SerializedPropertyType.ObjectReference:
-                    return "Writing ObjectReference is not supported";
-
-                default:
-                    return $"Writing property type '{prop.propertyType}' is not supported";
-            }
-        }
     }
 }

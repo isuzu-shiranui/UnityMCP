@@ -190,6 +190,47 @@ public sealed class McpStdioBridgeTests
         return Drive(() => server.Descriptor(), script);
     }
 
+    [Fact]
+    public async Task GroupsNarrowWhatTheClientIsOffered()
+    {
+        // The endpoint has always taken ?group=; a client that is not given it loads every tool
+        // and pays for the descriptions on every request of the conversation.
+        using var server = new FakeUnityServer();
+        server.Enqueue(new ScriptedResponse(200, """{"jsonrpc":"2.0","id":2,"result":{}}"""));
+
+        var input = new GatedReader();
+        var output = new RecordingWriter();
+        using var bridge = new McpStdioBridge(
+            input, output, () => server.Descriptor(), groups: "diagnostics,rendering");
+
+        var run = bridge.RunAsync();
+        input.Send(ToolsList);
+        await RecordingWriter.WaitFor(() => output.Lines.Count == 1, "the reply");
+        input.CloseInput();
+        await run;
+
+        Assert.Contains("group=diagnostics%2Crendering", server.Requests[0].Path);
+    }
+
+    [Fact]
+    public async Task WithoutGroupsTheUrlIsLeftAlone()
+    {
+        using var server = new FakeUnityServer();
+        server.Enqueue(new ScriptedResponse(200, """{"jsonrpc":"2.0","id":2,"result":{}}"""));
+
+        var input = new GatedReader();
+        var output = new RecordingWriter();
+        using var bridge = new McpStdioBridge(input, output, () => server.Descriptor());
+
+        var run = bridge.RunAsync();
+        input.Send(ToolsList);
+        await RecordingWriter.WaitFor(() => output.Lines.Count == 1, "the reply");
+        input.CloseInput();
+        await run;
+
+        Assert.DoesNotContain("group=", server.Requests[0].Path);
+    }
+
     private static async Task<IReadOnlyList<string>> Drive(Func<InstanceDescriptor> resolve, Action<GatedReader> script)
     {
         var input = new GatedReader();

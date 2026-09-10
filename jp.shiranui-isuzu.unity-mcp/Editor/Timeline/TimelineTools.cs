@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -210,7 +210,7 @@ namespace UnityMCP.Editor.Timeline
 
             var tracks = new JArray();
 
-            foreach (var t in timeline.GetOutputTracks())
+            foreach (var t in TimelineResolve.AllTracks(timeline))
             {
                 if (!string.IsNullOrWhiteSpace(trackFilter) &&
                     t.name.IndexOf(trackFilter, StringComparison.OrdinalIgnoreCase) < 0)
@@ -234,6 +234,13 @@ namespace UnityMCP.Editor.Timeline
                     // reason "the animation does nothing", and it does not show in the window.
                     ["binding"] = binding == null ? null : (JToken)DescribeBinding(binding),
                 };
+
+                // Only for a track that sits under another. A track nested under an AnimationTrack
+                // overrides it rather than playing beside it, which changes what a clip on it does.
+                if (t.parent is TrackAsset owner)
+                {
+                    entry["parentTrack"] = owner.name;
+                }
 
                 if (includeClips || IsControlTrack(t))
                 {

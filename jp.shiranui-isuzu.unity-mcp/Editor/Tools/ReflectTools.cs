@@ -49,11 +49,27 @@ namespace UnityMCP.Editor.Tools
             "Use this instead of execute_code when the question is what a value currently is. " +
             "Reading a member runs its getter, and a few Unity getters change the scene as a side " +
             "effect: Renderer.material and MeshFilter.mesh each replace the shared asset with a " +
-            "fresh instance. Read sharedMaterial and sharedMesh instead when you only want to look.",
+            "fresh instance. Read sharedMaterial and sharedMesh instead when you only want to look. " +
+            "A Collider's 'bounds' is the physics engine's copy of the box and lags the Transform " +
+            "until physics next runs, so this syncs before reading one; Renderer.bounds never " +
+            "lagged and is unaffected.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Read(
-            [McpArg("path", "Type name or instance root, then members: 'Namespace.Type/field/other[3]', '@selection/transform/position'.", Required = true)]
+            // Not Required: either this or 'paths' answers the call, and the framework's own
+            // check runs before the one that knows that.
+            [McpArg("path", "Type name or instance root, then members: 'Namespace.Type/field/other[3]', '@selection/transform/position'. Several at once go in 'paths'.")]
             string path = null,
+            [McpArg("paths", "Read several paths in one call, up to 50, instead of 'path'. The " +
+                             "reply keys each result by the path it was asked for, and one that " +
+                             "cannot be read carries its own 'error' rather than failing the " +
+                             "others. Every other argument applies to all of them. One path at a " +
+                             "time is a round trip each: three objects' bounds cost fourteen " +
+                             "calls once. " +
+                             "This is also how to ask what a set of objects has in common — " +
+                             "reading 360 renderers' sharedMaterial in batches of 50 took 8 calls " +
+                             "and told 301 materials apart by the instanceId each reference " +
+                             "carries, where a material tool asked per object took 361.")]
+            string[] paths = null,
             [McpArg("depth", "How deep to serialise nested objects.")]
             int depth = 2,
             [McpArg("max_items", "Maximum elements to include from any one collection.")]
@@ -61,14 +77,97 @@ namespace UnityMCP.Editor.Tools
             [McpArg("members", "Instead of a value, list the members available at this path.")]
             bool members = false)
         {
-            if (string.IsNullOrWhiteSpace(path))
+            var many = paths != null && paths.Length > 0;
+
+            if (many && !string.IsNullOrWhiteSpace(path))
             {
                 throw new McpToolException(
                     "invalid_params",
-                    "'path' is required, e.g. 'UnityEngine.QualitySettings/renderPipeline'.");
+                    "'path' and 'paths' are alternatives; pass one of them.");
             }
 
+            if (!many)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        "'path' is required, e.g. 'UnityEngine.QualitySettings/renderPipeline'. "
+                        + "Several at once go in 'paths'.");
+                }
+
+                return One(path, depth, maxItems, members);
+            }
+
+            if (paths.Length > MaxPaths)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'paths' takes at most {MaxPaths} at a time; {paths.Length} were given. Each "
+                    + "one runs a getter on the Editor's main thread.");
+            }
+
+            var reads = new JObject();
+
+            foreach (var one in paths)
+            {
+                // A path that cannot be read is that entry's answer rather than the call's. The
+                // others were asked for in the same breath and are still worth having, which is
+                // the shape a probe definition already returns.
+                try
+                {
+                    reads[one] = One(one, depth, maxItems, members);
+                }
+                catch (McpToolException ex)
+                {
+                    reads[one] = new JObject { ["path"] = one, ["error"] = ex.Message };
+                }
+            }
+
+            return new JObject { ["reads"] = reads };
+        }
+
+        /// <summary>The most paths one call will walk.</summary>
+        private const int MaxPaths = 50;
+
+        /// <summary>The same batched read other tools reach for after changing something.</summary>
+        /// <remarks>
+        /// Shared rather than duplicated, so a path means the same thing wherever it is written
+        /// and one that cannot be read costs its own entry rather than the whole reply.
+        /// </remarks>
+        internal static JObject Many(string[] paths, int depth = 2, int maxItems = 20)
+        {
+            var reads = new JObject();
+
+            foreach (var one in paths)
+            {
+                try
+                {
+                    reads[one] = One(one, depth, maxItems, members: false);
+                }
+                catch (McpToolException ex)
+                {
+                    reads[one] = new JObject { ["path"] = one, ["error"] = ex.Message };
+                }
+            }
+
+            return reads;
+        }
+
+        /// <summary>One path, resolved and serialised.</summary>
+        private static JObject One(string path, int depth, int maxItems, bool members)
+        {
             var current = ResolvePath(path, out var type, out var walked);
+
+            // The physics engine holds its own copy of every collider's box and does not take a
+            // Transform change until the next physics step. Nothing steps in the Editor, so a
+            // moved or rescaled collider answers with the box it had before the move, and nothing
+            // in the reply says so. Renderer.bounds does not lag this way.
+            if (current is Bounds && walked.EndsWith("/bounds", StringComparison.Ordinal))
+            {
+                Physics.SyncTransforms();
+                current = ResolvePath(path, out type, out walked);
+            }
 
             if (members)
             {
@@ -387,6 +486,34 @@ namespace UnityMCP.Editor.Tools
             return result;
         }
 
+        /// <summary>Whether an object of this name is in a loaded scene.</summary>
+        /// <remarks>
+        /// Only reached from a failure, so walking every root costs nothing anyone waits on. It
+        /// includes objects that are switched off, because one of those is exactly what someone
+        /// is reaching for when they go looking with reflect_read.
+        /// </remarks>
+        private static bool InScene(string name)
+        {
+            try
+            {
+                foreach (var transform in UnityEngine.Resources.FindObjectsOfTypeAll<Transform>())
+                {
+                    if (transform != null
+                        && transform.gameObject.scene.IsValid()
+                        && string.Equals(transform.name, name, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Nothing to add to the message, which is all this decides.
+            }
+
+            return false;
+        }
+
         internal static Type ResolveType(Segment segment)
         {
             var candidates = AppDomain.CurrentDomain.GetAssemblies()
@@ -397,9 +524,17 @@ namespace UnityMCP.Editor.Tools
 
             if (candidates.Length == 0)
             {
+                // A first segment with no prefix is read as a type name. Someone who wrote a
+                // hierarchy path instead was sent to reflect_find_type to search for a type that
+                // was never going to exist, three separate times, so the object they did name is
+                // looked for before that advice is given.
                 throw new McpToolException(
                     "not_found",
-                    $"No loaded type named '{segment.Name}'. reflect_find_type will search for it.");
+                    InScene(segment.Name)
+                        ? $"'{segment.Name}' is an object in the scene, not a type. Mark a "
+                          + $"hierarchy path as one: '@scene:/{segment.Name}/...'. A path with no "
+                          + "prefix names a type."
+                        : $"No loaded type named '{segment.Name}'. reflect_find_type will search for it.");
             }
 
             if (candidates.Length > 1 && candidates[0].FullName != segment.Name)
@@ -611,6 +746,22 @@ namespace UnityMCP.Editor.Tools
             if (value is Vector3 v3) return new JObject { ["x"] = v3.x, ["y"] = v3.y, ["z"] = v3.z };
             if (value is Vector4 v4) return new JObject { ["x"] = v4.x, ["y"] = v4.y, ["z"] = v4.z, ["w"] = v4.w };
             if (value is Color c) return new JObject { ["r"] = c.r, ["g"] = c.g, ["b"] = c.b, ["a"] = c.a };
+
+            // Bounds stores a half-size and calls it m_Extents. Reflected field by field that is
+            // what comes back, and a caller comparing it against a BoxCollider's 'size' — which is
+            // a full size — is out by two with both numbers looking reasonable. The names the API
+            // uses are given instead, size among them.
+            if (value is Bounds bounds)
+            {
+                return new JObject
+                {
+                    ["center"] = Serialize(bounds.center, depth, maxItems, ref budget),
+                    ["size"] = Serialize(bounds.size, depth, maxItems, ref budget),
+                    ["extents"] = Serialize(bounds.extents, depth, maxItems, ref budget),
+                    ["min"] = Serialize(bounds.min, depth, maxItems, ref budget),
+                    ["max"] = Serialize(bounds.max, depth, maxItems, ref budget),
+                };
+            }
 
             if (value is Matrix4x4 matrix)
             {

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Agents;
@@ -70,6 +70,8 @@ public static class DoctorCommand
         }
 
         context.Out.WriteLine();
+        ReportRelease(context);
+
         context.Out.WriteLine("Running Editors");
 
         if (running.Count == 0)
@@ -87,10 +89,184 @@ public static class DoctorCommand
                     $"    warning: this Editor wanted port {descriptor.PreferredPort} and took {descriptor.Port}. " +
                     "Another instance holds the preferred port, so a config written for it points somewhere else.");
             }
+
+            var skew = Skew(descriptor.ProtocolVersion, Program.Version());
+
+            if (skew != null)
+            {
+                context.Out.WriteLine("    " + skew);
+
+                var embedded = EmbeddedCopy(descriptor.ProjectPath);
+
+                if (embedded != null)
+                {
+                    context.Out.WriteLine("    " + embedded);
+                }
+            }
+
+            var samples = LeftBehindSamples(descriptor.ProjectPath);
+
+            if (samples != null)
+            {
+                context.Out.WriteLine("    " + samples);
+            }
         }
 
         // Always zero: doctor reports, and a report that fails the shell is a report nobody runs.
         return 0;
+    }
+
+    /// <summary>Says so when a newer release exists. Never installs one.</summary>
+    /// <remarks>
+    /// Nothing told anyone a release had happened, so an installation stayed where it was until
+    /// something broke. This says it and stops there: installing without being asked is what
+    /// turns a bad release into a broken machine, and 'upgrade --release' is the way back when
+    /// one turns out to be.
+    /// </remarks>
+    private static void ReportRelease(CommandContext context)
+    {
+        string? tag;
+
+        try
+        {
+            tag = ReleaseCheck.LatestTag(Fetch, context.Cancellation).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (tag is null || !ReleaseCheck.IsNewer(tag, Program.Version()))
+        {
+            return;
+        }
+
+        context.Out.WriteLine("Release");
+        context.Out.WriteLine(
+            $"  {tag} is out and this is {Program.Version()}. "
+            + "Install it with 'isuzu-unity-cli upgrade', and update the Unity package to match. "
+            + "'upgrade --release <tag>' goes back if one turns out to be broken.");
+        context.Out.WriteLine();
+    }
+
+    private static async Task<string> Fetch(CancellationToken cancellation)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        // GitHub refuses a request with no User-Agent, and the refusal arrives as a 403 that
+        // reads like a permission problem.
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("isuzu-unity-cli/" + Program.Version());
+
+        return await http.GetStringAsync(ReleaseCheck.LatestUrl, cancellation);
+    }
+
+    /// <summary>
+    /// Where a copy of the package sits inside the project, which is the copy the Editor loads.
+    /// </summary>
+    /// <remarks>
+    /// A folder under Packages/ wins over the manifest entry of the same name, and Unity says
+    /// nothing about it. Told to update through the Package Manager, someone with an embedded
+    /// copy changes the manifest, sees the version stay where it was, and has no way to tell why.
+    /// </remarks>
+    public static string? EmbeddedCopy(string projectPath)
+    {
+        if (string.IsNullOrEmpty(projectPath))
+        {
+            return null;
+        }
+
+        // The descriptor names the Assets folder; the packages sit beside it.
+        var root = Path.GetDirectoryName(projectPath.TrimEnd('/', '\\'));
+
+        if (root == null)
+        {
+            return null;
+        }
+
+        var embedded = Path.Combine(root, "Packages", "jp.shiranui-isuzu.unity-mcp");
+        var manifest = Path.Combine(embedded, "package.json");
+
+        if (!File.Exists(manifest))
+        {
+            return null;
+        }
+
+        return $"an embedded copy at {embedded} is what this Editor loads. A folder under "
+               + "Packages/ wins over the manifest entry of the same name, so updating the "
+               + "manifest changes nothing until that folder is removed or replaced.";
+    }
+
+    /// <summary>
+    /// Samples an older version of the package imported, which it no longer ships.
+    /// </summary>
+    /// <remarks>
+    /// Importing a sample copies it into Assets/, where it stays through every later upgrade.
+    /// The 1.1.1 samples were written against an IMcpCommandHandler that no longer exists, so a
+    /// project carrying them stops compiling and Unity opens asking whether to enter Safe Mode —
+    /// with nothing on screen connecting that to a package update.
+    /// </remarks>
+    public static string? LeftBehindSamples(string projectPath)
+    {
+        if (string.IsNullOrEmpty(projectPath))
+        {
+            return null;
+        }
+
+        var samples = Path.Combine(projectPath, "Samples", "Unity MCP");
+
+        if (!Directory.Exists(samples))
+        {
+            return null;
+        }
+
+        var versions = Directory.GetDirectories(samples).Select(Path.GetFileName).ToArray();
+        var named = versions.Length == 0 ? "" : $" ({string.Join(", ", versions)})";
+
+        return $"samples from an older release are still at {samples}{named}. This package ships "
+               + "no samples now, and the ones it used to are written against APIs that are gone: "
+               + "left in place they stop the project compiling. Delete that folder.";
+    }
+
+    /// <summary>Says which side is behind when the package and this CLI disagree on the major.</summary>
+    /// <remarks>
+    /// The descriptor has carried protocolVersion all along and nothing compared it, so a CLI and
+    /// a package from different releases failed in whatever way the missing piece happened to
+    /// fail — a tool that is not there, an argument that is not read — with nothing pointing at
+    /// the version. Only the major is compared: within one, the two are meant to work together,
+    /// and a warning on every patch difference would be noise nobody reads.
+    /// </remarks>
+    public static string? Skew(string protocolVersion, string cliVersion)
+    {
+        if (!TryMajor(protocolVersion, out var editor) || !TryMajor(cliVersion, out var cli))
+        {
+            return null;
+        }
+
+        if (editor == cli)
+        {
+            return null;
+        }
+
+        return editor < cli
+            ? $"version skew: this Editor's package is {protocolVersion} and this CLI is "
+              + $"{cliVersion}. Update the package in the Unity Package Manager."
+            : $"version skew: this Editor's package is {protocolVersion} and this CLI is "
+              + $"{cliVersion}. Update the CLI with 'isuzu-unity-cli upgrade'.";
+    }
+
+    private static bool TryMajor(string version, out int major)
+    {
+        major = 0;
+
+        if (string.IsNullOrEmpty(version))
+        {
+            return false;
+        }
+
+        var dot = version.IndexOf('.');
+        var head = dot < 0 ? version : version.Substring(0, dot);
+
+        return int.TryParse(head, out major);
     }
 
     /// <summary>
@@ -244,6 +420,19 @@ public static class DoctorCommand
             {
                 context.Out.WriteLine($"  [stale]     {destination} (could not reinstall: {e.Message})");
             }
+        }
+
+        // Reported and not removed, even with --fix: this tool did not put it there, and what
+        // else a skills directory holds is the user's to decide.
+        foreach (var guide in directories
+            .Append(SkillInstaller.SharedSkillsDirectory)
+            .Distinct(StringComparer.Ordinal)
+            .SelectMany(SkillInstaller.ObsoleteGuides))
+        {
+            context.Out.WriteLine($"  [old guide] {guide}");
+            context.Out.WriteLine(
+                "    describes the HTTP interface this server replaced. Agents read it alongside "
+                + "the current guide; delete it");
         }
     }
 

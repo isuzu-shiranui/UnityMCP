@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -327,7 +327,7 @@ namespace McpCodeExecution
             }
             catch (TargetInvocationException tie)
             {
-                var inner = tie.InnerException ?? tie;
+                var inner = Unwrap(tie);
                 return new JObject { ["error"] = $"Runtime error: {inner.Message}" };
             }
             finally
@@ -364,6 +364,23 @@ namespace McpCodeExecution
         /// "System.Collections.Generic.List`1[UnityEngine.GameObject]", which tells the caller
         /// the type and nothing else.
         /// </remarks>
+        /// <summary>The exception that actually happened, past every layer of reflection.</summary>
+        /// <remarks>
+        /// Unwrapping once is not enough: a snippet reaches Unity's internals by reflection too,
+        /// so the reply read "Exception has been thrown by the target of an invocation" — the
+        /// wrapper's own message, which says nothing about what went wrong. The cause behind one
+        /// of those was a settings file that would not parse, and the inner exception named it.
+        /// </remarks>
+        private static Exception Unwrap(Exception e)
+        {
+            while (e is TargetInvocationException wrapper && wrapper.InnerException != null)
+            {
+                e = wrapper.InnerException;
+            }
+
+            return e;
+        }
+
         private static (JToken Token, string Note) DescribeReturnValue(object returnValue)
         {
             switch (returnValue)

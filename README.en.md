@@ -72,6 +72,8 @@ Then install the agent skill for Claude Code and Codex:
 isuzu-unity-cli setup
 ```
 
+MCP clients can also be registered from the Editor. Preferences > Unity MCP has a Setup checklist; when it says no MCP client points at this Editor, the Register button on that row runs `setup --mcp`. Once one does, the row names the configuration files it found.
+
 ## First commands
 
 The server starts when the Editor opens a project, and it publishes a descriptor file. The CLI reads that file, so you never type a port or a token.
@@ -114,7 +116,7 @@ Per-client snippets, the Claude Desktop stdio bridge and the protocol facts are 
 
 ## Tools
 
-The Editor publishes at most 88 tools. The nine Timeline entries and the two Recorder entries appear only when `com.unity.timeline` and `com.unity.recorder` are installed. `test_run` and `test_results` appear only when `com.unity.test-framework` is installed. A project with none of those packages publishes 75 tools.
+The Editor publishes at most 98 tools. The nine Timeline entries and the two Recorder entries appear only when `com.unity.timeline` and `com.unity.recorder` are installed. `test_run` and `test_results` appear only when `com.unity.test-framework` is installed. A project with none of those packages publishes 85 tools.
 
 The full list is in the [tool reference](docs/en/tools.md).
 
@@ -194,7 +196,7 @@ The conditions were a Core i9-14900KF, Windows 11 (10.0.26200), .NET 10.0.100 an
 
 ## Documentation
 
-- [Tool reference](docs/en/tools.md): all 88 tools, with the things to know before editing
+- [Tool reference](docs/en/tools.md): all 98 tools, with the things to know before editing
 - [Connecting MCP clients](docs/en/mcp-clients.md): per-client configuration, the Claude Desktop bridge, protocol facts
 - [CLI reference](docs/en/cli.md): every command, project selection, exit codes, what lands on your machine
 - [Defined tools](docs/en/defined-tools.md): `probe`, `script` and `sequence` tools from a JSON file

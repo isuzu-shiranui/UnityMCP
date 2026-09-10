@@ -231,7 +231,10 @@ namespace UnityMCP.Editor.Timeline
             var descendants = TimelineResolve.AllTracks(timeline)
                 .Where(t => t != trackAsset && IsUnder(t, trackAsset))
                 .ToList();
-            var clipCount = trackAsset.GetClips().Count();
+            // The whole subtree, because DeleteTrack takes the children with it. Counting
+            // only the named track put "clipsRemoved": 68 next to "tracksRemoved": 3 in the same
+            // reply, where the three tracks between them held 139.
+            var clipCount = descendants.Concat(new[] { trackAsset }).Sum(t => t.GetClips().Count());
 
             // DeleteTrack takes the whole subtree, so a locked track further down would be removed
             // without its lock ever being consulted. Checked before anything is touched.

@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -248,10 +249,12 @@ namespace UnityMCP.Editor.Core
 
                     var answered = WithoutInlineImage(outcome.Result, out var picture);
 
+                    // No structuredContent: no tool here declares an outputSchema, so a client has
+                    // nothing to validate it against, and the spec asks for the same JSON in a text
+                    // block regardless. Sending both put every reply in the model's context twice.
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
-                        ["content"] = ResultContent(answered, picture),
-                        ["structuredContent"] = answered,
+                        ["content"] = ResultContent(answered, picture, descriptor),
                     }));
 
                 case ToolCallOutcome.Kind.Failed:
@@ -268,23 +271,16 @@ namespace UnityMCP.Editor.Core
                         $"Call job_status with job_id \"{outcome.JobId}\" to fetch the result. " +
                         "Do not retry this call; the work is in progress and retrying would run it twice.";
 
-                    var structured = new JObject
-                    {
-                        ["state"] = "running",
-                        ["jobId"] = outcome.JobId,
-                    };
-
                     var notice = this.runningNotice?.Invoke();
+
                     if (notice != null)
                     {
                         text += " " + notice;
-                        structured["message"] = notice;
                     }
 
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
                         ["content"] = TextContent(text),
-                        ["structuredContent"] = structured,
                     }));
             }
         }
@@ -371,16 +367,24 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>The MCP content for a result whose picture has already been taken out.</summary>
-        private static JArray ResultContent(JObject describing, string image)
+        private static JArray ResultContent(JObject describing, string image, McpToolDescriptor descriptor)
         {
+            var text = describing.ToString(Formatting.None);
+            var refused = TooLarge(text, descriptor);
+
+            if (refused != null)
+            {
+                return TextContent(refused);
+            }
+
             if (image == null)
             {
-                return TextContent(describing.ToString(Formatting.None));
+                return TextContent(text);
             }
 
             return new JArray
             {
-                new JObject { ["type"] = "text", ["text"] = describing.ToString(Formatting.None) },
+                new JObject { ["type"] = "text", ["text"] = text },
                 new JObject
                 {
                     ["type"] = "image",
@@ -388,6 +392,48 @@ namespace UnityMCP.Editor.Core
                     ["mimeType"] = "image/png",
                 },
             };
+        }
+
+        /// <summary>
+        /// What to say instead of a reply past the size the tool declares, or null to send it.
+        /// </summary>
+        /// <remarks>
+        /// The size was a hint in <c>_meta</c> that nothing checked. A production scene answered
+        /// scene_browse_hierarchy with 893,153 characters against the 200,000 it declares, under
+        /// a <c>truncated</c> of false, which is most of a context window spent on one call that
+        /// says nothing was left out. Refusing costs the caller a round trip; sending costs it
+        /// the conversation.
+        /// </remarks>
+        internal static string TooLarge(string text, McpToolDescriptor descriptor)
+        {
+            var cap = descriptor?.MaxResultSizeChars ?? 0;
+
+            if (cap <= 0 || text.Length <= cap)
+            {
+                return null;
+            }
+
+            // JSON runs near 2.8 characters to the token, which is the number worth quoting: the
+            // caller is deciding whether to spend that much of what it has left.
+            var tokens = text.Length / 2.8;
+
+            // The tool's own optional arguments rather than a guess at them. Naming 'limit' and
+            // 'offset' to a tool that has neither is advice that cannot be followed, which is
+            // the same dead end as being told to update through a Package Manager that is not
+            // what loads the package.
+            var narrowing = descriptor.Parameters == null
+                ? null
+                : string.Join(", ", descriptor.Parameters
+                    .Where(p => !p.Required)
+                    .Select(p => "'" + p.Name + "'"));
+
+            var advice = string.IsNullOrEmpty(narrowing)
+                ? "This tool takes no arguments to narrow it by, so ask something narrower instead."
+                : $"Ask for less of it with one of this tool's own arguments: {narrowing}.";
+
+            return $"'{descriptor.Name}' answered with {text.Length:N0} characters, past the "
+                   + $"{cap:N0} it declares as its limit, so the reply was not sent: it would "
+                   + $"have cost roughly {tokens:N0} tokens. {advice}";
         }
 
         /// <summary>Whether the text is base64 of something that begins like a PNG.</summary>

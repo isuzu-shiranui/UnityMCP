@@ -1,4 +1,4 @@
-using UnityEditor;
+﻿using UnityEditor;
 using UnityEngine;
 
 namespace UnityMCP.Editor.Settings
@@ -59,6 +59,19 @@ namespace UnityMCP.Editor.Settings
         /// </summary>
         [SerializeField]
         public int uiLanguage;
+
+        /// <summary>
+        /// The tool groups a generated client configuration asks for, comma separated. Empty
+        /// means every tool.
+        /// </summary>
+        /// <remarks>
+        /// A client loads whatever the endpoint lists and pays for it on every request of the
+        /// conversation, so this is the one setting here that changes what a session costs
+        /// before it does anything: the full catalog is about 40,000 tokens and diagnostics
+        /// alone is about 9,500.
+        /// </remarks>
+        [SerializeField]
+        public string toolGroups = string.Empty;
 
         private const int CurrentSettingsVersion = 4;
 

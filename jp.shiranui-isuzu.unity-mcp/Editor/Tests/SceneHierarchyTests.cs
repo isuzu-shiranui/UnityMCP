@@ -1,4 +1,6 @@
-using NUnit.Framework;
+﻿using NUnit.Framework;
+using System.Linq;
+
 using Newtonsoft.Json.Linq;
 
 using UnityEngine;
@@ -51,6 +53,31 @@ namespace UnityMCP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(this.root);
                 this.root = null;
+            }
+        }
+
+        /// <summary>
+        /// A layer nobody named is still the answer to "why is this not drawn", so it has to be
+        /// identifiable. Reported as the empty string it said only "not Default".
+        /// </summary>
+        [Test]
+        public void AnUnnamedLayerIsReportedByItsNumber()
+        {
+            var go = new GameObject("UnnamedLayerObject") { layer = 31 };
+
+            try
+            {
+                var browsed = SceneHierarchy.Browse(ToolArgs.Of(("name", "UnnamedLayerObject")));
+
+                var node = ((JArray)browsed["scenes"])
+                    .SelectMany(scene => (JArray)scene["gameObjects"])
+                    .First(n => n["name"].ToString() == "UnnamedLayerObject");
+
+                Assert.That(node["layer"].Value<int>(), Is.EqualTo(31));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
             }
         }
 
@@ -290,15 +317,6 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
-        public void ASnapshotTheEditorNoLongerHoldsIsAnErrorRatherThanAnEmptyDiff()
-        {
-            var result = Since("snap-does-not-exist");
-
-            Assert.That(result["error"], Is.Not.Null);
-            Assert.That(result["added"], Is.Null, "an empty diff would read as a still scene");
-        }
-
-        [Test]
         public void ReorderingSiblingsIsAChangeRatherThanNothing()
         {
             // A path carries an index only where a sibling name repeats, so without the sibling
@@ -459,6 +477,23 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(result["error"], Is.Null);
             Assert.That(Count(result, "removed"), Is.Zero);
+        }
+
+        [Test]
+        public void AnExpiredSnapshotIsAnsweredWithTheTreeRatherThanARoundTrip()
+        {
+            // A snapshot goes on every domain reload, and the walk that answers the diff has
+            // already run by the time the miss is known. An error here costs a round trip for a
+            // reply the caller has to be given anyway.
+            var result = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("since", "snap-does-not-exist")));
+
+            Assert.That(result["error"], Is.Null);
+            Assert.That(result["scenes"], Is.Not.Null, "the tree stands in for the diff");
+            Assert.That(result["snapshotId"], Is.Not.Null, "and it can be diffed from next time");
+            Assert.That(result["sinceExpired"]?.ToString(), Is.EqualTo("snap-does-not-exist"),
+                "the reply has to say why it is a tree");
+            Assert.That(result["added"], Is.Null, "an empty diff would read as a still scene");
         }
 
         [Test]

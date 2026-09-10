@@ -45,6 +45,13 @@ namespace UnityMCP.Editor.Core
 #if UNITY_6000_5_OR_NEWER
             return EditorUtility.EntityIdToObject(UnityEngine.EntityId.FromULong((ulong)id));
 #else
+            // The cast wraps rather than fails, so an id 2^32 above a live one resolves to that
+            // live object and the caller is handed the wrong thing under a successful reply.
+            if (id < int.MinValue || id > int.MaxValue)
+            {
+                return null;
+            }
+
             return EditorUtility.InstanceIDToObject((int)id);
 #endif
         }
