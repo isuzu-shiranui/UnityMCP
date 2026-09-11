@@ -14,6 +14,7 @@ using UnityEngine.Rendering;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
+using UnityMCP.Editor.Handlers;
 
 namespace UnityMCP.Editor.Tools
 {
@@ -999,6 +1000,231 @@ namespace UnityMCP.Editor.Tools
             throw new McpToolException(
                 "invalid_params",
                 $"'{argumentName}' must be {{x,y,z,w}}, {{r,g,b,a}} or an array for this property type.");
+        }
+
+        /// <summary>Shaders examined by one call, before `limit` narrows what comes back.</summary>
+        private const int MaxShadersChecked = 200;
+
+        /// <summary>Materials named per shader. The count beside them is the whole number.</summary>
+        private const int MaxMaterialsNamed = 5;
+
+        [McpTool(
+            "shader_batching_check",
+            "Whether the SRP Batcher can keep a shader's material data on the GPU, and what stops " +
+            "it when it cannot. This is the answer to 'why are there still thousands of SetPass " +
+            "calls': one incompatible shader breaks the batch for everything drawn with it, and " +
+            "nothing in the Editor reports it outside the Shader Inspector, one shader at a time. " +
+            "The reason names the offending shader variable, which is what has to be moved or " +
+            "declared. Pass 'scope' as 'scene' to check everything the open scenes draw with, or " +
+            "name one shader or material. Only a scriptable render pipeline has a batcher to be " +
+            "compatible with, so this is refused on the built-in pipeline.",
+            Idempotency = McpIdempotency.Safe,
+            MaxResultSizeChars = 60000)]
+        public static JObject BatchingCheck(
+            [McpArg("path", "Asset path of a shader or a material, e.g. 'Assets/Art/Toon.shader'.")]
+            string path = null,
+            [McpArg("name", "Shader name as it appears in the Shader declaration, e.g. " +
+                            "'Universal Render Pipeline/Lit'.")]
+            string name = null,
+            [McpArg("object_path", "A scene object; every shader its renderers draw with is checked.")]
+            string objectPath = null,
+            [McpArg("instance_id", "Address that object by instance id instead.")]
+            long? instanceId = null,
+            [McpArg("scope", "'scene' checks every shader the open scenes draw with.")]
+            string scope = null,
+            [McpArg("incompatible_only", "Leave out the shaders that are already compatible.")]
+            bool incompatibleOnly = false,
+            [McpArg("limit", "How many shaders to report.")]
+            int limit = 50,
+            [McpArg("offset", "Where to start, for paging.")]
+            int offset = 0,
+            [McpArg("fields", "Comma-separated keys to keep on each row.")]
+            string fields = null)
+        {
+            // The arguments are judged before the pipeline is, so a malformed call is told what is
+            // wrong with it whether or not this project could have answered.
+            RequireOneSource(path, name, objectPath, instanceId, scope);
+            SrpBatcherCheck.RequireSupport();
+
+            var users = Sources(path, name, objectPath, instanceId, scope);
+            var shaders = new List<Shader>(users.Keys);
+            shaders.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+
+            var bounded = shaders.Count > MaxShadersChecked;
+
+            if (bounded)
+            {
+                shaders.RemoveRange(MaxShadersChecked, shaders.Count - MaxShadersChecked);
+            }
+
+            var rows = new List<JObject>();
+            var compatible = 0;
+            var incompatible = 0;
+
+            foreach (var shader in shaders)
+            {
+                var row = SrpBatcherCheck.Check(shader);
+
+                if (row["compatible"] is { } verdict && verdict.Value<bool>())
+                {
+                    compatible++;
+
+                    if (incompatibleOnly)
+                    {
+                        continue;
+                    }
+                }
+                else if (row["checked"] is { } ran && ran.Value<bool>())
+                {
+                    incompatible++;
+                }
+
+                var materials = users[shader];
+
+                if (materials.Count > 0)
+                {
+                    // One shader is routinely worn by a hundred materials, and listing them all
+                    // buries the sentence that says what to fix. The count is what sizes the
+                    // problem; the names are a sample to find it by.
+                    row["usedByCount"] = materials.Count;
+                    row["usedBy"] = new JArray(materials.Take(MaxMaterialsNamed));
+
+                    if (materials.Count > MaxMaterialsNamed)
+                    {
+                        row["usedBySample"] = true;
+                    }
+                }
+
+                rows.Add(row);
+            }
+
+            var result = ListResponseBuilder.Build(
+                rows, offset, limit, row => row,
+                ListResponseBuilder.ParseFieldsParam(fields), new[] { "shader" });
+
+            result["pipeline"] = GraphicsSettings.currentRenderPipeline.GetType().Name;
+            result["compatible"] = compatible;
+            result["incompatible"] = incompatible;
+
+            if (bounded)
+            {
+                result["note"] = $"Stopped after {MaxShadersChecked} shaders; the scene draws with more.";
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Checks that the call names exactly one set of shaders. Naming two is refused rather than
+        /// one being picked, because which one was used would not be visible in the reply.
+        /// </summary>
+        /// <exception cref="McpToolException"><c>invalid_params</c>.</exception>
+        internal static void RequireOneSource(
+            string path, string name, string objectPath, long? instanceId, string scope)
+        {
+            var given = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(path)) { given.Add("path"); }
+            if (!string.IsNullOrWhiteSpace(name)) { given.Add("name"); }
+            if (!string.IsNullOrWhiteSpace(objectPath) || instanceId.HasValue) { given.Add("object_path"); }
+            if (!string.IsNullOrWhiteSpace(scope)) { given.Add("scope"); }
+
+            if (given.Count == 0)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "Name what to check: 'path' for a shader or material asset, 'name' for a shader "
+                    + "by its declared name, 'object_path' for a scene object, or scope 'scene' for "
+                    + "everything the open scenes draw with.");
+            }
+
+            if (given.Count > 1)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{string.Join("' and '", given)}' name different sets of shaders; pass one.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(scope)
+                && !string.Equals(scope, "scene", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'scope' takes 'scene'; '{scope}' is not it.");
+            }
+        }
+
+        /// <summary>The shaders one call is about, each with the materials that brought it in.</summary>
+        private static Dictionary<Shader, SortedSet<string>> Sources(
+            string path, string name, string objectPath, long? instanceId, string scope)
+        {
+            var found = new Dictionary<Shader, SortedSet<string>>();
+
+            if (!string.IsNullOrWhiteSpace(scope))
+            {
+                return SrpBatcherCheck.InScene();
+            }
+
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                found[RequireShaderByName(name)] = new SortedSet<string>();
+                return found;
+            }
+
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                var normalised = path.Replace('\\', '/');
+                var shader = AssetDatabase.LoadAssetAtPath<Shader>(normalised);
+
+                if (shader != null)
+                {
+                    found[shader] = new SortedSet<string>();
+                    return found;
+                }
+
+                var material = RequireMaterial(path);
+
+                if (material.shader == null)
+                {
+                    throw new McpToolException(
+                        "not_found",
+                        $"The material at '{path}' has no shader assigned.");
+                }
+
+                found[material.shader] = new SortedSet<string> { material.name };
+                return found;
+            }
+
+            var go = ObjectResolve.Object(objectPath, instanceId);
+
+            foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
+            {
+                foreach (var material in renderer.sharedMaterials)
+                {
+                    if (material == null || material.shader == null)
+                    {
+                        continue;
+                    }
+
+                    if (!found.TryGetValue(material.shader, out var set))
+                    {
+                        set = new SortedSet<string>();
+                        found[material.shader] = set;
+                    }
+
+                    set.Add(material.name);
+                }
+            }
+
+            if (found.Count == 0)
+            {
+                throw new McpToolException(
+                    "not_found",
+                    $"Nothing under '{objectPath ?? instanceId.ToString()}' draws with a shader: it "
+                    + "has no Renderer, or every material slot is empty.");
+            }
+
+            return found;
         }
 
         private static Shader RequireShader(string path)

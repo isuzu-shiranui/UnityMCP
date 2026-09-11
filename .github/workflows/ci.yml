@@ -263,13 +263,13 @@ jobs:
               }
             }
 
-            // Timeline, Recorder and the test runner live in assemblies constrained on their
-            // packages, so a project without those packages publishes fewer tools. The prose
-            // quotes both numbers, and both are derived here rather than remembered.
+            // Timeline, Recorder, the test runner and the uGUI tool live in assemblies constrained
+            // on their packages, so a project without those packages publishes fewer tools. The
+            // prose quotes both numbers, and both are derived here rather than remembered.
             const gated = new Set();
             for (const f of walk(root)) {
               if (f.includes(path.sep + 'Tests' + path.sep)) continue;
-              const gatedArea = ['Timeline', 'Recorder', 'TestRunner']
+              const gatedArea = ['Timeline', 'Recorder', 'TestRunner', 'Ugui']
                 .some(a => f.includes(path.sep + a + path.sep));
               if (!gatedArea) continue;
               const src = fs.readFileSync(f, 'utf8');

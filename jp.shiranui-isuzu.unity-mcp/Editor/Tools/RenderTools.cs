@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -12,6 +13,7 @@ using UnityEngine.Rendering;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
+using UnityMCP.Editor.Handlers;
 
 namespace UnityMCP.Editor.Tools
 {
@@ -45,6 +47,392 @@ namespace UnityMCP.Editor.Tools
         /// scene keeps one per shot.
         /// </summary>
         private const int MaxCameras = 50;
+
+        /// <summary>Frames one call may sample. Beyond this the caller is waiting, not measuring.</summary>
+        private const int MaxProfiledFrames = 300;
+
+        /// <summary>Markers one call may name, each of which costs a recorder for the window.</summary>
+        private const int MaxMarkers = 20;
+
+        [McpTool(
+            "render_profile_frame",
+            "Where a frame's time and its garbage go, sampled over a window of frames. This is the " +
+            "answer to 'why is it slow': CPU total, main thread, render thread and GPU, each as a " +
+            "median and a worst frame, plus the bytes allocated per frame. Counts of draw calls " +
+            "and triangles are not here - render_stats reports the last frame's. Name markers to " +
+            "sample your own ProfilerMarkers alongside. The numbers are worth reading in play " +
+            "mode; in edit mode they describe the Editor drawing its own windows, and the reply " +
+            "says which it measured so one is not read as the other.",
+            Idempotency = McpIdempotency.Safe,
+            MaxResultSizeChars = 60000)]
+        public static object ProfileFrame(
+            [McpArg("frames", "How many frames to sample. A longer window smooths a spike out of " +
+                              "the median; the worst frame is reported either way.")]
+            int frames = 30,
+            [McpArg("markers", "ProfilerMarker names to sample as well, e.g. 'MySystem.Tick'.")]
+            string[] markers = null)
+        {
+            if (frames < 1 || frames > MaxProfiledFrames)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'frames' takes 1 to {MaxProfiledFrames}; {frames} is outside that. "
+                    + "A longer window is a longer wait, not a better measurement.");
+            }
+
+            if (markers != null && markers.Length > MaxMarkers)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'markers' takes at most {MaxMarkers}; {markers.Length} were given.");
+            }
+
+            return new DeferredToolResult(
+                FrameSequencer.Run(ProfileSequence(frames, markers), "render_profile_frame"));
+        }
+
+        private static IEnumerator<FrameStep> ProfileSequence(int frames, string[] markers)
+        {
+            var profiler = new FrameProfiler(frames, markers);
+
+            try
+            {
+                var missing = profiler.Unavailable();
+
+                // The recorders collect from the frame they start, so the window has to pass before
+                // anything is read; reading now returns a window of nothing.
+                for (var i = 0; i < frames; i++)
+                {
+                    yield return FrameStep.Wait();
+                }
+
+                var counters = profiler.Read();
+
+                var result = new JObject
+                {
+                    ["requestedFrames"] = frames,
+                    ["playing"] = EditorApplication.isPlaying,
+                    ["counters"] = counters,
+                };
+
+                var notes = new JArray();
+
+                if (!EditorApplication.isPlaying)
+                {
+                    notes.Add("Edit mode: these are the Editor's own frames, not the game's. "
+                        + "play_mode_play first for figures that describe the game.");
+                }
+
+                if (profiler.Silent.Count > 0)
+                {
+                    result["silent"] = new JArray(profiler.Silent);
+                    notes.Add("The frame timing manager reported nothing, so "
+                        + string.Join(", ", profiler.Silent) + " are left out rather than given as "
+                        + "zero. It needs Frame Timing Stats on in Player Settings"
+                        + (FrameProfiler.FrameTimingSettingOn ? " - it is on here" : " - it is off here")
+                        + ", and in the Editor that is necessary without being enough. A built "
+                        + "player is where these read true.");
+                }
+
+                if (missing.Count > 0)
+                {
+                    result["unavailable"] = new JArray(missing);
+                }
+
+                if (notes.Count > 0)
+                {
+                    result["notes"] = notes;
+                }
+
+                yield return FrameStep.Done(result);
+            }
+            finally
+            {
+                profiler.Dispose();
+            }
+        }
+
+        /// <summary>Objects one call may hide, each of which is resolved and walked for renderers.</summary>
+        private const int MaxHidden = 50;
+
+        /// <summary>Frames one call may let pass between changing the scene and capturing it.</summary>
+        private const int MaxSettleFrames = 60;
+
+        [McpTool(
+            "render_capture_ab",
+            "Capture the frame as it is, capture it again with the named objects hidden, and report "
+            + "what changed - together with how much changes on its own. Two captures of an "
+            + "unchanged scene are not identical: animation, water, particles and temporal "
+            + "anti-aliasing all move between frames, and a difference smaller than that movement "
+            + "means nothing. The reply reports the noise alongside the change so the two can be "
+            + "told apart, which looking at the two pictures cannot do. The objects are put back "
+            + "before the call answers, and also if it is cancelled or the domain reloads - which "
+            + "is the other reason to use this rather than hiding them from execute_code, where "
+            + "nothing restores them if the Editor stops.",
+            Idempotency = McpIdempotency.Unsafe,
+            MaxResultSizeChars = 60000)]
+        public static object CaptureAb(
+            [McpArg("hide", "Hierarchy paths of the objects to hide for the second capture. Every "
+                            + "Renderer on them and under them is switched off.", Required = true)]
+            string[] hide = null,
+            [McpArg("save_path_prefix", "Where the three PNGs go. '_before', '_repeat' and '_after' "
+                                        + "are appended. Required: three pictures inline would cost "
+                                        + "about as much as the rest of the session.", Required = true)]
+            string savePathPrefix = null,
+            [McpArg("view", "'game' renders through a scene camera, 'scene' through the scene view's.")]
+            string view = "game",
+            [McpArg("camera", "Path or name of the camera to render through. Defaults to the main one.")]
+            string camera = null,
+            [McpArg("max_size", "Longest edge, when width and height are not given.")]
+            int maxSize = 1024,
+            [McpArg("width", "Width to capture at.")]
+            int? width = null,
+            [McpArg("height", "Height to capture at.")]
+            int? height = null,
+            [McpArg("settle_frames", "Editor frames to let pass between captures. Anything driven by "
+                                     + "a coroutine, a simulation or a temporal effect needs at least "
+                                     + "a frame to catch up, and it is also the window the noise is "
+                                     + "measured over, so it cannot be zero.")]
+            int settleFrames = 2,
+            [McpArg("threshold", "Largest per-channel difference, 0-255, at or below which a pixel "
+                                 + "counts as unchanged.")]
+            int threshold = 2,
+            [McpArg("grid", "Report the difference over a grid this many cells across. Clamped to 1-32.")]
+            int grid = 8)
+        {
+            if (hide == null || hide.Length == 0)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'hide' takes the hierarchy paths of the objects to switch off for the second "
+                    + "capture. With none there is no second capture to make, and capture_screenshot "
+                    + "is what takes a single picture.");
+            }
+
+            if (hide.Length > MaxHidden)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'hide' takes at most {MaxHidden} objects; {hide.Length} were given.");
+            }
+
+            if (string.IsNullOrWhiteSpace(savePathPrefix))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'save_path_prefix' is where the three PNGs go, for example "
+                    + "'Temp/foam'. They are not returned inline because three pictures in one "
+                    + "reply cost more than the answer is worth.");
+            }
+
+            if (settleFrames < 1 || settleFrames > MaxSettleFrames)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'settle_frames' takes 1 to {MaxSettleFrames}; {settleFrames} is outside that. "
+                    + "At zero the two captures of the unchanged scene are taken in the same frame, "
+                    + "so they always match and the noise reads as none whatever the scene is doing.");
+            }
+
+            // Resolved before the sequence starts so an unknown path is refused in this reply
+            // rather than a frame later, where it arrives as a failed job.
+            var renderers = Hidden(hide);
+
+            return new DeferredToolResult(
+                FrameSequencer.Run(
+                    AbSequence(renderers, savePathPrefix, view, camera, maxSize, width, height, settleFrames, threshold, grid),
+                    "render_capture_ab"));
+        }
+
+        /// <summary>Every Renderer on the named objects and under them.</summary>
+        private static Renderer[] Hidden(string[] paths)
+        {
+            var found = new List<Renderer>();
+
+            foreach (var path in paths)
+            {
+                var target = ObjectResolve.Object(path, null, "hide", null);
+
+                foreach (var renderer in target.GetComponentsInChildren<Renderer>(true))
+                {
+                    if (!found.Contains(renderer))
+                    {
+                        found.Add(renderer);
+                    }
+                }
+            }
+
+            if (found.Count == 0)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "None of the objects in 'hide' carries a Renderer, on itself or under it, so "
+                    + "hiding them would change nothing. Name the object that draws, which "
+                    + "scene_browse_hierarchy reports with its components.");
+            }
+
+            return found.ToArray();
+        }
+
+        private static IEnumerator<FrameStep> AbSequence(
+            Renderer[] renderers, string prefix, string view, string camera, int maxSize,
+            int? width, int? height, int settleFrames, int threshold, int grid)
+        {
+            var restore = new List<KeyValuePair<Renderer, bool>>();
+
+            try
+            {
+                var before = Shoot(prefix + "_before.png", view, camera, maxSize, width, height);
+
+                for (var i = 0; i < settleFrames; i++)
+                {
+                    yield return FrameStep.Wait();
+                }
+
+                var repeat = Shoot(prefix + "_repeat.png", view, camera, maxSize, width, height);
+
+                Hide(renderers, restore);
+
+                for (var i = 0; i < settleFrames; i++)
+                {
+                    yield return FrameStep.Wait();
+                }
+
+                var after = Shoot(prefix + "_after.png", view, camera, maxSize, width, height);
+
+                // Both pairs are the same number of frames apart, so the two numbers are
+                // comparable. Measuring the change against the first capture instead would span
+                // twice the window and count twice the movement as change.
+                var noise = Compare(before, repeat, threshold, grid);
+                var change = Compare(repeat, after, threshold, grid);
+
+                var noisePixels = (long)noise["changedPixels"];
+                var changePixels = (long)change["changedPixels"];
+
+                var result = new JObject
+                {
+                    ["before"] = before,
+                    ["repeat"] = repeat,
+                    ["after"] = after,
+                    ["hiddenRenderers"] = renderers.Length,
+                    ["noise"] = noise,
+                    ["change"] = change,
+                    ["measuredOver"] = $"{settleFrames} frame(s); noise is before against repeat, "
+                                       + "change is repeat against after",
+                    ["changeOverNoise"] = Math.Round((double)changePixels / Math.Max(1L, noisePixels), 2),
+                };
+
+                if (changePixels <= noisePixels)
+                {
+                    result["note"] = "Hiding these objects changed no more of the picture than two "
+                                     + "captures of the unchanged scene differ by, so this answers "
+                                     + "nothing about them. Something in the scene is moving between "
+                                     + "frames; stop it, or compare a part of the picture the "
+                                     + "movement does not reach.";
+                }
+
+                yield return FrameStep.Done(result);
+            }
+            finally
+            {
+                Show(restore);
+            }
+        }
+
+        /// <summary>
+        /// Switches every renderer off, recording what each one was.
+        /// </summary>
+        /// <remarks>
+        /// The renderers are resolved a frame or more before this runs, so one of them can already
+        /// be gone by the time it does.
+        /// </remarks>
+        internal static void Hide(Renderer[] renderers, List<KeyValuePair<Renderer, bool>> restore)
+        {
+            foreach (var renderer in renderers)
+            {
+                if (renderer == null)
+                {
+                    continue;
+                }
+
+                restore.Add(new KeyValuePair<Renderer, bool>(renderer, renderer.enabled));
+                renderer.enabled = false;
+            }
+        }
+
+        /// <summary>
+        /// Puts back exactly what <see cref="Hide"/> recorded.
+        /// </summary>
+        /// <remarks>
+        /// Switching everything back on instead would turn on a renderer the scene had off, which
+        /// is a change to the project that outlives the call and is not undoable. A renderer
+        /// destroyed while the call was in flight compares equal to null and is skipped.
+        /// </remarks>
+        internal static void Show(List<KeyValuePair<Renderer, bool>> restore)
+        {
+            foreach (var entry in restore)
+            {
+                if (entry.Key != null)
+                {
+                    entry.Key.enabled = entry.Value;
+                }
+            }
+        }
+
+        /// <summary>Takes one capture and answers with the path it was written to.</summary>
+        private static string Shoot(string path, string view, string camera, int maxSize, int? width, int? height)
+        {
+            var shot = ScreenshotCapture.Capture(ToolArgs.Of(
+                ("view", view),
+                ("camera", camera),
+                ("maxSize", maxSize),
+                ("width", width),
+                ("height", height),
+                ("savePath", path)));
+
+            // The camera-based path reports a missing camera or an unusable size as a key on an
+            // otherwise successful reply; unread, it would come back as a comparison of two files
+            // that were never written.
+            if (shot["error"] != null)
+            {
+                throw new McpToolException("tool_failed", (string)shot["error"], 500);
+            }
+
+            return (string)shot["path"];
+        }
+
+        [McpTool(
+            "render_capture_buffer",
+            "Save one of the render pipeline's intermediate targets as a picture: the depth, "
+            + "normals, motion or opaque texture. This is what answers 'what does the effect "
+            + "actually see', which the finished frame cannot show - a foam or fog or outline pass "
+            + "reads the depth texture, and that is not always the silhouette on screen. Depth "
+            + "comes back as grey shading plus the nearest and farthest distance in metres, so a "
+            + "pixel can be read as a number. A buffer the pipeline is not producing is refused by "
+            + "name, with the setting that turns it on; captured anyway it would be a picture of "
+            + "zeroes, which for depth reads as an empty scene. Scriptable pipelines only.",
+            Idempotency = McpIdempotency.Unsafe)]
+        public static JObject CaptureBuffer(
+            [McpArg("buffer", "Which target: depth, normals, motion or opaque.", Required = true)]
+            string buffer = null,
+            [McpArg("view", "'game' renders through a scene camera, 'scene' through the scene view's.")]
+            string view = "game",
+            [McpArg("camera", "Path or name of the camera to render through. Defaults to the main one.")]
+            string camera = null,
+            [McpArg("max_size", "Longest edge of the picture, when width and height are not given. "
+                                + "The capture is always made at the size the pipeline chose, which "
+                                + "the reply reports as capturedAt when it differs.")]
+            int maxSize = 1024,
+            [McpArg("width", "Width of the picture.")]
+            int? width = null,
+            [McpArg("height", "Height of the picture.")]
+            int? height = null,
+            [McpArg("save_path", "Write the PNG here instead of returning it inline. Pass the path "
+                                 + "it answers with to render_compare.")]
+            string savePath = null)
+        {
+            return CameraBufferCapture.Capture(buffer, view, camera, maxSize, width, height, savePath);
+        }
 
         [McpTool(
             "render_compare",

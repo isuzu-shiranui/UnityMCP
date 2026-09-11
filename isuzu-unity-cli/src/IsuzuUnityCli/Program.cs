@@ -125,7 +125,7 @@ public static class Program
                 "timeout", "logs", "raw",
             },
             ["health"] = new[] { "project", "raw" },
-            ["jobs"] = new[] { "project", "raw" },
+            ["jobs"] = new[] { "project", "raw", "wait", "timeout" },
             ["mcp-stdio"] = new[] { "project", "group" },
             ["setup"] = new[] { "agent", "client", "mcp", "scope", "no-skill", "project" },
             ["doctor"] = new[] { "fix" },
@@ -144,7 +144,8 @@ public static class Program
             {
                 "tools" => new[] { "project", "group" },
                 "verify" => new[] { "project", "test-mode", "assembly", "filter", "category", "timeout", "logs" },
-                "health" or "jobs" => new[] { "project" },
+                "health" => new[] { "project" },
+                "jobs" => new[] { "project", "timeout" },
                 "mcp-stdio" => new[] { "project", "group" },
                 "setup" => new[] { "agent", "client", "scope", "project" },
                 "upgrade" => new[] { "release" },

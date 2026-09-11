@@ -72,6 +72,7 @@ public static class ArgParser
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
         {
             ["verify"] = new HashSet<string>(StringComparer.Ordinal) { "test", "no-compile" },
+            ["jobs"] = new HashSet<string>(StringComparer.Ordinal) { "wait" },
             ["setup"] = new HashSet<string>(StringComparer.Ordinal) { "mcp", "no-skill" },
             ["uninstall"] = new HashSet<string>(StringComparer.Ordinal) { "yes", "no-skill" },
             ["doctor"] = new HashSet<string>(StringComparer.Ordinal) { "fix" },

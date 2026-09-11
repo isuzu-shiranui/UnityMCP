@@ -16,7 +16,7 @@ public static class Usage
           verify                         Recompile, optionally run the tests, read the console,
                                          and answer with one exit code
           health                         Show the Editor's server status
-          jobs [id]                      List background jobs, or show one
+          jobs [id]                      List background jobs, show one, or wait for one to end
           mcp-stdio                      Bridge stdio to the Editor's MCP endpoint (for MCP clients)
 
           setup                          Register with an MCP client and install the skill
@@ -64,6 +64,16 @@ public static class Usage
           Exit codes: 0 verified, 1 compile or tests failed, 2 an option is wrong, 3 no
           Editor or an ambiguous one, 4 timed out. Console errors are reported but never
           fail the run, because entries from earlier in the session linger.
+
+        JOBS OPTIONS
+          --wait                         Poll until the job ends and print only its last answer.
+                                         Needs an id. What holds the Editor up is reported on
+                                         stderr while the wait lasts
+          --timeout <seconds>            Give up waiting after this long; defaults to 300. The job
+                                         itself keeps running in the Editor
+
+          Exit codes: 0 the job completed, 1 it failed or was cancelled, 2 an option is wrong,
+          3 no Editor or an ambiguous one, 4 the wait timed out.
 
         ENVIRONMENT
           UNITY_MCP_STATE_DIR            Where the Editor writes its descriptors, when that is
@@ -121,6 +131,7 @@ public static class Usage
           isuzu-unity-cli call console_read_logs --type error --limit 20
           isuzu-unity-cli call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
           isuzu-unity-cli call execute_code --file snippet.cs
+          isuzu-unity-cli jobs execute_code-3f2a-1 --wait
           isuzu-unity-cli doctor --fix
           isuzu-unity-cli uninstall --yes
         """;

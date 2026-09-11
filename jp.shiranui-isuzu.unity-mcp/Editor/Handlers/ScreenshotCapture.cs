@@ -226,76 +226,101 @@ namespace UnityMCP.Editor.Handlers
             };
         }
 
+        /// <summary>
+        /// The camera a "game" or "scene" capture renders through, or null with
+        /// <paramref name="error"/> set to why there is none.
+        /// </summary>
+        internal static Camera ResolveCamera(string view, string named, out string error)
+        {
+            error = null;
+
+            if (view == "scene")
+            {
+                var sceneView = SceneView.lastActiveSceneView;
+
+                if (sceneView == null || sceneView.camera == null)
+                {
+                    error = "No active scene view found";
+                    return null;
+                }
+
+                return sceneView.camera;
+            }
+
+            if (!string.IsNullOrWhiteSpace(named))
+            {
+                var carrier = Tools.ObjectResolve.Object(named, null, "camera", null).GetComponent<Camera>();
+
+                if (carrier == null)
+                {
+                    error = $"'{named}' carries no Camera.";
+                }
+
+                return carrier;
+            }
+
+            var camera = Camera.main;
+
+            if (camera == null && Camera.allCameras.Length > 0)
+            {
+                camera = Camera.allCameras[0];
+            }
+
+            if (camera == null)
+            {
+                error = "No camera found in the scene";
+            }
+
+            return camera;
+        }
+
+        /// <summary>The size a capture takes when the caller asked for none.</summary>
+        /// <remarks>
+        /// A camera that has never drawn reports a zero <c>pixelWidth</c>, and the main Game view's
+        /// size is the shape the caller is looking at, so that is asked for first.
+        /// </remarks>
+        internal static void SourceSize(string view, Camera camera, out int width, out int height)
+        {
+            if (view == "scene")
+            {
+                width = camera.pixelWidth;
+                height = camera.pixelHeight;
+                return;
+            }
+
+            try
+            {
+                var gameViewSize = Handles.GetMainGameViewSize();
+                width = (int)gameViewSize.x;
+                height = (int)gameViewSize.y;
+            }
+            catch
+            {
+                width = camera.pixelWidth;
+                height = camera.pixelHeight;
+            }
+
+            if (width <= 0 || height <= 0)
+            {
+                width = camera.pixelWidth;
+                height = camera.pixelHeight;
+            }
+        }
+
         private static JObject CaptureCameraView(
             string view, int maxSize, int? requestedWidth, int? requestedHeight,
             string savePath, string named = null, string focus = null)
         {
             try
             {
-                Camera camera;
-                int sourceWidth;
-                int sourceHeight;
+                var camera = ResolveCamera(view, named, out var refusal);
 
-                if (view == "scene")
+                if (camera == null)
                 {
-                    var sceneView = SceneView.lastActiveSceneView;
-                    if (sceneView == null || sceneView.camera == null)
-                    {
-                        return new JObject { ["error"] = "No active scene view found" };
-                    }
-
-                    camera = sceneView.camera;
-                    sourceWidth = camera.pixelWidth;
-                    sourceHeight = camera.pixelHeight;
+                    return new JObject { ["error"] = refusal };
                 }
-                else
-                {
-                    if (!string.IsNullOrWhiteSpace(named))
-                    {
-                        camera = Tools.ObjectResolve.Object(named, null, "camera", null)
-                            .GetComponent<Camera>();
 
-                        if (camera == null)
-                        {
-                            return new JObject
-                            {
-                                ["error"] = $"'{named}' carries no Camera.",
-                            };
-                        }
-                    }
-                    else
-                    {
-                        camera = Camera.main;
-
-                        if (camera == null && Camera.allCameras.Length > 0)
-                        {
-                            camera = Camera.allCameras[0];
-                        }
-                    }
-
-                    if (camera == null)
-                    {
-                        return new JObject { ["error"] = "No camera found in the scene" };
-                    }
-
-                    try
-                    {
-                        var gameViewSize = Handles.GetMainGameViewSize();
-                        sourceWidth = (int)gameViewSize.x;
-                        sourceHeight = (int)gameViewSize.y;
-                    }
-                    catch
-                    {
-                        sourceWidth = camera.pixelWidth;
-                        sourceHeight = camera.pixelHeight;
-                    }
-
-                    if (sourceWidth <= 0 || sourceHeight <= 0)
-                    {
-                        sourceWidth = camera.pixelWidth;
-                        sourceHeight = camera.pixelHeight;
-                    }
-                }
+                SourceSize(view, camera, out var sourceWidth, out var sourceHeight);
 
                 var captureWidth = requestedWidth ?? sourceWidth;
                 var captureHeight = requestedHeight ?? sourceHeight;
@@ -716,7 +741,7 @@ namespace UnityMCP.Editor.Handlers
         }
 #endif
 
-        private static Texture2D ResizeTexture(Texture2D source, int newWidth, int newHeight)
+        internal static Texture2D ResizeTexture(Texture2D source, int newWidth, int newHeight)
         {
             var rt = RenderTexture.GetTemporary(newWidth, newHeight, 0, RenderTextureFormat.ARGB32);
             var previousActive = RenderTexture.active;

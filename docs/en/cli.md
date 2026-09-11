@@ -16,6 +16,7 @@ isuzu-unity-cli mcp-stdio --group <name> # narrow what the MCP client is offered
 isuzu-unity-cli call <tool> [...]        # invoke a tool
 isuzu-unity-cli verify [...]             # recompile, test and summarise in one call
 isuzu-unity-cli jobs [id]                # list jobs, or report one by id
+isuzu-unity-cli jobs <id> --wait         # poll until it ends, then print its last answer
 isuzu-unity-cli setup [--mcp] [...]      # install the skill and register the MCP endpoint
 isuzu-unity-cli doctor [--fix]           # what is installed, where, and what is stale
 isuzu-unity-cli upgrade [--release vX]   # update the CLI
@@ -96,6 +97,10 @@ Work slower than `syncWaitMs` (3 seconds by default) returns a job id instead of
 `isuzu-unity-cli jobs` lists jobs. `isuzu-unity-cli jobs <id>` reports one job's state and result.
 
 Do not repeat a call that returned a job id. The work is still running, and repeating the call runs it twice.
+
+`--wait` polls until the job ends and prints only its last answer. Whatever is holding the Editor up while the wait lasts — a compilation, a dialog, a main thread that has not come back — is reported on stderr. Exit codes: 0 the job completed, 1 it failed or was cancelled, 2 an option is wrong, 3 no Editor or an ambiguous one, 4 the wait timed out.
+
+`--timeout <seconds>` (300 by default) gives up waiting. The job itself keeps running in the Editor.
 
 ## tools --group
 

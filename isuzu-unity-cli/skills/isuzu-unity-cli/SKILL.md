@@ -202,9 +202,13 @@ Work slower than about three seconds returns a job id instead of a result:
 
 ```bash
 isuzu-unity-cli jobs execute_code-3
+isuzu-unity-cli jobs execute_code-3 --wait   # poll until it ends, print its last answer
 ```
 
 Do not repeat the call. The work is still running, and repeating the call runs it twice.
+
+`--wait` exits 0 when the job completed and 1 when it failed or was cancelled, so a script can
+stop on it. `--timeout <seconds>` (300 by default) gives up waiting without stopping the job.
 
 ## Errors
 

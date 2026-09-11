@@ -112,6 +112,7 @@ function Resolve-Bundled([string] $name, [string] $fallback) {
 }
 $timelineVersion = Resolve-Bundled 'com.unity.timeline' '1.8.7'
 $recorderVersion = Resolve-Bundled 'com.unity.recorder' '5.0.0'
+$uguiVersion = Resolve-Bundled 'com.unity.ugui' '1.0.0'
 
 if ($unityVersion -match '^(\d+)\.') {
     $editorMajor = [int]$Matches[1]
@@ -136,7 +137,8 @@ $manifest = @"
     "com.unity.modules.animation": "1.0.0",
     "com.unity.modules.director": "1.0.0",
     "com.unity.timeline": "$timelineVersion",
-    "com.unity.recorder": "$recorderVersion"
+    "com.unity.recorder": "$recorderVersion",
+    "com.unity.ugui": "$uguiVersion"
   },
   "testables": [ "jp.shiranui-isuzu.unity-mcp" ]
 }

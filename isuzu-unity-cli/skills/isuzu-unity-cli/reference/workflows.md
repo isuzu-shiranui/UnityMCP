@@ -132,3 +132,11 @@ Read the dialog before pressing anything. `Don't Save` and `Discard` throw away 
 `Cancel` is the safe answer, after which the cause can be fixed and the original call retried.
 Windows only - elsewhere `editor_dialog_list` answers `supported: false` and a person has to
 answer the dialog at the Editor.
+
+Some of these windows are not questions at all. Unity's progress window - `Hold on (busy for ...)`,
+`Running managed callbacks`, anything offering `Skip Transcoding` - clears when the work behind it
+finishes, and answering it abandons that work rather than letting the call through. When its
+message reads `Waiting for Unity's code to finish executing`, the work is the call you made:
+pressing a button leaves it running and puts the window straight back, and a call that holds the
+main thread cannot be interrupted from outside, so one that never ends means restarting the
+Editor. The running-job notice says which of the three kinds it is.

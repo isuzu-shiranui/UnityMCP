@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.3.0] - 2026-09-11
+## [4.3.0] - 2026-09-12
 
 ### Breaking
 - Over MCP, a reply larger than its tool's `MaxResultSizeChars` is refused with `isError` instead of being sent.
@@ -34,6 +34,56 @@
 - `scene_browse_hierarchy` refuses `since` against a snapshot that covered only one page, instead of reporting everything outside that page as removed.
 - CLI: `tools <name>` prints one tool, and `doctor` reports version skew, newer releases and which executable is running.
 - Preferences > Unity MCP shows whether a client is registered, and can register one.
+- `render_capture_ab` captures the frame, captures it again with the named objects hidden, and
+  reports what changed alongside how much changes on its own. Two captures of an unchanged scene
+  are not identical — animation, water, particles and temporal anti-aliasing all move between
+  frames — so a difference smaller than that movement means nothing, and neither picture shows
+  that. The two numbers are measured over the same number of frames so they can be compared. The
+  objects are put back before the call answers, and also when it is cancelled or the domain
+  reloads, which hiding them from `execute_code` cannot promise.
+- `render_capture_buffer` saves one of the pipeline's intermediate targets — depth, normals,
+  motion or opaque — as a picture. A foam, fog or outline pass reads the depth texture rather than
+  the finished frame, and the two are not the same silhouette. Depth comes back as grey shading
+  plus the nearest and farthest distance in metres, so a pixel can be read as a number. The
+  capture happens inside `endCameraRendering`, because the globals are pooled and reading one
+  after `Camera.Render` returns hands back a released target: every pixel zero, which on a
+  reversed-Z buffer is the far plane and reads as a correctly captured empty scene. A buffer the
+  pipeline is not producing is refused by name with the setting that turns it on.
+- `isuzu-unity-cli jobs <id> --wait` polls a job to its end and prints only its last answer,
+  exiting 0 when it completed and 1 when it failed or was cancelled. `--timeout` gives up waiting
+  without stopping the job.
+
+- `memory_usage` weighs the loaded objects and splits them by whether the project owns them. That
+  split is the answer: an Editor's own render targets and icon atlases are routinely the largest
+  textures in memory. On a real project it reported 7.3 GB of textures of which 5.5 GB belonged to
+  the project, and named the two 4K face maps costing 67 MB each.
+- `build_report` reads the report Unity writes beside the Library, so what a build contained and
+  weighed can be answered after the output is gone: the summary, a row per asset type, the heaviest
+  assets with their paths, and the slowest build steps. `compare_with` takes a second report and
+  says what appeared, what grew, and by how much — the only form of the question that answers why a
+  build got bigger, and one nothing else in the ecosystem does.
+- `render_profile_frame` samples a window of frames and reports where the time and the garbage
+  went: CPU total, main thread, render thread and GPU as a median and a worst frame, plus the bytes
+  allocated per frame and how many allocations. Name your own ProfilerMarkers to sample them
+  alongside. About 240 tokens. Draw call and triangle counts stay in `render_stats`. A frame-timing
+  counter the manager is not feeding is named in `silent` rather than reported as zero, because a
+  zero there is indistinguishable from a frame that cost nothing.
+- `shader_batching_check` reports whether the SRP Batcher can keep a shader's material data on the
+  GPU, and names the shader variable that stops it when it cannot. One incompatible shader breaks
+  the batch for everything drawn with it, and nothing in the Editor reports that outside the Shader
+  Inspector, one shader at a time. `scope: scene` checks everything the open scenes draw with and
+  answers in about 280 tokens. It is refused on the built-in pipeline, which has no batcher, and a
+  shader that failed to compile is reported as such rather than given a verdict that would mean
+  nothing.
+- `ui_hit_test` answers why a click never reaches a uGUI element. It lists what is under a screen
+  point in the order the event system sees them, names what covers the element you asked about, and
+  reports the elements under the point that cannot be hit at all with the reason for each: Raycast
+  Target off, an inactive object, a CanvasGroup that blocks nothing, a Canvas with no
+  GraphicRaycaster. A full answer costs about 200 tokens. It needs play mode, because
+  `EventSystem.current` is only set while the game runs; outside it every point reports nothing
+  under it, which reads like a correctly-answered question about a broken UI. The tool ships in an
+  assembly constrained on com.unity.ugui, so a project without that package loses the tool rather
+  than failing to compile.
 
 ### Fixed
 - A VRChat project no longer logs a fatal error for this package on every Editor start. ([#36](https://github.com/isuzu-shiranui/UnityMCP/issues/36))
@@ -62,6 +112,12 @@
 - Request bodies over 8 MiB are refused with 413.
 - `inspect_read` and `inspect_list` carry a reply ceiling, so a component with many array fields is refused over MCP rather than filling the caller's context.
 - `input_pointer` caps `frames_per_step` at 1000. The work a drag schedules is steps times frames per step, and only the first of the two was bounded.
+- The notice on a still-running call tells Unity's own progress window apart from a dialog that is
+  asking something. Both are dialogs by every test the window enumerator applies and both carry
+  buttons, so the advice to answer one read as if pressing it would let the call through. A
+  progress window clears when the work behind it finishes, and answering it abandons that work;
+  the one whose message says Unity is waiting for its own code to finish is the call you made, and
+  nothing outside the Editor can interrupt it.
 
 ## [4.2.0] - 2026-09-09
 

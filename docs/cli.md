@@ -15,6 +15,7 @@ isuzu-unity-cli tools <tool>             # 1 つのツールの説明と引数�
 isuzu-unity-cli call <tool> [...]        # ツールの実行
 isuzu-unity-cli verify [...]             # 再コンパイル・テスト・結果の要約を 1 回で
 isuzu-unity-cli jobs [id]                # ジョブの一覧、または指定 ID の状態
+isuzu-unity-cli jobs <id> --wait         # 終わるまで待って、最後の結果だけを表示
 isuzu-unity-cli setup [--mcp] [...]      # スキルの導入と MCP エンドポイントの登録
 isuzu-unity-cli doctor [--fix]           # 何がどこに入っているかの診断と修復
 isuzu-unity-cli upgrade [--release vX]   # CLI の更新
@@ -96,6 +97,10 @@ isuzu-unity-cli verify --raw                 # 要約を JSON で
 `isuzu-unity-cli jobs` はジョブの一覧を表示します。`isuzu-unity-cli jobs <id>` は指定した ID の状態と結果を表示します。
 
 job ID が返ったときは、同じ呼び出しをやり直さないでください。処理はまだ動いています。やり直すと 2 回実行されます。
+
+`--wait` を付けると、終わるまで一定間隔で問い合わせて、最後の答えだけを表示します。待っている間に Editor を止めているもの（コンパイル中、ダイアログが出ている、メインスレッドが戻ってこない）は標準エラーへ出します。終了コードは、ジョブが完了したとき 0、失敗または取り消しのとき 1、オプションの誤りで 2、Editor が見つからないか複数あって決められないとき 3、待ちを打ち切ったとき 4 です。
+
+`--timeout <秒>`（既定 300）で待ちを打ち切ります。打ち切ってもジョブ自体は Editor の中で動き続けます。
 
 ## tools --group
 
