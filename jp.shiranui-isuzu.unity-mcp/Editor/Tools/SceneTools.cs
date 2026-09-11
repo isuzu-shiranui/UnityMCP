@@ -63,6 +63,11 @@ namespace UnityMCP.Editor.Tools
             bool missingScripts = false,
             [McpArg("scene_index", "Restrict to a single open scene by index; omit for all scenes.")]
             int? sceneIndex = null,
+            [McpArg("object_path", "Start from this object instead of the scene roots, and report " +
+                                   "it and what is under it. This is how to read one branch: " +
+                                   "without it the only way to the objects under a known object " +
+                                   "is to take the whole scene and find them in it.")]
+            string objectPath = null,
             [McpArg("limit", "Maximum entries to return. Omit it, or pass 0, to return every entry. " +
                              "When paging separates children from their parent they are reported " +
                              "at the top level rather than nested.")]
@@ -108,6 +113,7 @@ namespace UnityMCP.Editor.Tools
                 ("activeOnly", activeOnly),
                 ("missingScripts", missingScripts),
                 ("sceneIndex", sceneIndex),
+                ("objectPath", objectPath),
                 ("limit", limit),
                 ("offset", offset),
                 ("fields", fields),

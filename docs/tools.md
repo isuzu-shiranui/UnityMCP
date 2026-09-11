@@ -14,7 +14,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数 |
+| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 2,872 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（Editor が固まっていても動く） |
@@ -24,7 +24,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |
 | `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
 | `test_results` | safe | 実行中・直近のテスト結果（実行中でも読める） |
-| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。**一致したものの子は、その子自身が一致しない限り出ません** — 親の名前で絞ると親1つだけが返るので、その下に何個あるかは `childrenNotShown` で分かります。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります。snapshot はスクリプトの再読み込みを越えないので、失効していれば `sinceExpired` を付けて木が返ります。`limit` や `offset` で一部しか返らなかった応答の snapshot は、差分の基準にできません |
+| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。**一致したものの子は、その子自身が一致しない限り出ません** — 親の名前で絞ると親1つだけが返るので、その下に何個あるかは `childrenNotShown` で分かります。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。`object_path` を渡すと、シーンのルートではなくそのオブジェクトから下だけを返します。特定のオブジェクトの下に何があるかを訊くのに、シーン全体を取る必要はありません。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります。snapshot はスクリプトの再読み込みを越えないので、失効していれば `sinceExpired` を付けて木が返ります。`limit` や `offset` で一部しか返らなかった応答の snapshot は、差分の基準にできません |
 | `scene_list` | safe | 開いているシーンとビルド設定のシーン |
 | `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です。配列は長さと要素の指定方法に加えて、中身も `elements` として返します（先頭20件まで。それ以上あるときは `elementsShown` が付きます）。要素が構造体のときは中身を返しません |
 | `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと、その GameObject が持つコンポーネントの一覧になります。`detail: "full"` を付ければ全コンポーネントのプロパティが1回で返るので、コンポーネントごとに呼ぶ必要はありません |

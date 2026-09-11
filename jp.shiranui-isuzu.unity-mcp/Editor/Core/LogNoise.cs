@@ -84,6 +84,67 @@ namespace UnityMCP.Editor.Core
         private static readonly Regex Location =
             new Regex(@"\(at (?<path>.+):(?<line>\d+)\)\s*$", RegexOptions.Compiled);
 
+        /// <summary>
+        /// A file path cut to its last few segments, the way a frame's location is cut.
+        /// </summary>
+        /// <remarks>
+        /// The console repeats the path on every entry, and an absolute one names the machine and
+        /// the package root each time: twenty errors carried about 500 tokens of the same prefix.
+        /// Three segments still name the file well enough to open it.
+        /// </remarks>
+        public static string ShortenPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            var forward = path.Replace('\\', '/');
+            var segments = forward.Split('/');
+
+            return segments.Length <= PathSegments
+                ? forward
+                : string.Join("/", segments, segments.Length - PathSegments, PathSegments);
+        }
+
+        /// <summary>
+        /// The message without its stack: the lines before the first frame Unity printed.
+        /// </summary>
+        /// <remarks>
+        /// The entry already carries the file and the line it came from, so the trace is the part
+        /// a caller can ask for rather than the part it has to take. Twenty errors read with their
+        /// traces cost about 3,500 tokens and about 650 without.
+        /// </remarks>
+        public static string WithoutStack(string message)
+        {
+            if (string.IsNullOrEmpty(message) || message.IndexOf('\n') < 0)
+            {
+                return message;
+            }
+
+            var lines = message.Replace("\r\n", "\n").Split('\n');
+            var text = new StringBuilder();
+
+            foreach (var line in lines)
+            {
+                if (Frame.IsMatch(line) || Located.IsMatch(line))
+                {
+                    break;
+                }
+
+                if (text.Length > 0)
+                {
+                    text.Append('\n');
+                }
+
+                text.Append(line);
+            }
+
+            // A trace with no line the patterns recognise leaves nothing behind, and an entry
+            // with no message at all is worse than one carrying its trace.
+            return text.Length == 0 ? lines[0] : text.ToString().TrimEnd();
+        }
+
         /// <summary>One message with its stack reduced to the frames that name source.</summary>
         public static string TrimStack(string message)
         {

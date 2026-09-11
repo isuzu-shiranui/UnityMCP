@@ -10,6 +10,7 @@
 - `asset_export_package` names its destination `destination` rather than `file`, which the CLI keeps for itself.
 - JSON-RPC requests are checked more strictly: `id: null`, and `params` or `arguments` that are not objects, are refused.
 - CLI: an option the command does not have, and an option missing its value, are refused with exit code 2. An option given twice is sent as a list.
+- `console_read_logs` leaves the stack trace out unless `stack_trace` asks for it, and cuts each entry's file path to its last three segments. Twenty exceptions cost 612 tokens rather than 2,872, and the entry still names its file and line.
 
 ### Added
 - Twelve tools:
@@ -25,7 +26,8 @@
 - `inspect_read` returns an array's elements, up to 20.
 - `material_read` takes `property`, `object_paths` and `group`.
 - `capture_screenshot` takes `camera` and `focus`. With `focus`, a capture of the game or scene view that would not show the object is refused.
-- `scene_browse_hierarchy` reports `childrenNotShown` on a filtered parent.
+- `scene_browse_hierarchy` reports `childrenNotShown` on a filtered parent, and takes `object_path` to walk one branch instead of the whole scene.
+- `console_read_logs` takes `stack_trace`.
 - `play_mode_step` takes `animators`, `play_mode_status` reports `frameCount`, and `animator_inspect` reports a running Animator's state.
 - `gameobject_create` takes `collider: false`.
 - A job id and a `scene_browse_hierarchy` snapshot id carry the domain they were made in, so an id kept across a reload names nothing rather than someone else's work.

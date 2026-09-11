@@ -45,15 +45,21 @@ namespace UnityMCP.Editor.Tools
             [McpArg("type", "Severity filter: all, error, warning, or log.")]
             string type = "all",
             [McpArg("fields", "Comma-separated field whitelist, to keep responses small. The " +
-                              "fields are 't' (severity), 'm' (message with its stack), 'f' " +
-                              "(file) and 'l' (line).")]
-            string fields = null)
+                              "fields are 't' (severity), 'm' (message), 'f' (file) and " +
+                              "'l' (line).")]
+            string fields = null,
+            [McpArg("stack_trace", "Include each entry's stack trace. Off by default: the entry " +
+                                   "already names the file and the line, and twenty errors cost " +
+                                   "about 3,500 tokens with their traces against about 650 " +
+                                   "without. Turn it on when the file and line are not enough.")]
+            bool stackTrace = false)
         {
             return LogReader.ReadLogs(ToolArgs.Of(
                 ("limit", limit),
                 ("offset", offset),
                 ("type", type),
-                ("fields", fields)));
+                ("fields", fields),
+                ("stackTrace", stackTrace)));
         }
 
         [McpTool(

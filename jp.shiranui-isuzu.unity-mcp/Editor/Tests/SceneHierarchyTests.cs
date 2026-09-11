@@ -742,6 +742,44 @@ namespace UnityMCP.Editor.Tests
             }
         }
 
+        /// <summary>
+        /// One branch, rooted where the caller asked, and nothing from the rest of the scene.
+        /// </summary>
+        /// <remarks>
+        /// Without this the objects under a known object could only be reached by taking the
+        /// whole scene and finding them in it, which on a real scene is hundreds of thousands of
+        /// tokens for the sake of one subtree.
+        /// </remarks>
+        [Test]
+        public void ABranchCanBeReadOnItsOwn()
+        {
+            var reply = SceneHierarchy.Browse(ToolArgs.Of(("objectPath", "/" + RootName)));
+            var scenes = (JArray)reply["scenes"];
+            var roots = (JArray)((JObject)scenes[0])["gameObjects"];
+
+            Assert.That(scenes.Count, Is.EqualTo(1), "only the scene the object is in");
+            Assert.That(roots.Count, Is.EqualTo(1), "the object asked for is the only root");
+            Assert.That(((JObject)roots[0])["name"].Value<string>(), Is.EqualTo(RootName));
+
+            // The branch and nothing else: the fixture's root, its two children and the one
+            // grandchild, with none of whatever else the scene holds.
+            Assert.That(reply["total"].Value<int>(), Is.EqualTo(4));
+            Assert.That(reply.ToString(), Does.Contain(GrandchildName), "and what is under it");
+        }
+
+        /// <summary>A snapshot of one branch is not a snapshot of the scene.</summary>
+        [Test]
+        public void ABranchSnapshotIsNotComparedAgainstTheWholeScene()
+        {
+            var whole = SceneHierarchy.Browse(ToolArgs.Of());
+            var snapshot = whole["snapshotId"].Value<string>();
+
+            var refused = SceneHierarchy.Browse(ToolArgs.Of(
+                ("objectPath", "/" + RootName), ("since", snapshot)));
+
+            Assert.That(refused["error"]?.ToString(), Does.Contain("different arguments"));
+        }
+
         private static JObject FindNode(JObject reply, string name)
         {
             foreach (var scene in (JArray)reply["scenes"])

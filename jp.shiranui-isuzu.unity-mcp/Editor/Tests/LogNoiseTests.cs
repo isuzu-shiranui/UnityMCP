@@ -192,6 +192,56 @@ namespace UnityMCP.Editor.Tests
             Assert.That(folded, Is.EqualTo(lines));
         }
 
+        /// <summary>
+        /// The message without its stack keeps every line of the message.
+        /// </summary>
+        /// <remarks>
+        /// An exception's own text can run to several lines, and cutting at the first newline
+        /// would leave the caller the first sentence of a message that explains itself in three.
+        /// </remarks>
+        [Test]
+        public void TheMessageSurvivesWithoutItsStack()
+        {
+            var message = string.Join("\n", new[]
+            {
+                "InvalidOperationException: the first line",
+                "  and a second line of the message",
+                "UnityMCP.Editor.Tests.Thing:Fail () (at Editor/Tests/Thing.cs:12)",
+                "UnityEngine.Debug:LogException (System.Exception)",
+            });
+
+            var without = LogNoise.WithoutStack(message);
+
+            Assert.That(without, Does.Contain("the first line"));
+            Assert.That(without, Does.Contain("a second line"));
+            Assert.That(without, Does.Not.Contain("Thing.cs"));
+            Assert.That(without, Does.Not.Contain("Debug:LogException"));
+        }
+
+        /// <summary>A trace with nothing the patterns recognise still leaves a message behind.</summary>
+        [Test]
+        public void AnUnrecognisedTraceLeavesTheMessage()
+        {
+            Assert.That(LogNoise.WithoutStack("only this\nand this"), Is.EqualTo("only this\nand this"));
+            Assert.That(LogNoise.WithoutStack("one line"), Is.EqualTo("one line"));
+            Assert.That(LogNoise.WithoutStack(null), Is.Null);
+        }
+
+        /// <summary>
+        /// A path is cut to its last segments, because the console repeats it on every entry.
+        /// </summary>
+        [Test]
+        public void APathIsCutToWhatNamesTheFile()
+        {
+            Assert.That(
+                LogNoise.ShortenPath(
+                    "H:/PublicGithub/UnityMCP/jp.shiranui-isuzu.unity-mcp/Editor/Handlers/CodeExecutor.cs"),
+                Is.EqualTo("Editor/Handlers/CodeExecutor.cs"));
+            Assert.That(LogNoise.ShortenPath("Assets/Scripts/Thing.cs"), Is.EqualTo("Assets/Scripts/Thing.cs"));
+            Assert.That(LogNoise.ShortenPath("Thing.cs"), Is.EqualTo("Thing.cs"));
+            Assert.That(LogNoise.ShortenPath(""), Is.EqualTo(""));
+        }
+
         [Test]
         public void ALineOnItsOwnIsLeftAlone()
         {

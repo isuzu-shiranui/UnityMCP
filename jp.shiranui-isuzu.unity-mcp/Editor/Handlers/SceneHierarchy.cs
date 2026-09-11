@@ -22,6 +22,7 @@ namespace UnityMCP.Editor.Handlers
                 var activeOnly = parameters["activeOnly"]?.Value<bool>() ?? false;
                 var missingScriptsOnly = parameters["missingScripts"]?.Value<bool>() ?? false;
                 var sceneIndex = parameters["sceneIndex"]?.Value<int?>();
+                var objectPath = parameters["objectPath"]?.ToString();
 
                 // A limit of zero or less means every node, which is what an omitted limit
                 // becomes; offset skips that many nodes of the flattened traversal, and fields
@@ -43,7 +44,7 @@ namespace UnityMCP.Editor.Handlers
                 // them reports everything the narrower one leaves out as removed, which is a
                 // confident wrong answer about objects that are still in the scene.
                 var walk = WalkOf(nameFilter, componentFilter, tagFilter, maxDepth,
-                    activeOnly, missingScriptsOnly, sceneIndex, fieldsFilter);
+                    activeOnly, missingScriptsOnly, sceneIndex, objectPath, fieldsFilter);
 
                 string expired = null;
 
@@ -113,23 +114,40 @@ namespace UnityMCP.Editor.Handlers
                 var startIndex = sceneIndex ?? 0;
                 var endIndex = sceneIndex.HasValue ? sceneIndex.Value + 1 : sceneCount;
 
-                for (var si = startIndex; si < endIndex; si++)
+                void Walk(Transform root, int si)
                 {
-                    var scene = SceneManager.GetSceneAt(si);
-                    if (!scene.isLoaded) continue;
-
-                    var rootObjects = scene.GetRootGameObjects();
-                    foreach (var root in rootObjects)
+                    if (hasFilter)
                     {
-                        if (hasFilter)
+                        var tree = BuildTreeNode(root, 0, maxDepth);
+                        MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
+                        CollectFilteredFlat(tree, si, -1, flat);
+                    }
+                    else
+                    {
+                        CollectFlat(root, 0, maxDepth, si, -1, flat);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(objectPath))
+                {
+                    // One branch rather than every root. Without this, the objects under a known
+                    // object could only be reached by taking the whole tree and finding them in
+                    // it, which on a real scene is the whole scene for the sake of one subtree.
+                    var start = UnityMCP.Editor.Tools.ObjectResolve.Object(
+                        objectPath, null, "object_path", null);
+
+                    Walk(start.transform, SceneIndexOf(start.scene));
+                }
+                else
+                {
+                    for (var si = startIndex; si < endIndex; si++)
+                    {
+                        var scene = SceneManager.GetSceneAt(si);
+                        if (!scene.isLoaded) continue;
+
+                        foreach (var root in scene.GetRootGameObjects())
                         {
-                            var tree = BuildTreeNode(root.transform, 0, maxDepth);
-                            MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
-                            CollectFilteredFlat(tree, si, -1, flat);
-                        }
-                        else
-                        {
-                            CollectFlat(root.transform, 0, maxDepth, si, -1, flat);
+                            Walk(root.transform, si);
                         }
                     }
                 }
@@ -248,12 +266,27 @@ namespace UnityMCP.Editor.Handlers
         /// </summary>
         private static string WalkOf(
             string name, string component, string tag, int maxDepth,
-            bool activeOnly, bool missingScriptsOnly, int? sceneIndex, string[] fields)
+            bool activeOnly, bool missingScriptsOnly, int? sceneIndex, string objectPath,
+            string[] fields)
         {
             var joined = fields == null ? string.Empty : string.Join(",", fields);
             return $"name={name}|component={component}|tag={tag}|maxDepth={maxDepth}" +
                    $"|activeOnly={activeOnly}|missingScripts={missingScriptsOnly}" +
-                   $"|sceneIndex={sceneIndex}|fields={joined}";
+                   $"|sceneIndex={sceneIndex}|objectPath={objectPath}|fields={joined}";
+        }
+
+        /// <summary>Which open scene this one is, so a subtree reports the index its nodes carry.</summary>
+        private static int SceneIndexOf(Scene scene)
+        {
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                if (SceneManager.GetSceneAt(i) == scene)
+                {
+                    return i;
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>

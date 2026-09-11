@@ -71,6 +71,10 @@ namespace UnityMCP.Editor.Handlers
                 var offset = parameters["offset"]?.Value<int>() ?? 0;
                 var typeFilter = parameters["type"]?.ToString() ?? "all";
 
+                // Off by default: the entry already names the file and the line, so the trace is
+                // the part worth asking for rather than the part every read has to carry.
+                var withStack = parameters["stackTrace"]?.Value<bool>() ?? false;
+
                 // Checked here rather than in the loop: the loop compares against each name in
                 // turn, so one it does not know narrows nothing and every severity comes back.
                 if (typeFilter != "all" && typeFilter != "error"
@@ -116,10 +120,12 @@ namespace UnityMCP.Editor.Handlers
                         }
 
                         var message = (string)MessageField.GetValue(entry) ?? "";
-                        var file = (string)FileField.GetValue(entry) ?? "";
+                        var file = LogNoise.ShortenPath((string)FileField.GetValue(entry) ?? "");
                         var line = (int)LineField.GetValue(entry);
 
-                        message = LogNoise.TrimStack(message);
+                        message = withStack
+                            ? LogNoise.TrimStack(message)
+                            : LogNoise.WithoutStack(message);
 
                         allEntries.Add(new JObject
                         {
@@ -145,6 +151,9 @@ namespace UnityMCP.Editor.Handlers
                         // beside it what the console holds. One number cannot be both: asking for
                         // errors in a console of thirteen plain logs answered "total 13" with an
                         // empty list, which reads as thirteen errors withheld.
+                        // Said rather than left to be noticed: a caller that needs the trace has
+                        // to know it was not sent.
+                        ["stackTrace"] = withStack,
                         ["total"] = allEntries.Count,
                         ["inConsole"] = totalCount,
                         ["errors"] = errorCount,
