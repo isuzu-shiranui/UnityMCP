@@ -108,7 +108,7 @@ destructive なステップを 1 つでも含む `sequence` は、それ自体�
 | `destructive` | `false`（destructive なステップを含む `sequence` は `true`） | `true` なら `confirm` / `dry_run` が属性ツールと同じ形で注入される。destructive なステップを含む `sequence` に `false` を書くとロード時にエラー |
 | `undoGroup` | なし | `sequence` にだけ指定でき、`mainThread: true` が前提 |
 | `alwaysLoad` | `false` | ツール検索の裏に隠さず常にロード済みにする |
-| `maxResultSizeChars` | `0`（クライアントの既定のまま） | クライアントに要求する上限（文字数）。ヒントとして `_meta` に載るだけで、パッケージ側は応答量を測りも切りもしません |
+| `maxResultSizeChars` | `0`（クライアントの既定のまま） | MCP で返す応答の上限（文字数）。超えた応答は切り詰めずにエラーとして返します |
 | `inputs` | なし | 名前 → `{type, description, required?, default?, enum?}`。`type` は `string` / `integer` / `number` / `boolean` / `object` / `array` |
 | `examples` | なし | 引数オブジェクトの実例（JSON オブジェクトか JSON 文字列の配列） |
 

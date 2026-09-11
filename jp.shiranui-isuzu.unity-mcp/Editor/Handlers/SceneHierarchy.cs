@@ -60,6 +60,13 @@ namespace UnityMCP.Editor.Handlers
                         expired = since;
                         diffing = false;
                     }
+                    else if (SceneHierarchyBaseline.IsPartial(since))
+                    {
+                        return new JObject
+                        {
+                            ["error"] = $"snapshot '{since}' covers only a page. Take a full one by reading without since, limit and offset. A scene too large to return whole narrows with 'name', 'component', 'tag', 'max_depth' or 'fields' instead: those keep the snapshot complete for what they select, where limit and offset leave it a page."
+                        };
+                    }
                     else if (!string.Equals(takenUnder, walk, StringComparison.Ordinal))
                     {
                         return new JObject
@@ -132,13 +139,14 @@ namespace UnityMCP.Editor.Handlers
                 var effectiveLimit = limit <= 0 ? int.MaxValue : limit;
                 JObject page;
                 projecting = flat;
+                var paths = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
                 try
                 {
                     page = ListResponseBuilder.Build(
                         flat,
                         offset,
                         effectiveLimit,
-                        ProjectFlatNode,
+                        node => ProjectFlatNode(node, paths),
                         fieldsFilter,
                         IdentityField
                     );
@@ -157,7 +165,8 @@ namespace UnityMCP.Editor.Handlers
                 // for the difference from it. Taken before the page is re-nested, because the
                 // rebuild moves the nodes into the tree, and before the two keys below are
                 // dropped, because a comparison has to see everything that can change.
-                var snapshotId = SceneHierarchyBaseline.Remember(walk, Peek(page));
+                var snapshotId = SceneHierarchyBaseline.Remember(walk, Peek(page),
+                    partial: offset > 0 || page["truncated"].Value<bool>());
 
                 // The tree says both of these already: `scenes` groups by scene and `children`
                 // names the parent. Carried per node they were 40% of the response.
@@ -314,6 +323,14 @@ namespace UnityMCP.Editor.Handlers
             public GameObject Go;
             public int SceneIndex;
             public int ParentIndex; // index into the flat list, or -1 for roots.
+
+            /// <summary>Children a filter kept out of the reply.</summary>
+            /// <remarks>
+            /// A filter matching a parent returns it with no children at all, which reads as a
+            /// leaf: asking for "Platform" answered with Platforms and nothing under it, and the
+            /// caller fetched the whole scene rather than the three plates it was after.
+            /// </remarks>
+            public int ChildrenNotShown;
         }
 
         private static void CollectFlat(
@@ -351,15 +368,23 @@ namespace UnityMCP.Editor.Handlers
             if (!node.Matched && !node.AncestorOfMatch) return;
 
             var myIndex = flat.Count;
-            flat.Add(new FlatNode
+            var mine = new FlatNode
             {
                 Go = node.Go,
                 SceneIndex = sceneIndex,
                 ParentIndex = parentIndex
-            });
+            };
+
+            flat.Add(mine);
 
             foreach (var child in node.Children)
             {
+                if (!child.Matched && !child.AncestorOfMatch)
+                {
+                    mine.ChildrenNotShown++;
+                    continue;
+                }
+
                 CollectFilteredFlat(child, sceneIndex, myIndex, flat);
             }
         }
@@ -379,7 +404,7 @@ namespace UnityMCP.Editor.Handlers
         [ThreadStatic]
         private static List<FlatNode> projecting;
 
-        private static JObject ProjectFlatNode(FlatNode n)
+        private static JObject ProjectFlatNode(FlatNode n, UnityMCP.Editor.Tools.ObjectResolve.PathBatch paths)
         {
             // The nested structure is rebuilt in RebuildScenesFromPage, so we
             // emit only the node-level keys here. ListResponseBuilder applies
@@ -391,7 +416,7 @@ namespace UnityMCP.Editor.Handlers
                 // The identifier every authoring tool takes. Without it a caller who has just
                 // browsed the hierarchy has to guess at the path of the thing they are looking
                 // at, and guesses fail on any name that repeats among siblings.
-                ["path"] = UnityMCP.Editor.Tools.ObjectResolve.PathOf(go),
+                ["path"] = paths.PathOf(go),
                 ["instanceId"] = EntityIdCompat.WireIdOf(go),
                 // A path carries an index only where a sibling name repeats, so without this a
                 // reorder is invisible — and it decides draw order under a Canvas.
@@ -434,9 +459,13 @@ namespace UnityMCP.Editor.Handlers
             }
 
             // Never empty: every GameObject carries a Transform.
-            node["components"] = GetComponentNames(go);
+            node["components"] = GetComponentNames(go, out var missing);
 
-            var missing = MissingScriptCount(go);
+            if (n.ChildrenNotShown > 0)
+            {
+                node["childrenNotShown"] = n.ChildrenNotShown;
+            }
+
             if (missing > 0)
             {
                 node["missingScripts"] = missing;
@@ -643,9 +672,10 @@ namespace UnityMCP.Editor.Handlers
             }
         }
 
-        private static JArray GetComponentNames(GameObject go)
+        private static JArray GetComponentNames(GameObject go, out int missing)
         {
             var arr = new JArray();
+            missing = 0;
             foreach (var comp in go.GetComponents<Component>())
             {
                 // A component that reads as null is a MonoBehaviour whose script Unity cannot
@@ -653,6 +683,7 @@ namespace UnityMCP.Editor.Handlers
                 // Naming it is the difference between an agent explaining a broken avatar and
                 // reporting a null it cannot account for.
                 arr.Add(comp != null ? comp.GetType().Name : MissingScript);
+                if (comp == null) missing++;
             }
             return arr;
         }

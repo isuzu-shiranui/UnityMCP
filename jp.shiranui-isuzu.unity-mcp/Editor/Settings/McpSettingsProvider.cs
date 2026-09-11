@@ -240,7 +240,8 @@ namespace UnityMCP.Editor.Settings
             if (!this.registrationLooked)
             {
                 this.registrationLooked = true;
-                this.registeredIn = McpClientRegistration.Registered(url, ProjectRoot());
+                this.registeredIn = McpClientRegistration.Registered(
+                    url, ProjectRoot(), Application.productName);
             }
 
             if (this.registeredIn.Count > 0)

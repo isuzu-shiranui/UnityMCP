@@ -54,12 +54,15 @@ Values are typed automatically. `--limit 20` sends a number and `--active_only t
 and a value that parses as JSON is sent as JSON, which is how a list or an object gets in.
 Errors print to stderr and set a non-zero exit code, so the commands can be used in scripts.
 
-On Windows PowerShell, escape the double quotes inside a list or an object. PowerShell removes
-them on the way to a program, so `--paths '["a","b"]'` arrives as `[a,b]` and is refused:
+A list can also be typed by naming the option once per value, which no shell can mangle:
 
-```powershell
-isuzu-unity-cli call reflect_read --paths '[\"@scene:/Player/Transform/position\"]'
+```bash
+isuzu-unity-cli call reflect_read --paths "@scene:/A/Transform/position" --paths "@scene:/B/Transform/position"
 ```
+
+That is the way to do it on Windows PowerShell, which strips the double quotes out of an argument
+on its way to a program: `--paths '["a","b"]'` arrives as `[a,b]` and is refused rather than read
+as one long path.
 
 Run `isuzu-unity-cli tools` for the authoritative list. It comes from the Editor, so it always
 matches the version you are talking to.
@@ -212,3 +215,4 @@ Do not repeat the call. The work is still running, and repeating the call runs i
 | `error [invalid_params]` | Argument missing or the value was rejected; the text says which |
 | `error [tool_not_found]` | Run `isuzu-unity-cli tools` |
 | `error [unauthorized]` | The descriptor is stale; restart the Editor |
+| The call fails outright right after `play_mode_play`, `play_mode_stop` or a script edit | The Editor is reloading its domain and the server is gone for those few seconds; it comes back on its own. A read can simply be called again. A change may already have arrived, so read the state back before sending it again. `reference/workflows.md` has the rest |

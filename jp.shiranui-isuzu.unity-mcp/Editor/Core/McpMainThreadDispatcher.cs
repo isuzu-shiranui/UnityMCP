@@ -44,6 +44,7 @@ namespace UnityMCP.Editor.Core
 
         private readonly Queue<WorkItem> queue = new();
         private readonly object gate = new();
+        private string stoppedReason;
 
         /// <summary>
         /// Log lines produced on worker threads, flushed from <see cref="Pump"/>.
@@ -94,6 +95,11 @@ namespace UnityMCP.Editor.Core
 
             lock (this.gate)
             {
+                if (this.stoppedReason != null)
+                {
+                    item.FailBeforeStart(this.stoppedReason);
+                    return item;
+                }
                 this.queue.Enqueue(item);
             }
 
@@ -167,6 +173,10 @@ namespace UnityMCP.Editor.Core
                     }
 
                     item = this.queue.Dequeue();
+                    if (!item.TryStart())
+                    {
+                        continue;
+                    }
                 }
 
                 // Run outside the lock so a slow item cannot block other workers from enqueuing.
@@ -184,6 +194,7 @@ namespace UnityMCP.Editor.Core
 
             lock (this.gate)
             {
+                this.stoppedReason = reason;
                 pending = new List<WorkItem>(this.queue);
                 this.queue.Clear();
             }
@@ -192,6 +203,12 @@ namespace UnityMCP.Editor.Core
             {
                 item.FailBeforeStart(reason);
             }
+        }
+
+        /// <summary>Accepts work again when the stopped server is explicitly restarted.</summary>
+        public void Resume()
+        {
+            lock (this.gate) { this.stoppedReason = null; }
         }
 
         /// <summary>
@@ -288,13 +305,6 @@ namespace UnityMCP.Editor.Core
             /// <summary>Runs the work on the main thread. Called only by the pump.</summary>
             internal void Run()
             {
-                if (Interlocked.CompareExchange(ref this.state, StateRunning, StatePending) != StatePending)
-                {
-                    // Abandoned while queued. Skipping here is what makes the "a timed-out
-                    // request produces no side effect" guarantee hold.
-                    return;
-                }
-
                 try
                 {
                     this.Result = this.work();
@@ -309,6 +319,10 @@ namespace UnityMCP.Editor.Core
                 }
             }
 
+            // Claim under the queue gate so Stop cannot slip between dequeue and start.
+            internal bool TryStart() =>
+                Interlocked.CompareExchange(ref this.state, StateRunning, StatePending) == StatePending;
+
             /// <summary>Marks a still-queued item as failed because the server is going away.</summary>
             internal void FailBeforeStart(string reason)
             {
@@ -317,7 +331,12 @@ namespace UnityMCP.Editor.Core
                     return;
                 }
 
-                this.Error = new InvalidOperationException(reason);
+                // A refusal, not a fault. Anything that is not an McpToolException leaves the
+                // request as a 500, and a client repeats a 500 on a read-only tool until its
+                // whole retry budget is gone - once per call, for as long as the server is down.
+                // 409 rather than 503 because a server someone stopped in Preferences does not
+                // come back by itself, and 503 is the status clients retry.
+                this.Error = new McpToolException("server_stopped", reason, 409);
                 this.completed.Set();
             }
         }

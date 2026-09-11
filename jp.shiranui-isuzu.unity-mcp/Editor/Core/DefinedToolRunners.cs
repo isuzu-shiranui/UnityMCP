@@ -352,6 +352,9 @@ namespace UnityMCP.Editor.Core
             public JObject Report() => new JObject { ["steps"] = this.Steps };
         }
 
+        /// <summary>How many times one step may hand back a deferred result before it is refused.</summary>
+        private const int MaxDeferrals = 64;
+
         private IEnumerator<FrameStep> Advance(Execution execution)
         {
             foreach (var step in this.steps)
@@ -359,8 +362,21 @@ namespace UnityMCP.Editor.Core
                 var entry = new JObject { ["id"] = step.Id, ["tool"] = step.Tool };
                 var result = this.Invoke(step, execution, out var error);
 
-                if (error == null && result is DeferredToolResult deferred)
+                // Bounded: a step whose result keeps handing back another already-completed
+                // deferral would spin here with no frame yielded, holding the main thread.
+                var deferrals = 0;
+
+                while (error == null && result is DeferredToolResult deferred)
                 {
+                    if (++deferrals > MaxDeferrals)
+                    {
+                        error = new McpToolException(
+                            "tool_failed",
+                            $"'{step.Tool}' deferred its result {MaxDeferrals} times without " +
+                            "finishing, so the sequence stopped rather than waiting for good.");
+                        break;
+                    }
+
                     execution.Pending = deferred.Item;
 
                     while (!deferred.Item.IsCompleted)
@@ -380,6 +396,11 @@ namespace UnityMCP.Editor.Core
                     }
                 }
 
+                if (error == null && HandlerErrorResult.Message(result) is { } reported)
+                {
+                    error = new McpToolException("invalid_params", reported);
+                }
+
                 if (error == null)
                 {
                     execution.Results[step.Id] = result;
@@ -390,6 +411,14 @@ namespace UnityMCP.Editor.Core
                 {
                     entry["ok"] = false;
                     entry["error"] = new JObject { ["code"] = error.Code, ["message"] = error.Message };
+
+                    // The handler's own result is kept even when the error was read out of it:
+                    // it carries the fields beside the message, which are what a caller needs to
+                    // tell what the step managed before it stopped.
+                    if (result != null && result is not DeferredToolResult)
+                    {
+                        entry["result"] = result;
+                    }
                 }
 
                 execution.Steps.Add(entry);

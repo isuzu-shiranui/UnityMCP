@@ -2,164 +2,64 @@
 
 ## [4.3.0] - 2026-09-11
 
+### Breaking
+- Over MCP, a reply larger than its tool's `MaxResultSizeChars` is refused with `isError` instead of being sent.
+- Replies no longer carry `structuredContent`. The text content holds the same JSON.
+- `capture_screenshot`, `reflect_read` and `gpu_readback` are no longer marked read-only, so clients stop retrying or auto-approving them.
+- An argument a tool does not declare is refused instead of ignored.
+- `asset_export_package` names its destination `destination` rather than `file`, which the CLI keeps for itself.
+- JSON-RPC requests are checked more strictly: `id: null`, and `params` or `arguments` that are not objects, are refused.
+- CLI: an option the command does not have, and an option missing its value, are refused with exit code 2. An option given twice is sent as a list.
+
 ### Added
-- `asset_export_package` writes the given assets to a `.unitypackage`. Each asset goes in with its
-  `.meta`, so importing the file back restores the GUIDs and the references that pointed at them
-  survive, which makes it a rollback point for the edits Undo does not cover. The file lands
-  outside the project, so `file` is required and an existing one is kept unless `overwrite` is
-  passed. `include_dependencies` follows the whole reference graph and the reply reports the size
-  actually written, because one character prefab can reach most of the project.
-- `scene_settings` reads and changes the lighting and environment a scene carries outside any
-  GameObject: the skybox, ambient light, fog and reflection, twenty settings in all. These live on
-  `RenderSettings`, which is scene-wide and has no path, so `inspect_write` could not reach them.
-  A change goes on the undo stack and marks the scene dirty.
-- `project_settings` reads and changes the settings under `ProjectSettings/` across fourteen
-  sections. A `property` that is not a whole serialized path is searched for as a substring, and
-  the search descends into arrays and structs, so a per-quality-level `shadowDistance` is
-  reachable. A write saves that one settings asset and is undoable.
-- `inspect_write` sets object references. A scene path, an asset path, an instance id or an empty
-  string to clear; a path naming a GameObject is narrowed to the component the field holds.
-- `inspect_write` grows and fills arrays through `<path>.Array.size` and
-  `<path>.Array.data[i]`, and reading an array reports its length and both of those paths.
-- `material_read` takes a `property` substring. On lilToon, checking one property goes from
-  32,743 bytes to 653.
-- `material_create`, `animator_create` and `animation_clip_create` make the three assets that
-  had no tool. Eleven `animator_*` tools edit a controller and none of them could make one, so an
-  empty project could reach none of them. The only way in was the Assets/Create menu, which lands
-  an unnamed asset in whatever folder the Project window happens to be showing and finishes only
-  once the rename field is dismissed. `material_create` without a `shader` uses the one this
-  project's render pipeline draws with, so a URP project does not get `Standard` and a magenta
-  result.
-- `render_stats` reports what the last drawn frame cost: draw calls, SetPass calls, triangles,
-  vertices, shadow casters and what batching collapsed. Reaching these meant walking
-  `UnityEditor.UnityStats` by reflection, which is how a claim that a scene got cheaper ends up
-  resting on the shape of the fix instead of on a measurement. Frame and render times are left
-  out; Unity marks them obsolete and one run read `renderTime` as 52491.31.
-- `capture_screenshot` takes a `camera`, and every capture reports the camera it used. `game`
-  renders through `Camera.main`, which is not necessarily the one you just made, and nothing said
-  which had been used.
-- `inspect_read` and `inspect_write` handle a layer mask: it reads as the layers it holds and is
-  written as a number or as a list of layer names, with `Everything` and `Nothing` for the two
-  masks worth naming in one word. "Why is this not drawn" and "why is this not hit" both end at a
-  culling or collision mask, and it read back as nothing but its type name.
-- `animator_inspect` reports what a running Animator is doing when Play Mode is on and an
-  `object_path` is given: the state each layer is in, how far through it is, and every parameter's
-  current value. The asset says what can happen; only the running Animator says what is happening.
-- A struct reports the paths of its own fields. Answered with nothing but `Generic`, a caller
-  reading a joint's spring or a light's shadow settings had nowhere to go next.
-- Preferences > Unity MCP finishes its own checklist. It stopped at "the CLI exists" and left
-  the step that actually connects something to a sentence telling the reader to go and run it
-  in a terminal, with nothing on the page saying whether it had been done. A third row now
-  reports which client configurations name this Editor's URL, and its button runs
-  `setup --mcp`. The check is a search for this Editor's own URL, so an entry left over from a
-  session that bound a different port reads as not registered — which is what it is.
-- `play_mode_status` reports `frameCount`. An Editor without focus stops ticking, so
-  `isPlaying` stays true while nothing advances: measured as the same frame five seconds
-  apart, then one more after `play_mode_step`. Two readings tell a running Editor from a
-  stalled one.
-- `animation_clip_write_curves` writes float curves into a clip. `animation_clip_create` leaves
-  the asset empty, and the one `execute_code` snippet in a whole hands-on run was a call to
-  `AnimationUtility` to fill it. Tangents are smoothed the way the Animation window's Auto does,
-  because keys left with default tangents hold and then jump. Nothing is written unless every
-  curve resolves, so a typo in the last curve does not leave half a motion behind.
-- `play_mode_step` takes `animators` and reports each one at the frame it reached: the state per
-  layer, how far through it is, whether it is in transition, and the parameter values. A state's
-  progress is not a property `paths` can read, so twenty-one steps in one run came with
-  twenty-one `animator_inspect` calls, each carrying the controller asset again.
-- `material_read` takes `object_paths`, up to 50, keyed by the path each was asked for. Comparing
-  materials across a scene went out as one call per object: three hundred calls and 744 KB.
-- `project_settings` reads several properties of a section with `properties` and changes several
-  together with `values`, saved once. Nothing is applied until every path has been found, so a
-  typo in the third of three leaves the file as it was, and the two masks of a layer collision
-  pair are never left disagreeing.
-- The CLI takes a list or an object for an argument that wants one: `--paths '["a","b"]'`. It
-  arrived as one string, and the tool answered about a type named after the opening bracket.
-  Text that only looks like JSON stays the string it was typed as, and a bracketed list that does
-  not parse is refused, because Windows PowerShell strips the quotes on the way to a native
-  program and `["a","b"]` arrives as `[a,b]`.
+- Twelve tools:
+  - `project_settings` and `scene_settings` read and change project and scene-wide settings.
+  - `material_create`, `animator_create`, `animation_clip_create` and `animation_clip_write_curves` create the assets the editing tools work on. Overwriting keeps the asset's GUID.
+  - `animator_set_parameter` drives a parameter on a running Animator.
+  - `asset_export_package` writes assets to a `.unitypackage`. A failed export leaves an existing file untouched.
+  - `asset_broken_references` finds references whose target is gone.
+  - `search_query` runs a query through the Editor's own search.
+  - `render_stats` reports what the last frame cost.
+  - `editor_state` answers while the main thread is busy.
+- `inspect_write` sets object references, grows arrays, and takes layer masks by name.
+- `inspect_read` returns an array's elements, up to 20.
+- `material_read` takes `property`, `object_paths` and `group`.
+- `capture_screenshot` takes `camera` and `focus`. With `focus`, a capture of the game or scene view that would not show the object is refused.
+- `scene_browse_hierarchy` reports `childrenNotShown` on a filtered parent.
+- `play_mode_step` takes `animators`, `play_mode_status` reports `frameCount`, and `animator_inspect` reports a running Animator's state.
+- `gameobject_create` takes `collider: false`.
+- A job id and a `scene_browse_hierarchy` snapshot id carry the domain they were made in, so an id kept across a reload names nothing rather than someone else's work.
+- `scene_browse_hierarchy` refuses `since` against a snapshot that covered only one page, instead of reporting everything outside that page as removed.
+- CLI: `tools <name>` prints one tool, and `doctor` reports version skew, newer releases and which executable is running.
+- Preferences > Unity MCP shows whether a client is registered, and can register one.
 
 ### Fixed
-- `doctor` reports version skew and new releases. The descriptor has carried `protocolVersion`
-  all along and nothing compared it, so a CLI and a package from different releases failed in
-  whatever way the missing piece happened to fail — a tool that is not there, an argument that is
-  not read — with nothing pointing at the version. It now names which side is behind. It also says
-  when a newer release exists, cached for six hours so the report stays fast, and it never
-  installs one: installing without being asked is what turns a bad release into a broken machine.
-- `animator_set_parameter` drives a parameter on a running Animator, the way a script would.
-  Making a transition fire on purpose is what checking a gimmick comes down to, and it was the
-  last thing in a character setup that still needed `execute_code`. Play Mode only; in Edit Mode
-  it says where the controller's default lives instead of writing it.
-- `upgrade` can install a named release: `upgrade --release v4.1.1`. It read `--version`, which
-  is intercepted before any command runs and prints this executable's own version, so
-  `upgrade --version v4.0.0` printed the current version and exited 0 having upgraded nothing.
-  The way back from a release that turns out to be broken was unreachable from the CLI, though
-  both installers had always taken a tag.
-- The CLI refuses an option the command does not have. `setup --agnet codex` read as no
-  `--agent` at all, and `--agent` defaults to every installed agent — so a misspelling widened
-  the write from one client's configuration to all of them, and said nothing about it. The
-  refusal names what that command does take.
-- An object reference could not be set to anything Unity serializes itself. The expected type was
-  read only from the managed spelling `PPtr<$Transform>`, and Unity writes `PPtr<Transform>` for
-  its own fields, so every built-in component's reference fields went unnarrowed: a GameObject
-  path meant for `m_ProbeAnchor` or `m_ConnectedBody` was handed over whole, and Unity dropped it.
-- A reference to an object that is switched off was reported as not found. Resolution went through
-  `GameObject.Find`, which skips inactive objects — a spare collider or a hidden outfit is exactly
-  what a reference points at.
-- An asset path whose sub-asset is what the field wants was refused. A PNG's main asset is its
-  Texture2D and its Sprite is a sub-asset, so a Sprite field was handed the one object in the file
-  it cannot hold.
-- An instance id too wide for an int resolved to a different, live object rather than to nothing.
-  Before Unity 6.5 the cast wraps, so an id 2^32 above a real one named that real object and the
-  reference was written somewhere the caller never asked for.
-- `inspect_write` without `component_type` answered with the component list and wrote nothing.
-  Only a listing should reach that view.
-- `project_settings` wrote every dirty asset in the project to disk, not just the settings asset
-  it changed.
-- `inspect_read`, `inspect_list` and `inspect_write` resolve their paths the way every other tool
-  does. They called `GameObject.Find`, which sees neither an object that is switched off nor the
-  `/Name[1]` form the hierarchy reports for repeated siblings, and answered `GameObject not found`
-  for a path that was correct. The refusal now names what is at that level.
-- `inspect_list` includes a property that a component's own Inspector draws by hand. Unity marks
-  such a field invisible, and listing by visibility left out a HingeJoint's `m_ConnectedBody` —
-  the one property someone debugging a joint has come to find, and one that `inspect_read` and
-  `inspect_write` both take.
-- An argument a tool does not declare is refused instead of dropped. `asset_find` given `path`
-  (the argument is `folder`) returned all 4,373 assets, and `scene_browse_hierarchy` given `nmae`
-  returned the whole scene: a caller asking to narrow was handed the opposite, with nothing in the
-  reply to say the filter never ran. The refusal names the arguments the tool does take.
-- `project_settings` writes the file it says it wrote. Every settings singleton carries the
-  built-in GUID, so `AssetDatabase.SaveAssetIfDirty` could not find one and left the object dirty
-  with the file byte-for-byte unchanged, under a reply saying `written: true`.
-- `inspect_write` warns when Play Mode will throw the change away, under the same
-  `playModeWarning` key the other editing tools use. The warning no longer appears on a change to
-  an asset, which survives Play Mode.
-- A console entry a snippet logged no longer arrives behind this server's own call path. Every
-  frame of that path names source, so four of them filled the frames the trimmer keeps: a message
-  of a few characters came back behind about 430 characters of transport, on every entry of every
-  console read. A frame inside a tool still survives, because that one names where the trouble was.
-- The CLI says what an empty HTTP body means. It reported one through the message written for a
-  body it could not parse, whose excerpt was then empty, so the sentence ended at its colon. An
-  empty body is what a domain reload answers with, which is what polling `compile_status` straight
-  after `compile_request` meets, so it now says so and says to try again.
-- `animator_inspect` explains a base layer whose stored weight is 0. Almost every controller
-  stores 0 there and Unity runs layer 0 at full weight regardless, so read as a weight it said the
-  layer was off, which is the opposite of what happens. The reply carries a `weightNote` saying so.
-- `render_stats` says that a reading taken after stepping several frames covers more than one of
-  them: five frames read as 80 draw calls where a single step gives 16.
+- A VRChat project no longer logs a fatal error for this package on every Editor start. ([#36](https://github.com/isuzu-shiranui/UnityMCP/issues/36))
+- `upgrade --release vX` installs a named release. `--version` only printed the CLI's version.
+- A `gameobject_create` refused for a bad parent or position no longer leaves the object in the scene.
+- A `timeline_create_clip` refused for its `control_source` or `animation_clip` leaves neither an empty clip on the track nor an exposed reference on the director.
+- `timeline_set_track` no longer rewrites the `.playable` when only a binding changes.
+- `inspect_read`, `inspect_list` and `inspect_write` find inactive objects and `/Name[1]` paths.
+- `inspect_list` includes properties a custom Inspector draws, such as a HingeJoint's `m_ConnectedBody`.
+- `inspect_write` without `component_type` writes to the GameObject instead of listing its components.
+- Integer properties refuse a value outside their type's range instead of storing a clamped one.
+- An instance id that does not fit in an int no longer resolves to a different object.
+- CLI: a whole number keeps its digits. An instance id past 2^53 was carried as a double, and the call answered about whichever object the rounded id belonged to.
+- `verify` fails when the Editor is already running tests instead of reporting that run's results, and `verify --test --test-mode play` no longer skips the tests.
+- `verify` counts a test that ended inconclusive as a failure. It was listed as one and exited 0.
+- The MCP stdio bridge answers a request once. A stream that broke after a payload had gone out put a second reply under the same id.
+- `asset_export_package` refuses a destination that names an existing folder. It appended the extension to the folder's own name and wrote the package beside it.
+- A stopped server refuses a call instead of answering 500, which a client repeated until its retry budget was gone.
+- `recorder_add_track` cleans up when Timeline cannot create the clip, instead of leaving the track and its settings inside the asset.
+- Console entries logged from a snippet no longer carry this server's call path.
 
 ### Changed
-- The skill is split into a guide and two reference pages, `reference/tools.md` and
-  `reference/workflows.md`, which the CLI installs beside it. The first read is a third of what it
-  was. Every page is ASCII: Windows PowerShell 5.1 decodes UTF-8 without a BOM as the ANSI
-  codepage, so six em dashes arrived as mojibake and four hands-on runs in a row read 26 KB twice
-  to get past them.
-- A tool result is sent once. Every reply carried the same JSON twice, in `content` and in
-  `structuredContent`, byte for byte: 13,478 bytes where 7,135 would do, on every call, kept for
-  the rest of the session. No tool here declares an `outputSchema`, so nothing could validate the
-  structured copy, and the specification asks for the text one regardless.
-- The CLI prints `truncated` and `next`. The Editor lifts them out of the result and onto the
-  envelope, and only `--raw` printed the envelope, so a listing that stopped early printed exactly
-  like a complete one.
+- The agent skill is a short guide plus two reference pages, all ASCII.
+- The CLI prints `truncated` and `next` when a listing stopped early.
+- `inspect_write` warns when Play Mode will discard a scene change.
+- Request bodies over 8 MiB are refused with 413.
+- `inspect_read` and `inspect_list` carry a reply ceiling, so a component with many array fields is refused over MCP rather than filling the caller's context.
+- `input_pointer` caps `frames_per_step` at 1000. The work a drag schedules is steps times frames per step, and only the first of the two was bounded.
 
 ## [4.2.0] - 2026-09-09
 

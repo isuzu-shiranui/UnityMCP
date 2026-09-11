@@ -6,10 +6,9 @@ namespace UnityMCP.Editor.Core
     public enum McpIdempotency
     {
         /// <summary>
-        /// Repeating the operation leaves the project as one call would, so a client may retry it
-        /// after a connection failure. That is weaker than having no side effect: a tool that
-        /// writes to a path the caller named, or reads a property whose getter instantiates, is
-        /// still Safe as long as the second call lands where the first one did.
+        /// A read-only operation that may be retried after a connection failure. The tool catalog
+        /// publishes both readOnlyHint and idempotentHint for this value. File writes and arbitrary
+        /// property getters must use Unsafe, even if a particular call happens to be repeatable.
         /// </summary>
         Safe,
 

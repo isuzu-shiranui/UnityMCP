@@ -31,6 +31,36 @@ namespace UnityMCP.Editor.Tests
 
         private string outputDirectory;
 
+        [Test]
+        public void ExportPreservesAnUnrelatedPartialFile()
+        {
+            Directory.CreateDirectory(this.outputDirectory);
+            var file = Path.Combine(this.outputDirectory, "preserve.unitypackage");
+            File.WriteAllText(file + ".partial", "unrelated");
+            AssetTools.ExportPackage(new[] { MaterialPath }, file);
+            Assert.That(File.ReadAllText(file + ".partial"), Is.EqualTo("unrelated"));
+            Assert.That(new FileInfo(file).Length, Is.GreaterThan(0));
+        }
+
+        [Test]
+        [Platform("Win")]
+        public void ALockedDestinationKeepsThePreviousBackupWhenCommitFails()
+        {
+            Directory.CreateDirectory(this.outputDirectory);
+            var file = Path.Combine(this.outputDirectory, "locked.unitypackage");
+            File.WriteAllText(file, "previous backup");
+            using (var locked = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                // A refusal the caller can read, not the 500 an escaping IOException becomes.
+                var error = Assert.Throws<McpToolException>(
+                    () => AssetTools.ExportPackage(new[] { MaterialPath }, file, overwrite: true));
+
+                Assert.That(error.Message, Does.Contain("untouched"));
+            }
+            Assert.That(File.ReadAllText(file), Is.EqualTo("previous backup"));
+            Assert.That(Directory.GetFiles(this.outputDirectory, "*.partial"), Is.Empty);
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -191,6 +221,58 @@ namespace UnityMCP.Editor.Tests
                 () => AssetTools.ExportPackage(new[] { MaterialPath }, null));
 
             Assert.That(noFile.Code, Is.EqualTo("invalid_params"));
+        }
+
+        /// <summary>
+        /// A destination that names a folder is refused rather than turned into a hidden file.
+        /// </summary>
+        /// <remarks>
+        /// The extension is appended when it is missing, so a trailing slash produced
+        /// '&lt;folder&gt;/.unitypackage' — a file with no name, in a place the caller would not
+        /// think to look for it.
+        /// </remarks>
+        [Test]
+        public void ADestinationThatNamesAFolderIsRefused()
+        {
+            var error = Assert.Throws<McpToolException>(
+                () => AssetTools.ExportPackage(
+                    new[] { MaterialPath }, this.outputDirectory.Replace('\\', '/') + "/"));
+
+            Assert.That(error.Code, Is.EqualTo("invalid_params"));
+            Assert.That(error.Message, Does.Contain("folder"));
+            Assert.That(
+                File.Exists(Path.Combine(this.outputDirectory, ".unitypackage")),
+                Is.False,
+                "nothing is written when the destination is refused");
+        }
+
+        /// <summary>
+        /// A folder named without a trailing separator is refused as well.
+        /// </summary>
+        /// <remarks>
+        /// The extension went onto the folder's own name, so the package landed beside the folder
+        /// the caller meant to write into, under a name nobody typed.
+        /// </remarks>
+        [Test]
+        public void AFolderWithoutATrailingSeparatorIsAlsoRefused()
+        {
+            Directory.CreateDirectory(this.outputDirectory);
+            var folder = this.outputDirectory.Replace('\\', '/');
+
+            // The file this refusal prevents sits beside the folder, which the fixture's own
+            // clean-up does not reach.
+            if (File.Exists(folder + ".unitypackage"))
+            {
+                File.Delete(folder + ".unitypackage");
+            }
+
+            var error = Assert.Throws<McpToolException>(
+                () => AssetTools.ExportPackage(new[] { MaterialPath }, folder));
+
+            Assert.That(error.Code, Is.EqualTo("invalid_params"));
+            Assert.That(error.Message, Does.Contain("folder"));
+            Assert.That(File.Exists(folder + ".unitypackage"), Is.False,
+                        "nothing is written beside the folder either");
         }
     }
 }

@@ -39,6 +39,8 @@ public static class DoctorCommand
         var running = context.ReadDescriptors();
         var known = context.ReadAllDescriptors();
 
+        ReportExecutable(context);
+
         context.Out.WriteLine("Agents");
 
         foreach (var agent in agents)
@@ -114,6 +116,128 @@ public static class DoctorCommand
 
         // Always zero: doctor reports, and a report that fails the shell is a report nobody runs.
         return 0;
+    }
+
+    /// <summary>
+    /// Where this build is, and what a caller typing the command's name actually gets.
+    /// </summary>
+    /// <remarks>
+    /// A copy installed once and left behind stays first on PATH, and an agent driving the Editor
+    /// through the command name runs that one: every fix made since goes unseen while the repo's
+    /// own build passes its tests. Found by an agent hitting a bug that had already been fixed
+    /// three versions earlier.
+    /// </remarks>
+    private static void ReportExecutable(CommandContext context)
+    {
+        context.Out.WriteLine("Executable");
+        context.Out.WriteLine($"  [running]  {Environment.ProcessPath ?? "unknown"} ({Program.Version()})");
+
+        var onPath = FirstOnPath();
+
+        if (onPath is null)
+        {
+            context.Out.WriteLine("  [absent]   no isuzu-unity-cli on PATH; the command name will not resolve");
+        }
+        else if (!SamePath(onPath, Environment.ProcessPath))
+        {
+            var version = VersionOf(onPath);
+
+            var note = version is null ? "" : $" ({version})";
+            var stale = version is not null && ReleaseCheck.IsNewer(Program.Version(), version);
+
+            context.Out.WriteLine($"  {(stale ? "[stale]   " : "[other]   ")} {onPath}{note}");
+            context.Out.WriteLine(
+                stale
+                    ? "    this is what the command name runs, and it is older than the build you are in. "
+                      + "Replace it, or the fixes in this build are not the ones being used"
+                    : "    this is what the command name runs, and it is not the build you are in");
+        }
+
+        context.Out.WriteLine();
+    }
+
+    /// <summary>
+    /// Whether two paths name the same file.
+    /// </summary>
+    /// <remarks>
+    /// Environment.ProcessPath is the resolved target on Linux, while a PATH entry usually is not:
+    /// install.sh puts the binary under ~/.local/bin, which is commonly a link. Compared as text,
+    /// every such installation reported that the command name runs some other build. Case is only
+    /// ignored where the filesystem ignores it.
+    /// </remarks>
+    private static bool SamePath(string? left, string? right)
+    {
+        if (left is null || right is null)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(left, right, comparison))
+        {
+            return true;
+        }
+
+        try
+        {
+            return string.Equals(
+                new FileInfo(left).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? left,
+                new FileInfo(right).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? right,
+                comparison);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The first isuzu-unity-cli a shell would find, or null when there is none.</summary>
+    private static string? FirstOnPath()
+    {
+        var names = OperatingSystem.IsWindows()
+            ? new[] { "isuzu-unity-cli.exe", "isuzu-unity-cli.cmd", "isuzu-unity-cli" }
+            : new[] { "isuzu-unity-cli" };
+
+        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "")
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var name in names)
+            {
+                try
+                {
+                    var candidate = Path.Combine(directory.Trim(), name);
+
+                    if (File.Exists(candidate))
+                    {
+                        return Path.GetFullPath(candidate);
+                    }
+                }
+                catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException)
+                {
+                    // A PATH entry that is not a usable directory is the shell's problem, not this.
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The version another copy reports, or null when it cannot be read.</summary>
+    private static string? VersionOf(string executable)
+    {
+        try
+        {
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(executable);
+
+            return string.IsNullOrWhiteSpace(info.ProductVersion) ? info.FileVersion : info.ProductVersion;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Says so when a newer release exists. Never installs one.</summary>

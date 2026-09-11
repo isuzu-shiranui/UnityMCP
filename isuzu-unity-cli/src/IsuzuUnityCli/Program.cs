@@ -48,6 +48,7 @@ public static class Program
 
         try
         {
+            RefuseMissingValues(parsed);
             // 'call' forwards what it does not recognise to the tool, which refuses what it does
             // not declare. Every other command consumes its options itself and had nowhere to put
             // a misspelling, so it dropped it: 'setup --agnet codex' reads as no --agent at all,
@@ -116,15 +117,15 @@ public static class Program
     private static readonly IReadOnlyDictionary<string, string[]> OptionsPerCommand =
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            ["projects"] = new string[0],
-            ["tools"] = new[] { "group", "project" },
+            ["projects"] = new[] { "raw" },
+            ["tools"] = new[] { "group", "project", "raw" },
             ["verify"] = new[]
             {
                 "project", "no-compile", "test", "test-mode", "assembly", "filter", "category",
                 "timeout", "logs", "raw",
             },
-            ["health"] = new[] { "project" },
-            ["jobs"] = new[] { "project" },
+            ["health"] = new[] { "project", "raw" },
+            ["jobs"] = new[] { "project", "raw" },
             ["mcp-stdio"] = new[] { "project", "group" },
             ["setup"] = new[] { "agent", "client", "mcp", "scope", "no-skill", "project" },
             ["doctor"] = new[] { "fix" },
@@ -134,6 +135,25 @@ public static class Program
 
     /// <summary>Options every command takes.</summary>
     private static readonly string[] AlwaysAccepted = { "help", "version", "compact" };
+
+    private static void RefuseMissingValues(ParsedArgs parsed)
+    {
+        var required = parsed.Command == "call"
+            ? new[] { "project", "json", "file" }
+            : parsed.Command switch
+            {
+                "tools" => new[] { "project", "group" },
+                "verify" => new[] { "project", "test-mode", "assembly", "filter", "category", "timeout", "logs" },
+                "health" or "jobs" => new[] { "project" },
+                "mcp-stdio" => new[] { "project", "group" },
+                "setup" => new[] { "agent", "client", "scope", "project" },
+                "upgrade" => new[] { "release" },
+                _ => Array.Empty<string>(),
+            };
+        var missing = required.Where(parsed.HasFlag).ToArray();
+        if (missing.Length > 0)
+            throw new CliException("An option value is required for " + string.Join(", ", missing.Select(name => "--" + name)) + ".", 2);
+    }
 
     /// <summary>Refuses an option the named command does not have.</summary>
     /// <remarks>
@@ -172,7 +192,7 @@ public static class Program
             $"Unknown option{(unknown.Count > 1 ? "s" : string.Empty)} "
             + string.Join(", ", unknown.Select(name => "--" + name))
             + $" for '{parsed.Command}'. It takes {takes}.",
-            1);
+            2);
     }
 
     public static string Version()

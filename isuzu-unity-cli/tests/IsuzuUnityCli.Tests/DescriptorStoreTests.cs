@@ -7,6 +7,44 @@ namespace IsuzuUnityCli.Tests;
 [Collection("environment")]
 public sealed class DescriptorStoreTests : IDisposable
 {
+    [Theory]
+    [InlineData("projectName", "42")]
+    [InlineData("token", "{}")]
+    [InlineData("endpoint", "[]")]
+    [InlineData("projectPath", "true")]
+    [InlineData("pid", "{}")]
+    [InlineData("portMismatch", "[]")]
+    public void WrongFieldTypesDoNotHideHealthyInstances(string field, string value)
+    {
+        Write("bad.json", "{\"" + field + "\":" + value + "}");
+        Write("healthy.json", Descriptor("Healthy"));
+        Assert.Equal("Healthy", Assert.Single(DescriptorStore.ReadAll([_dir], _ => true)).ProjectName);
+    }
+
+    /// <summary>
+    /// A field the CLI only reports is dropped, rather than taking the Editor with it.
+    /// </summary>
+    /// <remarks>
+    /// The port and the token are what a connection is made of, and a wrong type there cannot be
+    /// read past. The rest is shown to the reader, so an Editor of another version writing one of
+    /// them differently must not answer "no Editor is running" for one that is.
+    /// </remarks>
+    [Theory]
+    [InlineData("portMismatch", "0")]
+    [InlineData("preferredPort", "\"27180\"")]
+    [InlineData("mcpUrl", "42")]
+    [InlineData("unityVersion", "6000")]
+    public void AnInformationalFieldOfAnotherTypeStillLeavesTheEditorReachable(string field, string value)
+    {
+        Write("skewed.json", Descriptor("Skewed", extra: ",\"" + field + "\":" + value));
+
+        var found = Assert.Single(DescriptorStore.ReadAll([_dir], _ => true));
+
+        Assert.Equal("Skewed", found.ProjectName);
+        Assert.Equal(27180, found.Port);
+        Assert.Equal("tok", found.Token);
+    }
+
     private readonly string _dir = Path.Combine(Path.GetTempPath(), "isuzu-cli-tests", Guid.NewGuid().ToString("N"));
 
     public DescriptorStoreTests()

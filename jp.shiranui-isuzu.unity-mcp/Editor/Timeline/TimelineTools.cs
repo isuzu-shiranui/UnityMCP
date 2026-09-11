@@ -71,7 +71,7 @@ namespace UnityMCP.Editor.Timeline
         {
             if (string.IsNullOrWhiteSpace(objectPath) && !instanceId.HasValue)
             {
-                var directors = UnityObject.FindObjectsByType<PlayableDirector>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                var directors = AllDirectors();
 
                 return new JObject
                 {
@@ -177,6 +177,25 @@ namespace UnityMCP.Editor.Timeline
                 ["duration"] = Math.Round(director.duration, 4),
                 ["note"] = "Evaluated in the Editor. capture_screenshot now shows this moment.",
             };
+        }
+
+        /// <summary>Every PlayableDirector in the open scenes, inactive ones included.</summary>
+        /// <remarks>
+        /// The overload without a FindObjectsSortMode is absent up to 6000.3 and present from
+        /// 6000.5, where the one taking it becomes obsolete. Which of the two 6000.4 has is not
+        /// established, so the older branch suppresses the warning rather than the guard moving
+        /// down a version and failing to compile where the replacement is not there yet.
+        /// </remarks>
+        private static PlayableDirector[] AllDirectors()
+        {
+#if UNITY_6000_5_OR_NEWER
+            return UnityObject.FindObjectsByType<PlayableDirector>(FindObjectsInactive.Include);
+#else
+#pragma warning disable CS0618
+            return UnityObject.FindObjectsByType<PlayableDirector>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+#pragma warning restore CS0618
+#endif
         }
 
         private static JObject DescribeDirector(

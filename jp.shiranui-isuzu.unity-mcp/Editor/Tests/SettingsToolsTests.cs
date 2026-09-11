@@ -19,6 +19,33 @@ namespace UnityMCP.Editor.Tests
     public sealed class SettingsToolsTests
     {
         [Test]
+        public void SettingsBatchRejectsResizeAndElementEditBeforeApplyingOrSaving()
+        {
+            var target = new GameObject("SettingsArrayConflictFixture", typeof(MeshRenderer));
+            try
+            {
+                var renderer = target.GetComponent<MeshRenderer>();
+                renderer.sharedMaterials = new Material[] { null };
+                using var serialized = new SerializedObject(renderer);
+                var change = typeof(ProjectSettingsTools).GetMethod("ChangeMany",
+                    System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+                var thrown = Assert.Throws<System.Reflection.TargetInvocationException>(() =>
+                    change.Invoke(null, new object[] { serialized, "fixture", new JObject
+                    {
+                        ["m_Materials.Array.data[0]"] = JValue.CreateNull(),
+                        ["m_Materials.Array.size"] = 0,
+                    } }));
+                Assert.That(thrown.InnerException, Is.TypeOf<McpToolException>());
+                Assert.That(thrown.InnerException.Message, Does.Contain("Nothing was written"));
+                Assert.That(renderer.sharedMaterials.Length, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(target);
+            }
+        }
+
+        [Test]
         public void TheSectionsAreListedWhenNoneIsNamed()
         {
             var listed = ProjectSettingsTools.ProjectSettings();
@@ -92,6 +119,10 @@ namespace UnityMCP.Editor.Tests
                 Assert.That(written["written"].Value<bool>(), Is.True);
                 Assert.That(written["property"]["value"].Value<float>(), Is.EqualTo(0.25f));
                 Assert.That(EditorUtility.IsDirty(target), Is.False, "and the file was written");
+
+                // The save that writes a settings file writes everything else unsaved with it,
+                // and nothing in Unity narrows it, so the reply has to say so.
+                Assert.That(written["note"].ToString(), Does.Contain("every other unsaved asset"));
             }
             finally
             {
@@ -151,6 +182,16 @@ namespace UnityMCP.Editor.Tests
                     () => ProjectSettingsTools.ProjectSettings("physics", mask, -1));
 
                 Assert.That(thrown.Message, Does.Contain("uint"));
+
+                // The cast wraps rather than refusing, so this was stored as 0 under a success.
+                var overflowed = Assert.Throws<McpToolException>(
+                    () => ProjectSettingsTools.ProjectSettings("physics", mask, 4294967296L));
+
+                Assert.That(overflowed.Message, Does.Contain("4294967295"));
+                Assert.That(
+                    ProjectSettingsTools.ProjectSettings("physics", mask)["property"]["value"].Value<long>(),
+                    Is.EqualTo(uint.MaxValue),
+                    "a refused write leaves the value alone");
             }
             finally
             {

@@ -10,7 +10,8 @@ public static class Usage
 
         COMMANDS
           projects                       List Editors that are currently running
-          tools                          List the tools the Editor publishes
+          tools [exact-name]             List tools, or print one tool's full schema as JSON
+                                         With a name the output is the same with or without --raw
           call <tool> [args]             Invoke a tool
           verify                         Recompile, optionally run the tests, read the console,
                                          and answer with one exit code
@@ -25,7 +26,9 @@ public static class Usage
 
         CALL ARGUMENTS
           --json '<object>'              Arguments as one JSON object
-          --<name> <value>               Individual argument; repeatable
+          --<name> <value>               Individual argument. Naming one twice sends a list, which
+                                         is how an array is typed where quotes do not survive:
+                                         --paths one --paths two
           --file <path>                  For execute_code: read the snippet from a file and
                                          send it base64-encoded, so nothing can mangle it
 
@@ -44,7 +47,7 @@ public static class Usage
           --group <g>[,<g>]              Only these groups: diagnostics, authoring, rendering,
                                          timeline, build, code, input. On mcp-stdio it narrows
                                          what the client is offered, which it otherwise pays for
-                                         on every request: all 95 tools are about 40,000 tokens
+                                         on every request: every tool together is about 40,000 tokens
                                          and diagnostics alone is about 9,500
 
         VERIFY OPTIONS
@@ -58,9 +61,9 @@ public static class Usage
           --logs <n>                     How many console errors to report; defaults to 20
           --raw                          Print the JSON summary instead of the short report
 
-          Exit codes: 0 verified, 1 compile or tests failed, 3 no Editor or an ambiguous
-          one, 4 timed out. Console errors are reported but never fail the run, because
-          entries from earlier in the session linger.
+          Exit codes: 0 verified, 1 compile or tests failed, 2 an option is wrong, 3 no
+          Editor or an ambiguous one, 4 timed out. Console errors are reported but never
+          fail the run, because entries from earlier in the session linger.
 
         ENVIRONMENT
           UNITY_MCP_STATE_DIR            Where the Editor writes its descriptors, when that is
@@ -111,6 +114,7 @@ public static class Usage
           isuzu-unity-cli projects
           isuzu-unity-cli tools
           isuzu-unity-cli tools --group timeline,rendering
+          isuzu-unity-cli tools compile_status
           isuzu-unity-cli verify
           isuzu-unity-cli verify --test --assembly UnityMCP.Editor.Tests
           isuzu-unity-cli call play_mode_status

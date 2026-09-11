@@ -30,8 +30,10 @@ namespace UnityMCP.Editor.Tools
             "the most expensive thing here: one at the default size is around 40,000 tokens, so " +
             "four of them outweigh every other call of a session put together. Lower 'max_size' " +
             "when the question is about layout rather than detail, and read the numbers with " +
-            "inspect_read or reflect_read when a number would answer it.",
-            Idempotency = McpIdempotency.Safe)]
+            "inspect_read or reflect_read when a number would answer it. Name the object the " +
+            "picture is about in 'focus' so a camera pointed somewhere else is refused rather " +
+            "than paid for.",
+            Idempotency = McpIdempotency.Unsafe)]
         public static JObject CaptureScreenshot(
             [McpArg("view", "What to capture. 'game' and 'scene' render through the camera. " +
                             "'game_view_window' and 'scene_view_window' grab those windows off the " +
@@ -52,7 +54,14 @@ namespace UnityMCP.Editor.Tools
             string savePath = null,
             [McpArg("camera", "Scene path of the camera to render 'game' through. Omit to use " +
                               "Camera.main, which is not necessarily the one you just made.")]
-            string camera = null)
+            string camera = null,
+            [McpArg("focus", "Scene path of the object the picture is supposed to show. The call " +
+                             "is refused when that object is outside what the camera sees, instead " +
+                             "of returning a valid picture of somewhere else; otherwise the reply " +
+                             "says where in the frame it landed, as fractions from 0 to 1. Takes " +
+                             "the 'game' and 'scene' views only: a panel view is captured from the " +
+                             "window rather than rendered through a camera.")]
+            string focus = null)
         {
             return ScreenshotCapture.Capture(ToolArgs.Of(
                 ("view", view),
@@ -60,7 +69,8 @@ namespace UnityMCP.Editor.Tools
                 ("width", width),
                 ("height", height),
                 ("savePath", savePath),
-                ("camera", camera)));
+                ("camera", camera),
+                ("focus", focus)));
         }
 
         [McpTool(

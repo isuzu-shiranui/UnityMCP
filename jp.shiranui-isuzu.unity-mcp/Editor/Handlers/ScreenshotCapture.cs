@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 using Newtonsoft.Json.Linq;
@@ -111,6 +112,18 @@ namespace UnityMCP.Editor.Handlers
             // Editor panel views (or explicit window:<title>) route to desktop capture.
             if (IsEditorPanelView(view))
             {
+                // A panel is read off the desktop, with no camera to test the object against.
+                // Answered silently, the reply looks like a capture that passed the check.
+                if (!string.IsNullOrWhiteSpace(parameters["focus"]?.ToString()))
+                {
+                    throw new McpScreenshotException(
+                        "invalid_params",
+                        $"'focus' applies to the 'game' and 'scene' views, which render through a " +
+                        $"camera. '{view}' is captured from the window itself, so there is nothing " +
+                        "to test the object against.",
+                        400);
+                }
+
                 return CaptureEditorWindow(view, maxSize, requestedWidth, requestedHeight, savePath);
             }
 
@@ -119,7 +132,8 @@ namespace UnityMCP.Editor.Handlers
             {
                 return CaptureCameraView(
                     view, maxSize, requestedWidth, requestedHeight, savePath,
-                    parameters["camera"]?.ToString());
+                    parameters["camera"]?.ToString(),
+                    parameters["focus"]?.ToString());
             }
 
             // Unknown view name — surface as invalid_params so clients get a proper error envelope.
@@ -142,9 +156,79 @@ namespace UnityMCP.Editor.Handlers
         //  Camera-based capture (existing path, preserved)
         // ──────────────────────────────────────────────
 
+        /// <summary>Where the object a capture is meant to show sits relative to the camera.</summary>
+        /// <remarks>
+        /// Nothing in a picture's reply says whether the subject was in it, so a camera aimed
+        /// somewhere else answers with a perfectly valid image of the wrong place. One run spent
+        /// three captures and a render_compare proving a light had no effect, when the light was
+        /// at the origin and the camera was looking at a set built a thousand units away.
+        /// </remarks>
+        private static JObject FrameCheck(Camera camera, string focus, float aspect)
+        {
+            var go = Tools.ObjectResolve.Object(focus, null, "focus", null);
+
+            // Only what would be drawn. A disabled renderer, or one under an inactive object, has
+            // bounds that may still sit at the origin because nothing ever culled it, and taking
+            // it in stretches the box from there to the real content - the same stretch the seed
+            // below was removed to avoid.
+            var renderers = go.GetComponentsInChildren<Renderer>(true)
+                .Where(r => r.enabled && r.gameObject.activeInHierarchy)
+                .ToArray();
+
+            // A parent's own transform is not where its content is. Seeding the box with it and
+            // then taking in the renderers stretched the box from the origin to a cube a thousand
+            // units away, which passed the frustum test on the empty half and put the centre at a
+            // screen x of 36031 in a 128-pixel-wide picture. Only an object with nothing to draw
+            // falls back to its position.
+            var bounds = renderers.Length > 0
+                ? renderers[0].bounds
+                : new Bounds(go.transform.position, Vector3.zero);
+
+            for (var i = 1; i < renderers.Length; i++)
+            {
+                bounds.Encapsulate(renderers[i].bounds);
+            }
+
+            // Built for the aspect the capture will actually render at, not the one the camera
+            // happens to carry: a 1920x1080 Game View asked for a 256x1024 picture has a much
+            // narrower horizontal field of view, and the camera's own planes passed an object the
+            // render then left out of frame.
+            var projection = ProjectionFor(camera, aspect);
+            var clip = projection * camera.worldToCameraMatrix;
+            var planes = GeometryUtility.CalculateFrustumPlanes(clip);
+            var path = Tools.ObjectResolve.PathOf(go);
+
+            if (!GeometryUtility.TestPlanesAABB(planes, bounds))
+            {
+                var centre = bounds.center;
+
+                throw new McpScreenshotException(
+                    "not_in_frame",
+                    $"'{path}' is not in what {Tools.ObjectResolve.PathOf(camera.gameObject)} sees, " +
+                    $"so the picture would not show it. The object is at " +
+                    $"({centre.x:0.##}, {centre.y:0.##}, {centre.z:0.##}). Pick a camera that looks " +
+                    "at it with render_camera_info, move one there, or drop 'focus' to capture " +
+                    "this view anyway.",
+                    400);
+            }
+
+            // Fractions of the frame rather than pixels: the capture is resized after this runs,
+            // so a pixel coordinate would be quoted in a resolution the caller never receives.
+            var viewport = Viewport(clip, bounds.center);
+
+            return new JObject
+            {
+                ["path"] = path,
+                ["inFrame"] = true,
+                ["x"] = Math.Round(viewport.x, 3),
+                ["y"] = Math.Round(viewport.y, 3),
+                ["distance"] = Math.Round(viewport.z, 3),
+            };
+        }
+
         private static JObject CaptureCameraView(
             string view, int maxSize, int? requestedWidth, int? requestedHeight,
-            string savePath, string named = null)
+            string savePath, string named = null, string focus = null)
         {
             try
             {
@@ -241,6 +325,12 @@ namespace UnityMCP.Editor.Handlers
                     captureHeight = Mathf.Max(1, Mathf.RoundToInt(captureHeight * scale));
                 }
 
+                // Before the picture is paid for, not after, and against the shape the picture
+                // will have: the frustum the render uses comes from the capture's own dimensions.
+                var framing = string.IsNullOrWhiteSpace(focus)
+                    ? null
+                    : FrameCheck(camera, focus, (float)captureWidth / captureHeight);
+
                 var rt = RenderTexture.GetTemporary(captureWidth, captureHeight, 24, RenderTextureFormat.ARGB32);
                 var previousTargetTexture = camera.targetTexture;
                 var previousActiveRT = RenderTexture.active;
@@ -258,9 +348,16 @@ namespace UnityMCP.Editor.Handlers
                     tex2d.Apply();
                     RenderTexture.active = previousActiveRT;
 
-                    return Deliver(
+                    var delivered = Deliver(
                         tex2d.EncodeToPNG(), view, captureWidth, captureHeight, savePath,
                         Tools.ObjectResolve.PathOf(camera.gameObject));
+
+                    if (framing != null)
+                    {
+                        delivered["focus"] = framing;
+                    }
+
+                    return delivered;
                 }
                 finally
                 {
@@ -274,10 +371,45 @@ namespace UnityMCP.Editor.Handlers
                     }
                 }
             }
-            catch (Exception e)
+            // A refusal carries its own code and status, and wrapping it in the generic error
+            // string turns "this camera cannot see it" into "capture failed". The object the focus
+            // names is resolved here too, and its not_found is a refusal of the same kind.
+            catch (Exception e) when (e is not McpToolException)
             {
                 return new JObject { ["error"] = $"Screenshot capture failed: {e.Message}" };
             }
+        }
+
+        /// <summary>The projection this camera would use to fill a picture of the given aspect.</summary>
+        private static Matrix4x4 ProjectionFor(Camera camera, float aspect)
+        {
+            if (camera.orthographic)
+            {
+                var half = camera.orthographicSize;
+
+                return Matrix4x4.Ortho(
+                    -half * aspect, half * aspect, -half, half,
+                    camera.nearClipPlane, camera.farClipPlane);
+            }
+
+            return Matrix4x4.Perspective(
+                camera.fieldOfView, aspect, camera.nearClipPlane, camera.farClipPlane);
+        }
+
+        /// <summary>Where a world point lands in the frame, as fractions from 0 to 1.</summary>
+        private static Vector3 Viewport(Matrix4x4 worldToClip, Vector3 point)
+        {
+            var clip = worldToClip * new Vector4(point.x, point.y, point.z, 1f);
+
+            if (Mathf.Approximately(clip.w, 0f))
+            {
+                return new Vector3(0.5f, 0.5f, 0f);
+            }
+
+            return new Vector3(
+                (clip.x / clip.w + 1f) * 0.5f,
+                (clip.y / clip.w + 1f) * 0.5f,
+                clip.w);
         }
 
         // ──────────────────────────────────────────────

@@ -133,9 +133,9 @@ There are third-party tunnels as well, such as ngrok or cloudflared. Exposing th
 - The endpoint is stateless and has no session id.
 - Protocol revisions 2025-11-25, 2025-06-18 and 2025-03-26 are supported.
 - `tools/list` carries annotations. Safe tools carry `readOnlyHint` and `idempotentHint`, and destructive tools carry `destructiveHint`.
-- `tools/call` returns `structuredContent` alongside text. A tool-level error comes back as an `isError` result the model can read, not as a transport error.
+- `tools/call` returns JSON in a text content block. Screenshots add an image content block; `structuredContent` is not returned. A tool-level error comes back as an `isError` result the model can read, not as a transport error.
 - GET and DELETE answer 405. A request with a foreign `Origin` answers 403.
 - There is no `tools/list_changed`. If a package change or a defined-tool change adds or removes tools, reconnect the client.
 - Append `?group=diagnostics,authoring` to the MCP URL and `tools/list` returns only those groups. Calls themselves are never filtered.
 - Preferences > Tool groups writes it into the generated configuration for you, and shows how many tools the selection offers. For the stdio bridge it is `isuzu-unity-cli mcp-stdio --group diagnostics`.
-- **A client pays for every tool's description on every request.** All 95 come to about 40,000 tokens; `diagnostics` alone is about 9,500.
+- **A client pays for every tool's description on every request.** All of them come to about 40,000 tokens; `diagnostics` alone is about 9,500.

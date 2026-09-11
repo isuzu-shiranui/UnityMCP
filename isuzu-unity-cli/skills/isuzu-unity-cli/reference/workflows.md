@@ -82,8 +82,7 @@ isuzu-unity-cli call camera_probe
 ### Save a screenshot to a file
 
 ```bash
-isuzu-unity-cli call capture_screenshot --view scene --max_size 512 \
-  | python -c "import sys,json,base64; d=json.load(sys.stdin); open('scene.png','wb').write(base64.b64decode(d['image']))"
+isuzu-unity-cli call capture_screenshot --view scene --max_size 512 --save_path scene.png
 ```
 
 ### The connection was refused

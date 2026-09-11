@@ -72,6 +72,7 @@ namespace UnityMCP.Editor.Tools
             var target = AssetPath(path, ".controller");
 
             var existing = AssetDatabase.LoadAssetAtPath<AnimatorController>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
 
             if (existing != null && !overwrite)
             {
@@ -81,30 +82,73 @@ namespace UnityMCP.Editor.Tools
                     + "that is there with animator_add_state and animator_add_layer.");
             }
 
+            // Resolved before the old controller is destroyed. Looking the object up afterwards
+            // meant a path that does not resolve took the controller with it: the call failed and
+            // the asset it was replacing was already gone.
+            var host = string.IsNullOrWhiteSpace(objectPath)
+                ? null
+                : ObjectResolve.Object(objectPath, null, "object_path", null);
+
             EnsureFolder(target);
+
+            AnimatorController controller;
 
             if (existing != null)
             {
-                AssetDatabase.DeleteAsset(target);
-            }
+                // Emptied in place rather than deleted and remade. A new file carries a new GUID,
+                // and every Animator, prefab and override controller pointing at this one is left
+                // holding a missing reference. RemoveLayer destroys the layer's state machine, so
+                // nothing is orphaned inside the file either.
+                //
+                // Recorded through AnimatorResolve, which takes the controller and everything
+                // stored inside its file: the states, transitions and behaviours the layers take
+                // with them are separate objects there, and the controller alone leaves them off
+                // the undo stack.
+                AnimatorResolve.RecordUndo(existing, "MCP Create Animator Controller");
 
-            var controller = AnimatorController.CreateAnimatorControllerAtPath(target);
+                for (var i = existing.layers.Length - 1; i >= 0; i--)
+                {
+                    existing.RemoveLayer(i);
+                }
+
+                for (var i = existing.parameters.Length - 1; i >= 0; i--)
+                {
+                    existing.RemoveParameter(i);
+                }
+
+                existing.AddLayer("Base Layer");
+
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssetIfDirty(existing);
+
+                controller = existing;
+            }
+            else
+            {
+                controller = AnimatorController.CreateAnimatorControllerAtPath(target);
+            }
 
             var created = new JObject
             {
                 ["path"] = target,
                 ["layer"] = controller.layers[0].name,
-                ["created"] = true,
+                // False when the asset was already there: its GUID and every reference to it
+                // survive, and a caller keying off created cannot tell the two apart otherwise.
+                ["created"] = existing == null,
             };
 
-            if (!string.IsNullOrWhiteSpace(objectPath))
+            if (existing != null)
             {
-                var go = ObjectResolve.Object(objectPath, null, "object_path", null);
-                var animator = go.GetComponent<Animator>();
+                created["replaced"] = true;
+            }
+
+            if (host != null)
+            {
+                var animator = host.GetComponent<Animator>();
 
                 if (animator == null)
                 {
-                    animator = Undo.AddComponent<Animator>(go);
+                    animator = Undo.AddComponent<Animator>(host);
                 }
                 else
                 {
@@ -112,7 +156,7 @@ namespace UnityMCP.Editor.Tools
                 }
 
                 animator.runtimeAnimatorController = controller;
-                created["attachedTo"] = ObjectResolve.PathOf(go);
+                created["attachedTo"] = ObjectResolve.PathOf(host);
             }
 
             return created;
@@ -126,6 +170,7 @@ namespace UnityMCP.Editor.Tools
             "animation_clip_write_curves is what puts a motion in it. Looping is a setting rather " +
             "than a curve, so it is here.",
             Idempotency = McpIdempotency.Unsafe,
+            UndoGroup = "MCP Create Animation Clip",
             Group = "authoring")]
         public static JObject AnimationClipCreate(
             [McpArg("path", "Where to write the .anim, e.g. Assets/Art/Idle.anim. Missing folders " +
@@ -140,6 +185,7 @@ namespace UnityMCP.Editor.Tools
             var target = AssetPath(path, ".anim");
 
             var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
 
             if (existing != null && !overwrite)
             {
@@ -149,17 +195,25 @@ namespace UnityMCP.Editor.Tools
 
             EnsureFolder(target);
 
-            if (existing != null)
-            {
-                AssetDatabase.DeleteAsset(target);
-            }
-
             var clip = new AnimationClip { name = System.IO.Path.GetFileNameWithoutExtension(target) };
 
             // loopTime is not on AnimationClip; it lives in the settings the importer writes.
             var settings = AnimationUtility.GetAnimationClipSettings(clip);
             settings.loopTime = loop;
             AnimationUtility.SetAnimationClipSettings(clip, settings);
+
+            if (existing != null)
+            {
+                AssetTools.ReplaceAssetContents(existing, clip, target);
+
+                return new JObject
+                {
+                    ["path"] = target,
+                    ["loop"] = loop,
+                    ["created"] = false,
+                    ["replaced"] = true,
+                };
+            }
 
             AssetDatabase.CreateAsset(clip, target);
             AssetDatabase.SaveAssetIfDirty(clip);
@@ -823,7 +877,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("conditions", "Array of {parameter, mode, threshold}. Modes: If and IfNot for a " +
                                   "bool or trigger, Greater and Less for a float or int, Equals and " +
                                   "NotEqual for an int. The threshold is ignored by If and IfNot.")]
-            JToken conditions = null,
+            JObject[] conditions = null,
             [McpArg("has_exit_time", "Let the transition fire when the source clip reaches 'exit_time', " +
                                      "with no condition needed.")]
             bool hasExitTime = false,
@@ -1206,29 +1260,17 @@ namespace UnityMCP.Editor.Tools
             public float Threshold { get; }
         }
 
-        private static List<ParsedCondition> ParseConditions(AnimatorController controller, JToken conditions)
+        private static List<ParsedCondition> ParseConditions(AnimatorController controller, JObject[] conditions)
         {
             var parsed = new List<ParsedCondition>();
 
-            if (conditions == null || conditions.Type == JTokenType.Null)
+            if (conditions == null)
             {
                 return parsed;
             }
 
-            if (!(conditions is JArray array))
+            foreach (var item in conditions)
             {
-                throw new McpToolException(
-                    "invalid_params",
-                    "'conditions' is an array of objects, e.g. [{\"parameter\":\"Grounded\",\"mode\":\"If\"}].");
-            }
-
-            foreach (var entry in array)
-            {
-                if (!(entry is JObject item))
-                {
-                    throw new McpToolException("invalid_params", "Each condition is an object with 'parameter' and 'mode'.");
-                }
-
                 var name = item["parameter"]?.ToString();
 
                 if (string.IsNullOrWhiteSpace(name))

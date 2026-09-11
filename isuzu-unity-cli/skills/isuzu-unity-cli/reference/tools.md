@@ -44,7 +44,7 @@ are not committed.
 | `gameobject_add_component --component_type Rigidbody` / `gameobject_remove_component` | Returns the component list |
 | `asset_find --type Material --folder Assets/Art --limit 20` | Then `asset_info`, `asset_move`, `asset_delete` (to the OS trash) |
 | `asset_create_folder --path Assets/Art/Materials` | Creates parents too; calling it twice is not an error |
-| `asset_export_package --paths Assets/Art --file C:/tmp/art.unitypackage` | A rollback point that keeps the GUIDs, for edits Undo does not cover |
+| `asset_export_package --paths Assets/Art --destination C:/tmp/art.unitypackage` | A rollback point that keeps the GUIDs, for edits Undo does not cover |
 | `scene_list` / `scene_open` / `scene_save` / `scene_create` | `scene_open` refuses over unsaved changes |
 | `prefab_create` / `prefab_instantiate` / `prefab_apply` | `prefab_apply` needs `confirm: true`; it is not undoable and changes every instance |
 | `build_settings` then `build_player --output_path C:/out/Game.exe` | A cold build returns a job id; poll `jobs <id>` |

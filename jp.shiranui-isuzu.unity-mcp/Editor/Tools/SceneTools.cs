@@ -24,7 +24,9 @@ namespace UnityMCP.Editor.Tools
             "type, or tag. Prefer narrowing with a filter and a small limit over fetching the " +
             "whole tree: a full hierarchy dump is large and mostly irrelevant to any one question. " +
             "A filtered walk also returns the parents leading down to each match, so results " +
-            "include objects that do not themselves satisfy the filter. While a prefab is open for " +
+            "include objects that do not themselves satisfy the filter. What it leaves out is a " +
+            "match's own children, when they do not match too: a filter naming a parent answers " +
+            "with that parent alone, and 'childrenNotShown' on it counts what is under it. While a prefab is open for " +
             "editing this still reports the scene behind it, and paths from that scene cannot be " +
             "resolved by the gameobject_ and inspect_ tools, which address the prefab contents " +
             "instead. In a reply that was not narrowed by 'fields', a key missing from a node " +

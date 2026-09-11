@@ -20,6 +20,26 @@ namespace UnityMCP.Editor.Tools
     /// </summary>
     internal static class RenderTools
     {
+        /// <summary>Every camera in the open scenes, inactive ones included.</summary>
+        /// <remarks>
+        /// The overload without a FindObjectsSortMode is absent up to 6000.3 and present from
+        /// 6000.5, where the one taking it becomes obsolete. Which of the two 6000.4 has is not
+        /// established, so the older branch suppresses the warning the way the engine suppresses
+        /// it around its own calls; moving the guard down a version instead would fail to compile
+        /// wherever the replacement is not there yet.
+        /// </remarks>
+        private static Camera[] AllCameras()
+        {
+#if UNITY_6000_5_OR_NEWER
+            return UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsInactive.Include);
+#else
+#pragma warning disable CS0618
+            return UnityEngine.Object.FindObjectsByType<Camera>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+#pragma warning restore CS0618
+#endif
+        }
+
         /// <summary>
         /// Cameras reported. Each runs to about a kilobyte with its matrices, and a cinematic
         /// scene keeps one per shot.
@@ -396,7 +416,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("include_matrices", "Include the view and projection matrices, row-major.")]
             bool includeMatrices = true)
         {
-            var cameras = UnityEngine.Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+            var cameras = AllCameras()
                 .Where(c => string.IsNullOrWhiteSpace(name)
                             || c.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
                 .OrderByDescending(c => c.isActiveAndEnabled)
@@ -492,16 +512,20 @@ namespace UnityMCP.Editor.Tools
                     $"No file at '{path}'. Capture one with capture_screenshot and its save_path argument.");
             }
 
+            var bytes = File.ReadAllBytes(full);
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
 
-            if (!texture.LoadImage(File.ReadAllBytes(full)))
+            try
+            {
+                if (!texture.LoadImage(bytes))
+                    throw new McpToolException("invalid_params", $"'{path}' is not an image Unity can read.");
+                return texture;
+            }
+            catch
             {
                 UnityEngine.Object.DestroyImmediate(texture);
-
-                throw new McpToolException("invalid_params", $"'{path}' is not an image Unity can read.");
+                throw;
             }
-
-            return texture;
         }
     }
 }

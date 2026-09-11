@@ -19,6 +19,43 @@ namespace UnityMCP.Editor.Tests
     internal sealed class SceneHierarchyTests
     {
         private const string NamePrefix = "SHTest";
+
+        [Test]
+        public void BatchedPathsMatchSinglePathsAcrossDuplicateNamesAndRoots()
+        {
+            var other = new GameObject(this.root.name);
+            var a = new GameObject("Duplicate");
+            a.transform.SetParent(this.root.transform);
+            var b = new GameObject("Duplicate");
+            b.transform.SetParent(this.root.transform);
+            b.SetActive(false);
+            try
+            {
+                var objects = this.root.GetComponentsInChildren<Transform>(true)
+                    .Select(t => t.gameObject).Concat(new[] { other }).ToArray();
+                var batch = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
+                foreach (var go in objects.Reverse())
+                    Assert.That(batch.PathOf(go), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(go)));
+
+                b.transform.SetSiblingIndex(0);
+                var nextRead = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
+                foreach (var go in objects)
+                    Assert.That(nextRead.PathOf(go), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(go)),
+                        "a new browse must observe reordered siblings");
+
+                var filtered = SceneHierarchy.Browse(ToolArgs.Of(("name", "Duplicate"), ("activeOnly", true)));
+                var node = FindByName(ChildrenOf(FindNode(filtered, this.root.name)), "Duplicate");
+                Assert.That(node, Is.Not.Null);
+                Assert.That(node["path"].ToString(), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(a)),
+                    "inactive siblings excluded by the filter still determine path indices");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(a);
+                UnityEngine.Object.DestroyImmediate(b);
+                UnityEngine.Object.DestroyImmediate(other);
+            }
+        }
         private const string RootName = "SHTestRoot";
         private const string ChildAName = "SHTestChildA";
         private const string ChildBName = "SHTestChildB";
@@ -54,6 +91,20 @@ namespace UnityMCP.Editor.Tests
                 UnityEngine.Object.DestroyImmediate(this.root);
                 this.root = null;
             }
+        }
+
+        [Test]
+        public void APreResetSnapshotCannotBecomeAnotherSnapshotsId()
+        {
+            var nodes = new[] { new JObject { ["instanceId"] = 1, ["name"] = "before" } };
+            var oldId = SceneHierarchyBaseline.Remember("same-walk", nodes);
+            SceneHierarchyBaseline.Reset();
+            var newId = SceneHierarchyBaseline.Remember("same-walk", nodes);
+
+            Assert.That(newId, Is.Not.EqualTo(oldId));
+            Assert.That(SceneHierarchyBaseline.WalkOf(oldId), Is.Null);
+            Assert.That(SceneHierarchyBaseline.CompareWith(oldId, "same-walk", nodes, out var replacementId), Is.Null);
+            Assert.That(replacementId, Is.Null);
         }
 
         /// <summary>
@@ -258,6 +309,32 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(SnapshotOf(full), Is.Not.Null.And.Not.Empty,
                 "without an id the caller has nothing to ask for a difference from");
+        }
+
+        [TestCase(1, 0)]
+        [TestCase(0, 1)]
+        public void APartialSnapshotCannotReportUnseenExistingNodesAsAdded(int limit, int offset)
+        {
+            var page = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("limit", limit), ("offset", offset)));
+            var snapshot = SnapshotOf(page);
+            Assert.That(snapshot, Is.Not.Null.And.Not.Empty, "pages still identify their snapshot");
+            var result = Since(snapshot);
+            // The way out is named as well as the refusal: a scene too large to return whole is
+            // narrowed with a filter, which keeps the snapshot complete for what it selects.
+            Assert.That(result["error"]?.ToString(),
+                        Does.Contain("only a page").And.Contain("Take a full one").And.Contain("max_depth"));
+            Assert.That(result["added"], Is.Null);
+        }
+
+        [Test]
+        public void ALimitThatIncludesTheWholeWalkStillMakesAFullSnapshot()
+        {
+            var page = SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix), ("limit", int.MaxValue)));
+            var result = Since(SnapshotOf(page));
+            Assert.That(result["error"], Is.Null);
+            Assert.That(Count(result, "added"), Is.Zero);
+            Assert.That(Count(result, "changed"), Is.Zero);
         }
 
         [Test]
@@ -630,6 +707,55 @@ namespace UnityMCP.Editor.Tests
         private static JArray ChildrenOf(JObject node)
         {
             return node?["children"] as JArray;
+        }
+    /// <summary>
+        /// A filtered node says how many of its children the filter kept out.
+        /// </summary>
+        /// <remarks>
+        /// Filtering by a parent's name answered with the parent and nothing under it, which
+        /// reads as a leaf: a hands-on run took that for "the filter does not show children" and
+        /// fetched the whole scene instead of the three objects it was after.
+        /// </remarks>
+        [Test]
+        public void AMatchedParentSaysHowManyChildrenTheFilterLeftOut()
+        {
+            var parent = new GameObject("FilterParentProbe");
+
+            try
+            {
+                for (var i = 0; i < 3; i++)
+                {
+                    new GameObject("FilterChildProbe" + i).transform.SetParent(parent.transform);
+                }
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(("name", "FilterParentProbe")));
+                var node = FindNode(reply, "FilterParentProbe");
+
+                Assert.That(node, Is.Not.Null, "the filter has to match the parent itself");
+                Assert.That(node["children"], Is.Null, "its children do not match, so they are not here");
+                Assert.That(node["childrenNotShown"].Value<int>(), Is.EqualTo(3),
+                    "and the reply has to say that there are three of them");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        private static JObject FindNode(JObject reply, string name)
+        {
+            foreach (var scene in (JArray)reply["scenes"])
+            {
+                foreach (JObject node in (JArray)scene["gameObjects"])
+                {
+                    if (node["name"].Value<string>() == name)
+                    {
+                        return node;
+                    }
+                }
+            }
+
+            return null;
         }
     }
 }

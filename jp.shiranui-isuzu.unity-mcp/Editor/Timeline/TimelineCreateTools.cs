@@ -305,6 +305,17 @@ namespace UnityMCP.Editor.Timeline
                 throw new McpToolException("invalid_params", "'duration' must be a positive, finite number.");
             }
 
+            // A clip is a control clip or an animation clip, never both, so one of the two would
+            // always be refused - after the other had already written the director's exposed
+            // reference, which is scene data the deleted clip can no longer name.
+            if (!string.IsNullOrWhiteSpace(controlSource) && !string.IsNullOrWhiteSpace(animationClip))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "'control_source' and 'animation_clip' describe different kinds of clip. " +
+                    "Pass the one the track takes.");
+            }
+
             var director = TimelineResolve.Director(objectPath, instanceId);
             var timeline = TimelineResolve.Timeline(director, "add a clip to");
 
@@ -356,14 +367,50 @@ namespace UnityMCP.Editor.Timeline
 
             string controls = null;
 
-            if (!string.IsNullOrWhiteSpace(controlSource))
+            try
             {
-                controls = SetControlSource(clip, director, controlSource);
-            }
+                if (!string.IsNullOrWhiteSpace(controlSource))
+                {
+                    controls = SetControlSource(clip, director, controlSource);
+                }
 
-            if (!string.IsNullOrWhiteSpace(animationClip))
+                if (!string.IsNullOrWhiteSpace(animationClip))
+                {
+                    SetAnimationClip(clip, animationClip);
+                }
+            }
+            catch (Exception refusal)
             {
-                SetAnimationClip(clip, animationClip);
+                // The clip exists by the time its contents are refused. Its exposed reference
+                // lives on the director rather than in the clip, so it has to be withdrawn before
+                // the clip that names it is destroyed; nothing could reach it afterwards.
+                if (clip.asset is ControlPlayableAsset refused
+                    && !string.IsNullOrEmpty(refused.sourceGameObject.exposedName.ToString()))
+                {
+                    director.ClearReferenceValue(refused.sourceGameObject.exposedName);
+                }
+
+                // Whether the clip really went is reported rather than assumed, and a failure to
+                // remove it must not replace the refusal on its way out.
+                var cleaned = false;
+
+                try
+                {
+                    cleaned = timeline.DeleteClip(clip);
+                }
+                catch (Exception)
+                {
+                }
+
+                if (!cleaned)
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"{refusal.Message} The clip made for it could not be removed and is still " +
+                        $"on '{TimelineResolve.PathOf(trackAsset)}'; delete it with timeline_delete.");
+                }
+
+                throw;
             }
 
             Commit(timeline, director);

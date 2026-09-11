@@ -10,6 +10,31 @@ namespace IsuzuUnityCli.Tests;
 [Collection("environment")]
 public sealed class ProgramTests
 {
+    [Theory]
+    [InlineData("setup", "--agent")]
+    [InlineData("setup", "--client")]
+    [InlineData("setup", "--scope")]
+    [InlineData("call", "--project")]
+    [InlineData("call", "--file")]
+    [InlineData("call", "--json")]
+    [InlineData("verify", "--timeout")]
+    [InlineData("tools", "--group")]
+    [InlineData("upgrade", "--release")]
+    public async Task MissingValuesFailBeforeDiscoveryOrSetup(string command, string option)
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = output,
+            Err = error,
+            ReadDescriptors = () => throw new InvalidOperationException("Discovery must not run")
+        };
+        Assert.Equal(2, await Program.Run([command, option], context));
+        Assert.Contains(option, error.ToString());
+        Assert.Equal("", output.ToString());
+    }
+
     private static (CommandContext Context, StringWriter Out, StringWriter Err) Context(params InstanceDescriptor[] descriptors)
     {
         var output = new StringWriter();
@@ -40,7 +65,7 @@ public sealed class ProgramTests
     {
         var (context, _, error) = Context();
 
-        Assert.Equal(1, await Program.Run(new[] { "upgrade", "--releaze", "v4.0.0" }, context));
+        Assert.Equal(2, await Program.Run(new[] { "upgrade", "--releaze", "v4.0.0" }, context));
         Assert.Contains("--release", error.ToString());
     }
 
@@ -57,7 +82,7 @@ public sealed class ProgramTests
     {
         var (context, output, error) = Context();
 
-        Assert.Equal(1, await Program.Run(new[] { "setup", "--agnet", "codex" }, context));
+        Assert.Equal(2, await Program.Run(new[] { "setup", "--agnet", "codex" }, context));
         Assert.Contains("--agnet", error.ToString());
         Assert.Contains("--agent", error.ToString());
         Assert.Equal("", output.ToString());
@@ -72,7 +97,7 @@ public sealed class ProgramTests
     {
         var (context, _, error) = Context();
 
-        Assert.Equal(1, await Program.Run(new[] { "doctor", "--group", "rendering" }, context));
+        Assert.Equal(2, await Program.Run(new[] { "doctor", "--group", "rendering" }, context));
 
         var reported = error.ToString();
 
@@ -96,6 +121,19 @@ public sealed class ProgramTests
 
             Assert.DoesNotContain("Unknown option", error.ToString());
         }
+    }
+
+    [Theory]
+    [InlineData("tools")]
+    [InlineData("health")]
+    [InlineData("jobs")]
+    public async Task RawOutputReachesCommandsThatSupportIt(string command)
+    {
+        var (context, _, error) = Context();
+
+        // No Editor: reaching resolution proves the option passed the command gate.
+        Assert.Equal(3, await Program.Run([command, "--raw"], context));
+        Assert.Equal(InstanceResolver.NoneRunning + Environment.NewLine, error.ToString());
     }
 
     /// <summary>

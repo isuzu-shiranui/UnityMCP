@@ -12,10 +12,27 @@ public sealed class ScalarCoercionTests
     {
         Assert.Equal(true, ScalarCoercion.Coerce("true"));
         Assert.Equal(false, ScalarCoercion.Coerce("false"));
-        Assert.Equal(7d, ScalarCoercion.Coerce("007"));
+        Assert.Equal(7L, ScalarCoercion.Coerce("007"));
         Assert.Equal(100000d, ScalarCoercion.Coerce("1e5"));
-        Assert.Equal(16d, ScalarCoercion.Coerce("0x10"));
+        Assert.Equal(16L, ScalarCoercion.Coerce("0x10"));
         Assert.Equal(1.5d, ScalarCoercion.Coerce("1.5"));
+    }
+
+    /// <summary>
+    /// A whole number reaches the Editor with the digits that were typed.
+    /// </summary>
+    /// <remarks>
+    /// An instance id on Unity 6.5 can exceed 2^53. Carried as a double, 568105589204596758 was
+    /// sent as 568105589204596736 and the call came back not_found, naming an id nobody typed.
+    /// </remarks>
+    [Theory]
+    [InlineData("568105589204596758")]
+    [InlineData("-568105589204596758")]
+    [InlineData("9223372036854775807")]
+    public void ALargeWholeNumberKeepsItsDigits(string value)
+    {
+        Assert.Equal(value, ScalarCoercion.ToJsonNode(value).ToJsonString());
+        Assert.Equal(long.Parse(value), ScalarCoercion.Coerce(value));
     }
 
     [Fact]
@@ -81,6 +98,49 @@ public sealed class ScalarCoercionTests
     {
         var thrown = Assert.Throws<CliException>(() => ScalarCoercion.ToJsonNode(value));
 
-        Assert.Contains("PowerShell", thrown.Message);
+        Assert.Contains("--paths one --paths two", thrown.Message);
+    }
+
+    /// <summary>
+    /// A C# snippet reaches execute_code whatever punctuation it holds.
+    /// </summary>
+    /// <remarks>
+    /// The separator that tells a quote-stripped list apart from a value is a colon inside braces
+    /// and a comma inside brackets, and ordinary C# has both: a ternary, a case label, a Windows
+    /// path, an interpolated format specifier. Refused, they came back advised to name the option
+    /// once per value, which has nothing to do with a snippet.
+    /// </remarks>
+    [Theory]
+    [InlineData("{ return Application.isPlaying ? 1 : 0; }")]
+    [InlineData("{ var p = \"C:/tmp/a.png\"; return p; }")]
+    [InlineData("{ switch (n) { case 1: return 1; } return 0; }")]
+    [InlineData("{ Debug.Log($\"pos: {t.position}\"); }")]
+    [InlineData("[SerializeField, Range(0,1)]")]
+    public void CodeIsNotAStrippedList(string value)
+    {
+        var node = ScalarCoercion.ToJsonNode(value);
+
+        Assert.Equal(JsonValueKind.String, node.GetValueKind());
+        Assert.Equal(value, node.GetValue<string>());
+    }
+
+    /// <summary>
+    /// A value that merely wears brackets is a value, not a mangled list.
+    /// </summary>
+    /// <remarks>
+    /// Refusing everything that opens and closes like JSON took a GameObject named [Player] and a
+    /// C# block bound for execute_code with it, and left no spelling that could reach either. The
+    /// separator is what a stripped-quote list always has and these never do.
+    /// </remarks>
+    [Theory]
+    [InlineData("[Player]")]
+    [InlineData("[SYSTEM]")]
+    [InlineData("{ var x = 1; return x; }")]
+    public void BracketsWithNothingSeparatedInsideThemStayAString(string value)
+    {
+        var node = ScalarCoercion.ToJsonNode(value);
+
+        Assert.Equal(JsonValueKind.String, node.GetValueKind());
+        Assert.Equal(value, node.GetValue<string>());
     }
 }

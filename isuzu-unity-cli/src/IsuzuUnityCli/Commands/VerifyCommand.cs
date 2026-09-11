@@ -36,6 +36,7 @@ public static class VerifyCommand
         var startedAt = DateTimeOffset.UtcNow;
         var elapsed = Stopwatch.StartNew();
         var run = new Verifier(context, parsed, context.ResolveInstance(parsed), intervals.JobIntervalMs);
+        UnityError? failed = null;
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.Cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(timeout));
@@ -58,6 +59,12 @@ public static class VerifyCommand
         {
             run.TimedOut = true;
         }
+        catch (UnityError e)
+        {
+            // Held rather than thrown, so the steps that already succeeded are still reported.
+            // A run that stopped at the tests still knows whether the code compiled.
+            failed = e;
+        }
 
         if (parsed.HasFlag("raw"))
         {
@@ -72,6 +79,12 @@ public static class VerifyCommand
         {
             context.Err.WriteLine($"verify timed out after {Format(timeout)}s");
             return 4;
+        }
+
+        if (failed is not null)
+        {
+            context.ReportError(failed.Code, failed.Message);
+            return 1;
         }
 
         return run.Ok ? 0 : 1;
@@ -185,7 +198,7 @@ public static class VerifyCommand
         public bool Ok =>
             !TimedOut
             && (!CompileRan || CompileSucceeded == true)
-            && (!TestsRan || (Failed == 0 && TestStatus != "failed" && TestStatus != "interrupted"));
+            && (!TestsRan || (Failures.Count == 0 && TestStatus == "completed"));
 
         public async Task Compile(int intervalMs, int startGraceMs, CancellationToken cancellation)
         {
@@ -242,7 +255,17 @@ public static class VerifyCommand
             AddOption(body, "filter");
             AddOption(body, "category");
 
-            await Call("test_run", body, cancellation);
+            // A run already in progress is left alone and reported as not started; its results then
+            // answered for this request, so verify passed on tests it never asked to run.
+            if (OptionalFlag((await Call("test_run", body, cancellation))["started"]) == false)
+            {
+                throw new UnityError(
+                    "test_run_busy",
+                    "The Editor is already running tests, so this run was not started and its "
+                    + "results could not be told apart from that one's. Wait for it to finish, then "
+                    + "run verify again. A run that was interrupted before it could report still "
+                    + "reads as running; call test_run with force true to start over.");
+            }
 
             while (true)
             {
@@ -359,7 +382,10 @@ public static class VerifyCommand
 
             if (TestsRan)
             {
-                text.Append($"tests: {Passed} passed, {Failed} failed ({TestMode})");
+                // Failures holds every case that neither passed nor was skipped, which is more
+                // than NUnit's failure count: an inconclusive case verified nothing and is listed
+                // below, so reporting only the failure count would print entries under a zero.
+                text.Append($"tests: {Passed} passed, {Failures.Count} failed ({TestMode})");
                 text.Append(TestStatus == "completed" ? "\n" : $", status {TestStatus}\n");
 
                 foreach (var failure in Failures)
@@ -382,13 +408,13 @@ public static class VerifyCommand
         /// One tool call that outlives a domain reload. The server is simply gone while the reload
         /// runs, for longer than the HTTP client's own retry budget, so a refused connection or a
         /// reset is retried here until the command's deadline rather than reported.
-        /// Safe even for compile_request and test_run, because repeating either only answers that
-        /// one is already in flight.
+        /// test_run is not replayable: a short run may finish before a lost reply is noticed.
         /// </summary>
         private async Task<JsonObject> Call(string tool, JsonObject body, CancellationToken cancellation)
         {
             var json = body.ToJsonString();
             var reauthenticated = false;
+            var replayable = tool != "test_run";
 
             while (true)
             {
@@ -397,7 +423,8 @@ public static class VerifyCommand
                 try
                 {
                     envelope = await _context.Client.SendAsync(
-                        _instance, HttpMethod.Post, "/tools/" + tool, json, Idempotency.Safe, cancellation);
+                        _instance, HttpMethod.Post, "/tools/" + tool, json,
+                        replayable ? Idempotency.Safe : Idempotency.Unsafe, cancellation);
                 }
                 catch (UnityError e) when (e.HttpStatus == 401 && !reauthenticated)
                 {
@@ -405,6 +432,22 @@ public static class VerifyCommand
                     reauthenticated = true;
                     Rediscover();
                     continue;
+                }
+                // Only a reply that never arrived leaves test_run unconfirmed. A gateway status means
+                // it never reached the tool; any other 5xx carries the tool's own failure, and
+                // calling that "may already have run" hid the reason behind the wrong advice.
+                catch (UnityError e) when (!replayable && e.HttpStatus != 401
+                    && (e.HttpStatus is null || e.Code == "non_json" || e.HttpStatus is 502 or 503 or 504))
+                {
+                    // Both codes mean the request never left this process: one was refused at the
+                    // door, the other never got through it. Neither can have started a test run.
+                    if (e.Code is "ECONNREFUSED" or "ECONNTIMEOUT")
+                    {
+                        Rediscover();
+                        await Task.Delay(TransportRetryMs, cancellation);
+                        continue;
+                    }
+                    throw UnconfirmedTestRun(e);
                 }
                 catch (UnityError e) when (e.HttpStatus is null || e.Code == "non_json")
                 {
@@ -424,7 +467,7 @@ public static class VerifyCommand
                     // would only hide it.
                     Rediscover();
 
-                    if (!await IsReloading(cancellation))
+                    if (!replayable || !await IsReloading(cancellation))
                     {
                         throw;
                     }
@@ -450,6 +493,8 @@ public static class VerifyCommand
                     var outcome = await AwaitJob(jobId, cancellation);
                     if (outcome is null)
                     {
+                        if (!replayable)
+                            throw UnconfirmedTestRun();
                         continue;
                     }
 
@@ -459,6 +504,11 @@ public static class VerifyCommand
                 return result;
             }
         }
+
+        private static UnityError UnconfirmedTestRun(Exception? inner = null) => new(
+            "test_run_unconfirmed",
+            "The test_run response was lost or could not be confirmed. Tests may already have run; "
+            + "the request was not repeated. Read test_results before starting another run.", null, inner);
 
         /// <summary>
         /// Polls a job to its end. Returns its result, throws its failure, or returns null when
@@ -484,8 +534,11 @@ public static class VerifyCommand
                 }
                 catch (UnityError e) when (e.HttpStatus is null || e.Code == "non_json" || e.HttpStatus == 401)
                 {
+                    // The listener going down for a domain reload, or coming back up after one.
+                    // The job is still the same job, so polling continues; if the reload took it
+                    // with it the next poll says job_not_found and the caller starts over.
                     Rediscover();
-                    return null;
+                    continue;
                 }
 
                 switch (Text(job["status"]))
@@ -566,6 +619,13 @@ public static class VerifyCommand
 
         private void AddOption(JsonObject body, string name)
         {
+            // Repeating an option builds a list elsewhere in the CLI, and test_run takes one of
+            // each. Saying so beats sending the last value as though it were the whole answer.
+            if (_parsed.Repeats.TryGetValue(name, out var given) && given.Count > 1)
+            {
+                throw new CliException($"--{name} was given {given.Count} times; verify takes one.", 2);
+            }
+
             var value = _parsed.Option(name);
 
             if (!string.IsNullOrEmpty(value))

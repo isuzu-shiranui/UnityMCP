@@ -22,6 +22,36 @@ namespace UnityMCP.Editor.Tests
     {
         private GameObject target;
 
+        private sealed class NumericFixture : ScriptableObject
+        {
+            public long signed;
+            public ulong unsigned;
+            public double precise;
+        }
+
+        [Test]
+        public void NativeSerializedNumbersKeepAllSixtyFourBits()
+        {
+            var fixture = ScriptableObject.CreateInstance<NumericFixture>();
+            try
+            {
+                using var serialized = new SerializedObject(fixture);
+                Assert.That(SerializedValues.Write(serialized.FindProperty("signed"), new JValue(long.MinValue)), Is.Null);
+                Assert.That(SerializedValues.Write(serialized.FindProperty("unsigned"), new JValue(ulong.MaxValue)), Is.Null);
+                const double precise = 1.2345678901234567;
+                Assert.That(SerializedValues.Write(serialized.FindProperty("precise"), new JValue(precise)), Is.Null);
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                serialized.Update();
+                Assert.That(fixture.signed, Is.EqualTo(long.MinValue));
+                Assert.That(fixture.unsigned, Is.EqualTo(ulong.MaxValue));
+                Assert.That(fixture.precise, Is.EqualTo(precise));
+                Assert.That(SerializedValues.Read(serialized.FindProperty("signed")).Value<long>(), Is.EqualTo(long.MinValue));
+                Assert.That(SerializedValues.Read(serialized.FindProperty("unsigned")).Value<ulong>(), Is.EqualTo(ulong.MaxValue));
+                Assert.That(SerializedValues.Read(serialized.FindProperty("precise")).Value<double>(), Is.EqualTo(precise));
+            }
+            finally { Object.DestroyImmediate(fixture); }
+        }
+
         [SetUp]
         public void SetUp()
         {
@@ -67,12 +97,45 @@ namespace UnityMCP.Editor.Tests
                 ("mode", "write"),
                 ("objectPath", "/InspectorAccessTests"),
                 ("componentType", "Rigidbody"),
-                ("values", new JObject { ["m_Mass"] = 7.5f, ["m_Drag"] = 2.5f })));
+                ("values", new JObject { ["m_Mass"] = 7.5f, ["m_UseGravity"] = false })));
 
             Assert.That(reply["error"], Is.Null, (string)reply["error"]);
             Assert.That(reply["count"].Value<int>(), Is.EqualTo(2));
             Assert.That(body.mass, Is.EqualTo(7.5f).Within(0.001f));
-            Assert.That(body.linearDamping, Is.EqualTo(2.5f).Within(0.001f));
+            Assert.That(body.useGravity, Is.False);
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ResizingAndEditingTheSameArrayIsRefusedBeforeApplying(bool resizeFirst)
+        {
+            var renderer = target.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = new Material[] { null };
+            var values = new JObject();
+            if (resizeFirst) values["m_Materials.Array.size"] = 0;
+            values["m_Materials.Array.data[0]"] = JValue.CreateNull();
+            if (!resizeFirst) values["m_Materials.Array.size"] = 0;
+
+            var reply = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "write"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "MeshRenderer"), ("values", values)));
+
+            Assert.That((string)reply["error"], Does.Contain("Nothing was written"));
+            Assert.That(renderer.sharedMaterials.Length, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ResizingAnArrayAloneStillWorks()
+        {
+            var renderer = target.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = new Material[] { null };
+            var reply = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "write"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "MeshRenderer"),
+                ("values", new JObject { ["m_Materials.Array.size"] = 0 })));
+
+            Assert.That(reply["error"], Is.Null);
+            Assert.That(renderer.sharedMaterials, Is.Empty);
         }
 
         /// <summary>
@@ -343,6 +406,59 @@ namespace UnityMCP.Editor.Tests
             Assert.That(value["length"].Value<int>(), Is.EqualTo(2));
             Assert.That(value["elementPath"].ToString(), Is.EqualTo("m_Materials.Array.data[0]"));
             Assert.That(value["lengthPath"].ToString(), Is.EqualTo("m_Materials.Array.size"));
+        }
+
+        /// <summary>
+        /// The elements travel with the length, so "is this list filled in?" is one call.
+        /// </summary>
+        /// <remarks>
+        /// A length alone cannot tell three references from three empty slots, which is the
+        /// question behind most null references at Start, and answering it cost one call per slot.
+        /// </remarks>
+        [Test]
+        public void ReadingAnArrayCarriesItsElements()
+        {
+            var renderer = target.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = new[] { new Material(Shader.Find("Unlit/Color")), null };
+
+            try
+            {
+                var read = InspectorAccess.Access(ToolArgs.Of(
+                    ("mode", "read"), ("objectPath", "/InspectorAccessTests"),
+                    ("componentType", "MeshRenderer"), ("propertyPath", "m_Materials")));
+
+                var elements = read["property"]["value"]["elements"];
+
+                Assert.That(elements.Count(), Is.EqualTo(2));
+                Assert.That(elements[0]["name"].ToString(), Is.Not.Empty);
+                // Value<string>() rather than the token type: a JValue built from a null string
+                // is typed String and serialises as null, so the type says nothing here.
+                Assert.That(elements[1]["name"].Value<string>(), Is.Null, "an empty slot reads as empty");
+            }
+            finally
+            {
+                Object.DestroyImmediate(renderer.sharedMaterials[0]);
+            }
+        }
+
+        /// <summary>
+        /// A long array is cut, and says so, rather than turning one property into a page.
+        /// </summary>
+        [Test]
+        public void ALongArrayReportsHowManyOfItsElementsAreShown()
+        {
+            var renderer = target.AddComponent<MeshRenderer>();
+            renderer.sharedMaterials = new Material[40];
+
+            var read = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "read"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "MeshRenderer"), ("propertyPath", "m_Materials")));
+
+            var value = read["property"]["value"];
+
+            Assert.That(value["length"].Value<int>(), Is.EqualTo(40));
+            Assert.That(value["elements"].Count(), Is.EqualTo(20));
+            Assert.That(value["elementsShown"].Value<int>(), Is.EqualTo(20));
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 
 using Newtonsoft.Json.Linq;
@@ -192,14 +193,19 @@ namespace UnityMCP.Editor.Tools
             [McpArg("object_paths", "Several objects to read in one call, up to 50. Each is read " +
                                     "the way 'object_path' reads one, and the reply is keyed by " +
                                     "the path given; an object that cannot be read carries its own " +
-                                    "error and the rest still come back. Comparing three hundred " +
-                                    "objects' materials one at a time cost three hundred calls and " +
-                                    "744 KB. Alternative to 'object_path'.")]
-            string[] objectPaths = null)
+                                    "error and the rest still come back. Alternative to " +
+                                    "'object_path'.")]
+            string[] objectPaths = null,
+            [McpArg("group", "Report one description per distinct set of materials rather than " +
+                             "one per object, with the objects sharing it listed beside it, and " +
+                             "their material names and asset paths. Objects drawn with the same " +
+                             "settings come back as one group however many there are. Only means " +
+                             "something with 'object_paths'.")]
+            bool group = false)
         {
             if (objectPaths != null && objectPaths.Length > 0)
             {
-                return ReadObjects(objectPaths, path, objectPath, slot, property);
+                return ReadObjects(objectPaths, path, objectPath, slot, property, group);
             }
 
             if (string.IsNullOrWhiteSpace(objectPath))
@@ -222,7 +228,7 @@ namespace UnityMCP.Editor.Tools
                     "scene object whose renderer holds materials.");
             }
 
-            return ReadObject(objectPath, slot, property);
+            return ReadObject(objectPath, slot, property, slot.HasValue);
         }
 
         /// <summary>The most objects one call reads.</summary>
@@ -241,7 +247,7 @@ namespace UnityMCP.Editor.Tools
         /// change that; an argument does.
         /// </remarks>
         private static JObject ReadObjects(
-            string[] objectPaths, string path, string objectPath, int? slot, string property)
+            string[] objectPaths, string path, string objectPath, int? slot, string property, bool group)
         {
             if (!string.IsNullOrWhiteSpace(path) || !string.IsNullOrWhiteSpace(objectPath))
             {
@@ -265,7 +271,9 @@ namespace UnityMCP.Editor.Tools
             {
                 try
                 {
-                    reads[one] = ReadObject(one, slot, property);
+                    // Grouping compares descriptions, so they carry the property values: without
+                    // them two materials that differ only in colour described, and grouped, alike.
+                    reads[one] = ReadObject(one, slot, property, slot.HasValue || group);
                 }
                 catch (McpToolException e)
                 {
@@ -276,10 +284,179 @@ namespace UnityMCP.Editor.Tools
                 }
             }
 
-            return new JObject { ["reads"] = reads };
+            return group ? Grouped(reads) : new JObject { ["reads"] = reads };
         }
 
-        private static JObject ReadObject(string objectPath, int? slot, string property)
+        /// <summary>
+        /// One entry per distinct set of materials, with the objects using it listed beside it.
+        /// </summary>
+        /// <remarks>
+        /// Asking whether three hundred objects share a material means comparing three hundred
+        /// descriptions that are word for word the same, and sending them all back cost 738 KB
+        /// where the answer is one shape and a list of paths. Grouped by content rather than by
+        /// instance: two materials with the same settings are interchangeable, which is what the
+        /// question is really about, and reflect_read over sharedMaterial is what counts instances.
+        /// <para>
+        /// The unit is the renderer's whole set, not one material: an object drawn with two
+        /// materials groups with objects carrying those same two, and not with an object carrying
+        /// only one of them. 'distinct' counts those sets.
+        /// </para>
+        /// </remarks>
+        private static JObject Grouped(JObject reads)
+        {
+            var groups = new List<(string Key, JObject Shape, JArray Objects, JArray Names, JArray Paths)>();
+            var failed = new JObject();
+
+            foreach (var pair in reads)
+            {
+                var entry = (JObject)pair.Value;
+
+                if (entry["error"] != null)
+                {
+                    failed[pair.Key] = entry["error"];
+                    continue;
+                }
+
+                // The materials alone, not the renderer around them: two objects drawn with the
+                // same material are the answer being asked for whether or not one of them carries
+                // a second slot the read did not touch.
+                var shape = new JObject { ["slots"] = entry["slots"]?.DeepClone() };
+
+                var key = KeyOf(shape);
+                var found = groups.FindIndex(g => string.Equals(g.Key, key, StringComparison.Ordinal));
+
+                if (found < 0)
+                {
+                    // The stripped shape is what gets reported: the first member's own name and
+                    // asset path describe one material out of however many the group holds, and a
+                    // caller that read that path back would edit one object and believe it edited
+                    // all of them. Both are collected across the members instead.
+                    groups.Add((key, StripIdentity(shape), new JArray { pair.Key },
+                                FieldOf(shape, "name", new JArray()),
+                                FieldOf(shape, "path", new JArray())));
+                }
+                else
+                {
+                    groups[found].Objects.Add(pair.Key);
+                    FieldOf(shape, "name", groups[found].Names);
+                    FieldOf(shape, "path", groups[found].Paths);
+                }
+            }
+
+            var reported = new JArray();
+
+            foreach (var (_, shape, objects, names, paths) in groups)
+            {
+                // Values are read for every object because the grouping compares them, but a
+                // group of one shares its settings with nobody: publishing its whole property
+                // list makes the grouped reply larger than the plain one it was meant to shrink.
+                if (objects.Count == 1)
+                {
+                    Summarise(shape);
+                }
+
+                var one = new JObject
+                {
+                    ["objects"] = objects,
+                    ["count"] = objects.Count,
+                    ["names"] = names,
+                };
+
+                if (paths.Count > 0)
+                {
+                    one["paths"] = paths;
+                }
+
+                foreach (var field in shape)
+                {
+                    one[field.Key] = field.Value;
+                }
+
+                reported.Add(one);
+            }
+
+            var result = new JObject
+            {
+                ["distinct"] = reported.Count,
+                ["groups"] = reported,
+            };
+
+            if (failed.Count > 0)
+            {
+                result["failed"] = failed;
+            }
+
+            return result;
+        }
+
+        /// <summary>What a material is named and where it lives, which no two of them share.</summary>
+        /// <remarks>
+        /// Three hundred bricks set up identically carry three hundred materials called
+        /// BrickMaterial_0 to BrickMaterial_299, so a key taken over the whole description put
+        /// every one of them in a group of its own and saved nothing. Whether they can share one
+        /// material is a question about their settings.
+        /// </remarks>
+        private static readonly string[] Identity = { "name", "path", "note", "slot" };
+
+        /// <summary>Replaces each slot's property list with its length, as an ungrouped read reports it.</summary>
+        private static void Summarise(JObject shape)
+        {
+            foreach (var slot in shape["slots"] as JArray ?? new JArray())
+            {
+                if (slot is not JObject entry || entry["properties"] is not JArray properties)
+                {
+                    continue;
+                }
+
+                if (entry["propertyCount"] == null)
+                {
+                    entry["propertyCount"] = properties.Count;
+                }
+
+                entry.Remove("properties");
+            }
+        }
+
+        /// <summary>The description without the fields that name one material rather than describe it.</summary>
+        private static JObject StripIdentity(JObject shape)
+        {
+            var stripped = (JObject)shape.DeepClone();
+
+            foreach (var slot in stripped["slots"] as JArray ?? new JArray())
+            {
+                foreach (var field in Identity)
+                {
+                    (slot as JObject)?.Remove(field);
+                }
+            }
+
+            return stripped;
+        }
+
+        /// <summary>The description with the identifying fields taken out, as a comparable string.</summary>
+        private static string KeyOf(JObject shape) =>
+            StripIdentity(shape).ToString(Newtonsoft.Json.Formatting.None);
+
+        /// <summary>
+        /// Adds this member's value for one identifying field to the group's, so the grouping
+        /// hides none of them.
+        /// </summary>
+        private static JArray FieldOf(JObject shape, string field, JArray collected)
+        {
+            foreach (var slot in shape["slots"] as JArray ?? new JArray())
+            {
+                var value = (slot as JObject)?[field]?.ToString();
+
+                if (!string.IsNullOrEmpty(value) && !collected.Any(n => n.ToString() == value))
+                {
+                    collected.Add(value);
+                }
+            }
+
+            return collected;
+        }
+
+        private static JObject ReadObject(string objectPath, int? slot, string property, bool withProperties)
         {
             var go = ObjectResolve.Object(objectPath, null, "object_path", null);
             var renderer = RequireRenderer(go);
@@ -304,7 +481,7 @@ namespace UnityMCP.Editor.Tools
                     broken.Add(i);
                 }
 
-                slots.Add(Describe(materials[i], i, slot.HasValue, property));
+                slots.Add(Describe(materials[i], i, withProperties, property));
             }
 
             return new JObject
@@ -870,6 +1047,7 @@ namespace UnityMCP.Editor.Tools
             "showing and finishes only once the rename field is dismissed. Set its properties " +
             "afterwards with material_set, and hang it on a renderer with inspect_write.",
             Idempotency = McpIdempotency.Unsafe,
+            UndoGroup = "MCP Create Material",
             Group = "rendering")]
         public static JObject MaterialCreate(
             [McpArg("path", "Where to write the .mat, e.g. Assets/Art/Wood.mat. Missing folders " +
@@ -901,7 +1079,10 @@ namespace UnityMCP.Editor.Tools
                     $"'{target}' is outside Assets/. A material has to live in the project.");
             }
 
-            if (!overwrite && AssetDatabase.LoadAssetAtPath<Material>(target) != null)
+            var existing = AssetDatabase.LoadAssetAtPath<Material>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
+
+            if (!overwrite && existing != null)
             {
                 throw new McpToolException(
                     "invalid_params",
@@ -913,12 +1094,20 @@ namespace UnityMCP.Editor.Tools
 
             EnsureFolder(target);
 
-            var material = new Material(chosen);
-
-            if (overwrite && AssetDatabase.LoadAssetAtPath<Material>(target) != null)
+            if (existing != null)
             {
-                AssetDatabase.DeleteAsset(target);
+                AssetTools.ReplaceAssetContents(existing, new Material(chosen), target);
+
+                return new JObject
+                {
+                    ["path"] = target,
+                    ["shader"] = chosen.name,
+                    ["created"] = false,
+                    ["replaced"] = true,
+                };
             }
+
+            var material = new Material(chosen);
 
             AssetDatabase.CreateAsset(material, target);
             AssetDatabase.SaveAssetIfDirty(material);

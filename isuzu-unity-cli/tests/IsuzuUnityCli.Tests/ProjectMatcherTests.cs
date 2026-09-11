@@ -221,10 +221,21 @@ public sealed class ProjectMatcherTests
         Assert.Equal("UnityMCP v3 Test B", ProjectMatcher.ByName(Open, "/p/b/").ProjectName);
     }
 
+    /// <summary>
+    /// A backslash path names the folder on Windows. Elsewhere a backslash is part of a file
+    /// name, so the same text names nothing, and the CI runs on Linux.
+    /// </summary>
     [Fact]
     public void TheSlashesDoNotHaveToMatch()
     {
-        Assert.Equal("Other", ProjectMatcher.ByName(Open, @"\p\c").ProjectName);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("Other", ProjectMatcher.ByName(Open, @"\p\c").ProjectName);
+        }
+        else
+        {
+            Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, @"\p\c"));
+        }
     }
 
     [Fact]

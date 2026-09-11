@@ -14,15 +14,19 @@ namespace UnityMCP.Editor.Settings
     /// step it could neither do nor report on, so a user had no way to tell a finished setup from
     /// an unfinished one.
     /// <para>
-    /// The test is a search for this Editor's own URL rather than a reading of each client's
-    /// format. The URL carries the port, which is unique to this Editor while it runs, so a hit
-    /// means that file reaches this Editor and nothing else does. It also gives the right answer
-    /// for free when the port has moved: the old entry no longer names this URL, and an entry
-    /// that cannot reach the Editor is not a finished setup.
+    /// The test is a search of each file's text rather than a reading of each client's format.
+    /// The URL carries the port, which is unique to this Editor while it runs, so a hit means
+    /// that file reaches this Editor and nothing else does. It also gives the right answer for
+    /// free when the port has moved: the old entry no longer names this URL, and an entry that
+    /// cannot reach the Editor is not a finished setup. A stdio entry carries no URL to match,
+    /// so it is recognised by the bridge subcommand and the project name instead.
     /// </para>
     /// </remarks>
     internal static class McpClientRegistration
     {
+        /// <summary>The CLI subcommand a stdio entry launches.</summary>
+        private const string StdioSubcommand = "mcp-stdio";
+
         /// <summary>The configuration files the CLI's setup writes, in their usual places.</summary>
         /// <remarks>
         /// Duplicating the CLI's catalog here would be worse than this list: the Editor needs only
@@ -74,8 +78,14 @@ namespace UnityMCP.Editor.Settings
             yield return Path.Combine(projectRoot, ".vscode", "mcp.json");
         }
 
-        /// <summary>The configuration files that name this Editor's URL.</summary>
-        public static List<string> Registered(string mcpUrl, string projectRoot)
+        /// <summary>The configuration files that point a client at this Editor.</summary>
+        /// <remarks>
+        /// Two shapes, not one. Claude Desktop cannot open a local HTTP server, so its entry
+        /// launches the CLI's stdio bridge and names the project rather than the URL. Looking only
+        /// for the URL reported a working registration as missing, next to a button offering to
+        /// write the one that was already there.
+        /// </remarks>
+        public static List<string> Registered(string mcpUrl, string projectRoot, string projectName = null)
         {
             var found = new List<string>();
 
@@ -88,7 +98,14 @@ namespace UnityMCP.Editor.Settings
             {
                 try
                 {
-                    if (File.Exists(path) && File.ReadAllText(path).Contains(mcpUrl))
+                    if (!File.Exists(path))
+                    {
+                        continue;
+                    }
+
+                    var text = File.ReadAllText(path);
+
+                    if (text.Contains(mcpUrl) || BridgedTo(text, projectName))
                     {
                         found.Add(path);
                     }
@@ -101,6 +118,43 @@ namespace UnityMCP.Editor.Settings
             }
 
             return found;
+        }
+
+        /// <summary>Whether a stdio entry in this file names this project.</summary>
+        /// <remarks>
+        /// The two have to appear together. Looked for anywhere in the file, an entry bridging
+        /// another project plus any mention of this one's name read as registered, and Unity's
+        /// default product name is "My project", which every unrenamed project shares. The name is
+        /// matched as a whole argument rather than as a substring, so "Demo" does not answer for
+        /// an entry whose project is "DemoScene".
+        /// </remarks>
+        private static bool BridgedTo(string text, string projectName)
+        {
+            if (string.IsNullOrEmpty(projectName))
+            {
+                return false;
+            }
+
+            var at = text.IndexOf(StdioSubcommand, StringComparison.Ordinal);
+
+            while (at >= 0)
+            {
+                // The arguments of one entry, which end at the closing bracket of its list.
+                var end = text.IndexOf(']', at);
+                var entry = end < 0 ? text.Substring(at) : text.Substring(at, end - at);
+
+                foreach (var argument in entry.Split('"', '\''))
+                {
+                    if (string.Equals(argument.Trim(), projectName, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+
+                at = text.IndexOf(StdioSubcommand, at + StdioSubcommand.Length, StringComparison.Ordinal);
+            }
+
+            return false;
         }
     }
 }

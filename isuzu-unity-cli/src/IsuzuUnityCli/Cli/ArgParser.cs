@@ -8,6 +8,16 @@ public sealed class ParsedArgs
     public List<string> Positional { get; } = new();
     /// <summary>Insertion order is kept because it decides which value wins when tool arguments are merged.</summary>
     public OrderedDictionary<string, string> Options { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every value given for an option, in the order they appeared.
+    /// </summary>
+    /// <remarks>
+    /// Naming one twice used to keep the last and drop the rest without saying so, which is what
+    /// a caller reaches for when shell quoting fights them over a JSON array. Repeating the flag
+    /// is how a list gets typed on a command line where quotes do not survive.
+    /// </remarks>
+    public OrderedDictionary<string, List<string>> Repeats { get; } = new(StringComparer.Ordinal);
     public List<string> Flags { get; } = new();
 
     public bool HasFlag(string name) => Flags.Contains(name, StringComparer.Ordinal);
@@ -41,20 +51,43 @@ public static class ArgParser
     };
 
     /// <summary>
-    /// Options that are on or off. Without this the parser takes whatever follows as the value,
-    /// so <c>--compact projects</c> loses the command and <c>call --compact scene_browse_hierarchy</c>
-    /// loses the tool name, and neither reads as set.
+    /// Options that are on or off whichever command is running. Without this the parser takes
+    /// whatever follows as the value, so <c>--compact projects</c> loses the command and
+    /// <c>call --compact scene_browse_hierarchy</c> loses the tool name, and neither reads as set.
     /// </summary>
-    private static readonly IReadOnlySet<string> ValuelessOptions = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly IReadOnlySet<string> AlwaysValueless = new HashSet<string>(StringComparer.Ordinal)
     {
-        "compact", "raw", "help", "version", "yes", "no-skill", "fix",
+        "compact", "raw", "help", "version",
     };
+
+    /// <summary>
+    /// The same, for options one command owns.
+    /// </summary>
+    /// <remarks>
+    /// Kept per command because 'call' forwards what it does not recognise to the tool: a global
+    /// entry makes <c>call a_tool --test Something</c> send <c>test: true</c> and drop the word
+    /// after it, which is the silent difference between what was typed and what was sent.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> ValuelessPerCommand =
+        new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
+        {
+            ["verify"] = new HashSet<string>(StringComparer.Ordinal) { "test", "no-compile" },
+            ["setup"] = new HashSet<string>(StringComparer.Ordinal) { "mcp", "no-skill" },
+            ["uninstall"] = new HashSet<string>(StringComparer.Ordinal) { "yes", "no-skill" },
+            ["doctor"] = new HashSet<string>(StringComparer.Ordinal) { "fix" },
+        };
+
+    private static bool IsValueless(string command, string name) =>
+        AlwaysValueless.Contains(name)
+        || (ValuelessPerCommand.TryGetValue(command, out var own) && own.Contains(name));
 
     public static ParsedArgs Parse(IReadOnlyList<string> argv)
     {
         var positional = new List<string>();
         var options = new OrderedDictionary<string, string>(StringComparer.Ordinal);
+        var repeats = new OrderedDictionary<string, List<string>>(StringComparer.Ordinal);
         var flags = new List<string>();
+        var command = "";
 
         for (var i = 0; i < argv.Count; i++)
         {
@@ -68,6 +101,11 @@ public static class ArgParser
                     continue;
                 }
 
+                if (positional.Count == 0)
+                {
+                    command = token;
+                }
+
                 positional.Add(token);
                 continue;
             }
@@ -76,13 +114,21 @@ public static class ArgParser
             var next = i + 1 < argv.Count ? argv[i + 1] : null;
 
             if (next is null || next.StartsWith("--", StringComparison.Ordinal)
-                || ValuelessOptions.Contains(name))
+                || IsValueless(command, name))
             {
                 AddFlag(flags, name);
             }
             else
             {
                 options[name] = next;
+
+                if (!repeats.TryGetValue(name, out var given))
+                {
+                    given = new List<string>();
+                    repeats[name] = given;
+                }
+
+                given.Add(next);
                 i++;
             }
         }
@@ -93,6 +139,11 @@ public static class ArgParser
         foreach (var pair in options)
         {
             result.Options[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in repeats)
+        {
+            result.Repeats[pair.Key] = pair.Value;
         }
 
         result.Flags.AddRange(flags);

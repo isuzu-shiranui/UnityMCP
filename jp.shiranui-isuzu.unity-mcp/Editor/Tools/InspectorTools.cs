@@ -20,7 +20,10 @@ namespace UnityMCP.Editor.Tools
             "inspect_read",
             "Read one serialized property from a component, or from the GameObject itself when " +
             "component_type is omitted. Identify the object by either instance_id or object_path.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            // An array property carries its first elements, so one read of a component holding
+            // several reference arrays is twenty times the size of the same read without them.
+            MaxResultSizeChars = 200000)]
         public static JObject Read(
             [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
             string propertyPath,
@@ -49,7 +52,8 @@ namespace UnityMCP.Editor.Tools
             "lists the components on the GameObject rather than one component's properties, and " +
             "with detail:'full' that is every component's properties together: one call for the " +
             "whole object rather than one for each component it carries.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Safe,
+            MaxResultSizeChars = 200000)]
         public static JObject List(
             [McpArg("instance_id", "Target object instance id; alternative to object_path.")]
             long? instanceId = null,

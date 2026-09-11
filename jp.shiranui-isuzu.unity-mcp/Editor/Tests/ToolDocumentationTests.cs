@@ -38,6 +38,22 @@ namespace UnityMCP.Editor.Tests
         /// </remarks>
         private static string Reference(string relative)
         {
+            // A local UPM dependency can live outside the consuming project. Its repository
+            // keeps docs beside the package, so use that location before walking the project.
+            var package = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(ToolCatalog).Assembly);
+            if (package != null && !string.IsNullOrEmpty(package.resolvedPath))
+            {
+                var parent = Directory.GetParent(package.resolvedPath);
+                if (parent != null)
+                {
+                    var candidate = Path.Combine(parent.FullName, "docs", relative);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
             var directory = new DirectoryInfo(UnityEngine.Application.dataPath);
 
             while (directory != null)

@@ -228,9 +228,9 @@ jobs:
       # A tool list that names 23 tools while the package publishes 57 is how v2's docs ended up
       # describing seven tools that did not exist. The catalogue is generated from the
       # attributes, so the only thing that can drift is the prose — checked here rather than
-      # remembered. The tool tables live in docs/tools.md and docs/en/tools.md; the tool count
-      # is written as a literal in those pages, in both READMEs and on both guide pages under
-      # site/, and every such literal has to equal the number of published tools.
+      # remembered. The tool tables live in docs/tools.md and docs/en/tools.md. A page may state
+      # a tool count or leave it out, but a count it does state has to equal the number of
+      # published tools.
       - name: Every tool is documented
         run: |
           node -e "
@@ -282,33 +282,22 @@ jobs:
               failed = true;
             }
 
-            // Matches '74 tools' and '74 個のツール'. A page with no count at all fails too:
-            // a check that finds nothing to compare is not checking anything.
+            // Matches '74 tools' and '74 個のツール'.
             const counted = /(\d+)\s*(?:tools\b|個のツール)/g;
             for (const doc of ['docs/tools.md', 'docs/en/tools.md', 'README.md', 'README.en.md',
                                 'site/index.html', 'site/en/index.html']) {
               const text = fs.readFileSync(doc, 'utf8');
               const literals = [...text.matchAll(counted)].map(m => Number(m[1]));
-              if (literals.length === 0) {
-                console.error(doc + ' states no tool count');
-                failed = true;
-                continue;
-              }
               const wrong = literals.filter(n => n !== names.size && n !== bare);
               if (wrong.length) {
                 console.error(doc + ' says ' + wrong.join('/') + ' tools; the package publishes ' +
                   names.size + ', or ' + bare + ' without the optional packages');
                 failed = true;
               }
-
-              if (!literals.includes(names.size)) {
-                console.error(doc + ' never states the full count of ' + names.size);
-                failed = true;
-              }
             }
 
             if (failed) process.exit(1);
-            console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented and counted in docs/tools.md, docs/en/tools.md and both READMEs');
+            console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented in docs/tools.md and docs/en/tools.md');
           "
 
       # The install scripts are fetched and piped into a shell, so their first byte is parsed

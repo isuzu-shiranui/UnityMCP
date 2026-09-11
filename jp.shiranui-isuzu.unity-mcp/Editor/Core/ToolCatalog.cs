@@ -255,7 +255,12 @@ namespace UnityMCP.Editor.Core
             buffer.Append('[');
 
             var first = true;
-            foreach (var descriptor in this.Select(groups))
+            // MCP clients can only poll deferred calls with tools exposed by this list.
+            // Keep the one polling helper even when diagnostics was not requested.
+            var selected = mcpShape && groups != null && groups.Count > 0
+                ? this.Tools.Where(t => groups.Contains(t.Group) || t.Name == "job_status")
+                : this.Select(groups);
+            foreach (var descriptor in selected)
             {
                 if (!first)
                 {

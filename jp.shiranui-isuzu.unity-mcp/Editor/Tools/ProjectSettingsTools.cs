@@ -54,7 +54,10 @@ namespace UnityMCP.Editor.Tools
             "Read or change a project's own settings: player, quality, graphics, tags and layers, " +
             "physics, time, audio, input, editor. These live in files under ProjectSettings/ and " +
             "have no scene path, so inspect_write cannot reach them. A change is written to disk " +
-            "at once, with no save step.",
+            "at once, with no save step. That write saves every dirty asset, not only this file, " +
+            "so on a project with work in progress it can outlast the main-thread window and come " +
+            "back as a job - and the same save can reload the domain, which takes the job's record " +
+            "with it. Read the property back rather than polling job_status for it.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Project Settings",
             Group = "build")]
@@ -157,6 +160,27 @@ namespace UnityMCP.Editor.Tools
                 : Read(serialized, section, property);
         }
 
+        /// <summary>What a write costs beyond the setting it changed.</summary>
+        internal const string SavesEverythingNote =
+            "SaveAssets is the only call that writes a settings file, and it writes every other " +
+            "unsaved asset in the project with it. Anything left dirty on purpose is now on disk.";
+
+        /// <summary>
+        /// Persist the change. There is no way to write one settings file on its own.
+        /// </summary>
+        /// <remarks>
+        /// SaveAssetIfDirty clears the dirty flag and leaves the file byte-for-byte unchanged:
+        /// every settings singleton carries a built-in GUID, and that is what it looks its target
+        /// up by. Calling it is worse than doing nothing, because the cleared flag stops the next
+        /// SaveAssets from writing the file either. SaveToSerializedFileAndForget refuses an
+        /// object that is already persistent, which these are. So SaveAssets it is, and the reply
+        /// says what that costs rather than the tool pretending it was narrower.
+        /// </remarks>
+        private static void SaveSection()
+        {
+            AssetDatabase.SaveAssets();
+        }
+
         /// <summary>Several of a section's properties, read in one call.</summary>
         private static JObject ReadMany(SerializedObject serialized, string section, string[] properties)
         {
@@ -188,6 +212,12 @@ namespace UnityMCP.Editor.Tools
         /// </remarks>
         private static JObject ChangeMany(SerializedObject serialized, string section, JObject values)
         {
+            var conflict = SerializedValues.BatchPathConflict(values);
+            if (conflict != null)
+            {
+                throw new McpToolException("invalid_params", conflict);
+            }
+
             var found = new List<(string Path, SerializedProperty Property, JToken Value)>();
 
             foreach (var pair in values)
@@ -220,7 +250,7 @@ namespace UnityMCP.Editor.Tools
             }
 
             serialized.ApplyModifiedProperties();
-            AssetDatabase.SaveAssets();
+            SaveSection();
             serialized.Update();
 
             var written = new JObject();
@@ -234,6 +264,7 @@ namespace UnityMCP.Editor.Tools
             {
                 ["section"] = section,
                 ["written"] = written,
+                ["note"] = SavesEverythingNote,
             };
         }
 
@@ -259,14 +290,7 @@ namespace UnityMCP.Editor.Tools
             }
 
             serialized.ApplyModifiedProperties();
-
-            // Not SaveAssetIfDirty: every settings singleton carries the built-in GUID
-            // 00000000000000008000000000000000, and SaveAssetIfDirty finds its target by GUID, so
-            // it leaves the object dirty and the file byte-for-byte unchanged while the call
-            // reports a write. SaveAssets is the only one that writes these, and it writes every
-            // other dirty asset with them.
-            AssetDatabase.SaveAssets();
-
+            SaveSection();
             serialized.Update();
 
             return new JObject
@@ -274,6 +298,7 @@ namespace UnityMCP.Editor.Tools
                 ["section"] = section,
                 ["property"] = SerializedValues.Describe(serialized.FindProperty(property)),
                 ["written"] = true,
+                ["note"] = SavesEverythingNote,
             };
         }
 

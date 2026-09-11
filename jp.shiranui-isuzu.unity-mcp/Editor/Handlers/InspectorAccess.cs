@@ -407,6 +407,12 @@ namespace UnityMCP.Editor.Handlers
                 return new JObject { ["error"] = "'values' is empty; name at least one property." };
             }
 
+            var conflict = SerializedValues.BatchPathConflict(values);
+            if (conflict != null)
+            {
+                return new JObject { ["error"] = conflict };
+            }
+
             var written = new JObject();
 
             foreach (var pair in values)

@@ -11,12 +11,13 @@ isuzu-unity-cli projects                 # 起動中の Editor 一覧
 isuzu-unity-cli health                   # サーバーの状態・キュー深さ・実行中ジョブ数
 isuzu-unity-cli tools                    # 利用可能なツールと引数名
 isuzu-unity-cli tools --group <name>     # グループで絞り込み（カンマ区切りで複数可）
+isuzu-unity-cli tools <tool>             # 1 つのツールの説明と引数だけ
 isuzu-unity-cli call <tool> [...]        # ツールの実行
 isuzu-unity-cli verify [...]             # 再コンパイル・テスト・結果の要約を 1 回で
 isuzu-unity-cli jobs [id]                # ジョブの一覧、または指定 ID の状態
 isuzu-unity-cli setup [--mcp] [...]      # スキルの導入と MCP エンドポイントの登録
 isuzu-unity-cli doctor [--fix]           # 何がどこに入っているかの診断と修復
-isuzu-unity-cli upgrade [--version vX]   # CLI の更新
+isuzu-unity-cli upgrade [--release vX]   # CLI の更新
 isuzu-unity-cli uninstall [--yes]        # 消す対象の一覧表示と削除
 isuzu-unity-cli mcp-stdio --project <n>  # Claude Desktop 向け stdio ブリッジ
 isuzu-unity-cli mcp-stdio --group <g>    # クライアントに渡すツールをグループで絞る
@@ -33,7 +34,9 @@ isuzu-unity-cli call play_mode_status --project MyGame
 isuzu-unity-cli call play_mode_status --raw          # 結果だけでなく応答全体を表示
 ```
 
-値の型は自動で決まります。`--limit 20` は数値として送られます。`--active_only true` は真偽値として送られます。
+値の型は自動で決まります。`--limit 20` は数値として送られます。`--active_only true` は真偽値として送られます。同じオプションを 2 回以上書くと配列になります（`--paths one --paths two`）。引用符が通らないシェルで配列を渡すのはこの書き方です。
+
+JSON は端末では整形して出力し、パイプやリダイレクトのときは詰めて出力します。端末でも詰めたいときは `--compact` を付けてください。
 
 C# のスニペットは `--file` で渡してください。シェルと JSON エンコーダの両方に通すと、文字列リテラル中のバックスラッシュが失われます。その結果、呼び出し側からは見えない生成ソースでコンパイルエラーが起きます。`--file` はスニペットを base64 で送るので、どちらも経由しません。
 
@@ -59,7 +62,7 @@ isuzu-unity-cli call play_mode_status
 |---|---|
 | 0 | 成功 |
 | 1 | エラー（`verify` ではコンパイルエラーかテスト失敗） |
-| 2 | 引数の誤り。`call` にツール名が無い場合に返ります。`verify` の `--timeout` に正の数でない値、`--logs` に 0 以上の整数でない値を渡した場合も同じです |
+| 2 | 引数の誤り。そのコマンドが持たないオプション、値の無いオプション、`call` にツール名が無い場合に返ります。`verify` の `--timeout` に正の数でない値、`--logs` に 0 以上の整数でない値を渡した場合も同じです |
 | 3 | Editor が見つからないか、候補が複数ある |
 | 4 | `verify` の `--timeout` 超過 |
 | 130 | Ctrl+C による中断 |
@@ -96,7 +99,7 @@ job ID が返ったときは、同じ呼び出しをやり直さないでくだ�
 
 ## tools --group
 
-`isuzu-unity-cli tools --group <name>[,<name>]` はツール一覧をグループで絞り込みます。グループは `diagnostics` / `authoring` / `rendering` / `timeline` / `build` / `code` / `input` です。
+`isuzu-unity-cli tools --group <name>[,<name>]` はツール一覧をグループで絞り込みます。グループは `diagnostics` / `authoring` / `rendering` / `timeline` / `build` / `code` / `input` です。ツール名を 1 つ渡すと、そのツールの説明と引数だけを表示します。一覧全体を読むより小さく済みます。
 
 ## setup
 
@@ -112,7 +115,7 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project  # MCP エンド
 ```bash
 isuzu-unity-cli doctor          # 何がどこに入っているか、古いものが残っていないか
 isuzu-unity-cli doctor --fix    # 直せるものは直す（トークン再生成後の再登録など）
-isuzu-unity-cli upgrade         # 最新版に更新（--version でバージョン指定）
+isuzu-unity-cli upgrade         # 最新版に更新（--release でバージョン指定）
 isuzu-unity-cli uninstall       # 消す対象を一覧表示するだけ
 isuzu-unity-cli uninstall --yes # 実行
 ```

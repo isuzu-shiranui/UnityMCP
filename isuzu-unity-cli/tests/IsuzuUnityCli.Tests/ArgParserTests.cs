@@ -65,6 +65,38 @@ public sealed class ArgParserTests
     }
 
     /// <summary>
+    /// A flag a command reads is a flag, whatever word follows it.
+    /// </summary>
+    /// <remarks>
+    /// <c>verify --test play</c> took "play" as the value of --test, so the flag read as unset and
+    /// verify exited 0 without running a single test.
+    /// </remarks>
+    [Fact]
+    public void AFlagACommandReadsDoesNotSwallowTheNextWord()
+    {
+        var parsed = ArgParser.Parse(["verify", "--test", "play"]);
+
+        Assert.True(parsed.HasFlag("test"));
+    }
+
+    /// <summary>
+    /// The same name is an ordinary option under a command that does not own it.
+    /// </summary>
+    /// <remarks>
+    /// 'call' forwards what it does not recognise to the tool, so a flag listed for every command
+    /// made 'call a_tool --test Something' send test: true and drop the word after it.
+    /// </remarks>
+    [Fact]
+    public void AFlagOfOneCommandIsAValueUnderAnother()
+    {
+        var parsed = ArgParser.Parse(["call", "a_tool", "--test", "Something"]);
+
+        Assert.False(parsed.HasFlag("test"));
+        Assert.Equal("Something", parsed.Option("test"));
+        Assert.DoesNotContain("Something", parsed.Positional);
+    }
+
+    /// <summary>
     /// A name another command owns is still an argument when a tool declares it.
     /// </summary>
     /// <remarks>
@@ -106,5 +138,25 @@ public sealed class ArgParserTests
         Assert.Equal("{\"limit\":5}", parsed.Option("json"));
         Assert.True(parsed.HasFlag("compact"));
         Assert.Equal("scene_browse_hierarchy", parsed.Positional[0]);
+    }
+
+    /// <summary>
+    /// An option named twice is a list, not the last one to be typed.
+    /// </summary>
+    /// <remarks>
+    /// Repeating the flag is how a list gets typed where the shell will not let a JSON array
+    /// through intact - Windows PowerShell strips the quotes out of one. Keeping only the last
+    /// value sent a request the caller had not written and said nothing about the rest.
+    /// </remarks>
+    [Fact]
+    public void AnOptionGivenTwiceBecomesAnArray()
+    {
+        var parsed = ArgParser.Parse(
+            ["call", "reflect_read", "--paths", "one", "--paths", "two", "--depth", "3"]);
+
+        var args = ToolArguments.Build("reflect_read", parsed);
+
+        Assert.Equal("""["one","two"]""", args["paths"]!.ToJsonString());
+        Assert.Equal("3", args["depth"]!.ToJsonString());
     }
 }

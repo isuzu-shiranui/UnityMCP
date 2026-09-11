@@ -11,13 +11,14 @@ isuzu-unity-cli projects                 # Editors currently running
 isuzu-unity-cli health                   # server state, queue depth, running jobs
 isuzu-unity-cli tools                    # what this Editor publishes, with argument names
 isuzu-unity-cli tools --group <name>     # filter by group (comma-separated for several)
+isuzu-unity-cli tools <tool>             # one tool's description and arguments
 isuzu-unity-cli mcp-stdio --group <name> # narrow what the MCP client is offered
 isuzu-unity-cli call <tool> [...]        # invoke a tool
 isuzu-unity-cli verify [...]             # recompile, test and summarise in one call
 isuzu-unity-cli jobs [id]                # list jobs, or report one by id
 isuzu-unity-cli setup [--mcp] [...]      # install the skill and register the MCP endpoint
 isuzu-unity-cli doctor [--fix]           # what is installed, where, and what is stale
-isuzu-unity-cli upgrade [--version vX]   # update the CLI
+isuzu-unity-cli upgrade [--release vX]   # update the CLI
 isuzu-unity-cli uninstall [--yes]        # list what would be removed, then remove it
 isuzu-unity-cli mcp-stdio --project <n>  # stdio bridge for Claude Desktop
 ```
@@ -33,7 +34,9 @@ isuzu-unity-cli call play_mode_status --project MyGame
 isuzu-unity-cli call play_mode_status --raw          # the whole envelope, not just the result
 ```
 
-Values are typed automatically. `--limit 20` sends a number. `--active_only true` sends a boolean.
+Values are typed automatically. `--limit 20` sends a number. `--active_only true` sends a boolean. Naming the same option twice or more sends a list (`--paths one --paths two`), which is how an array is typed in a shell that eats quotes.
+
+JSON is indented in a terminal and packed when the output is piped or redirected. `--compact` packs it in a terminal too.
 
 Pass C# snippets with `--file`. Passing a snippet through both a shell and a JSON encoder loses the backslashes in its string literals. The result is a compile error inside generated source that the caller never sees. `--file` sends the snippet base64-encoded and avoids both layers.
 
@@ -59,7 +62,7 @@ Run from outside every project, the CLI does not guess. It lists the candidates 
 |---|---|
 | 0 | success |
 | 1 | error (for `verify`: compile errors or test failures) |
-| 2 | bad arguments. `call` without a tool name returns it. So does a `verify` `--timeout` that is not a positive number, or a `verify` `--logs` that is not a count |
+| 2 | bad arguments. An option the command does not have, an option missing its value, and `call` without a tool name all return it. So does a `verify` `--timeout` that is not a positive number, or a `verify` `--logs` that is not a count |
 | 3 | no Editor found, or the choice is ambiguous |
 | 4 | `verify` exceeded `--timeout` |
 | 130 | interrupted with Ctrl+C |
@@ -96,7 +99,7 @@ Do not repeat a call that returned a job id. The work is still running, and repe
 
 ## tools --group
 
-`isuzu-unity-cli tools --group <name>[,<name>]` filters the tool list by group. The groups are `diagnostics`, `authoring`, `rendering`, `timeline`, `build`, `code` and `input`.
+`isuzu-unity-cli tools --group <name>[,<name>]` filters the tool list by group. The groups are `diagnostics`, `authoring`, `rendering`, `timeline`, `build`, `code` and `input`. Name one tool instead and only its description and arguments are printed, which is far smaller than the whole list.
 
 ## setup
 
@@ -112,7 +115,7 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project  # also register
 ```bash
 isuzu-unity-cli doctor          # what is installed, where, and what is stale
 isuzu-unity-cli doctor --fix    # repairs what it finds, e.g. re-registering clients after a token regeneration
-isuzu-unity-cli upgrade         # updates the CLI; --version pins one
+isuzu-unity-cli upgrade         # updates the CLI; --release pins one
 isuzu-unity-cli uninstall       # lists what would go
 isuzu-unity-cli uninstall --yes # removes it
 ```

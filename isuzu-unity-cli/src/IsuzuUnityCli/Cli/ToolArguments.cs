@@ -39,15 +39,34 @@ public static class ToolArguments
 
         foreach (var pair in parsed.Options)
         {
-            if (!ArgParser.CallReservedOptions.Contains(pair.Key))
+            if (ArgParser.CallReservedOptions.Contains(pair.Key))
             {
-                args[pair.Key] = ScalarCoercion.ToJsonNode(pair.Value);
+                continue;
             }
+
+            // An option named more than once is a list. Quoting a JSON array through a shell that
+            // strips quotes is the thing this avoids, and dropping all but the last was silent.
+            if (parsed.Repeats.TryGetValue(pair.Key, out var given) && given.Count > 1)
+            {
+                var many = new JsonArray();
+
+                foreach (var value in given)
+                {
+                    many.Add(ScalarCoercion.ToJsonNode(value));
+                }
+
+                args[pair.Key] = many;
+                continue;
+            }
+
+            args[pair.Key] = ScalarCoercion.ToJsonNode(pair.Value);
         }
 
         foreach (var flag in parsed.Flags)
         {
-            if (!ArgParser.CallReservedOptions.Contains(flag))
+            // A name given both ways is a value that also appeared bare, as a trailing
+            // '--type' does. Taking the flag would drop what was typed before it.
+            if (!ArgParser.CallReservedOptions.Contains(flag) && !args.ContainsKey(flag))
             {
                 args[flag] = true;
             }

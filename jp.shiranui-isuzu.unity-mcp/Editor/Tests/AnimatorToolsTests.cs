@@ -240,6 +240,101 @@ namespace UnityMCP.Editor.Tests
             }
         }
 
+        /// <summary>
+        /// Replacing a controller keeps its file, so what pointed at it still does.
+        /// </summary>
+        /// <remarks>
+        /// Deleting and re-creating gave the .controller a new GUID, and every Animator, prefab
+        /// and override controller holding the old one was left with a missing reference — while
+        /// the reply said nothing but "created".
+        /// </remarks>
+        [Test]
+        public void OverwritingAControllerKeepsItsGuidAndEmptiesIt()
+        {
+            const string made = Folder + "/Replaced.controller";
+
+            try
+            {
+                AnimatorEditTools.AnimatorCreate(made);
+                AnimatorEditTools.AddParameter(made, null, "IsWalking", "Bool");
+
+                var before = AssetDatabase.AssetPathToGUID(made);
+
+                var again = AnimatorEditTools.AnimatorCreate(made, null, true);
+
+                Assert.That(AssetDatabase.AssetPathToGUID(made), Is.EqualTo(before));
+                Assert.That(again["replaced"].Value<bool>(), Is.True);
+
+                var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(made);
+
+                Assert.That(controller.parameters, Is.Empty, "the replacement starts empty");
+                Assert.That(controller.layers.Length, Is.EqualTo(1));
+                Assert.That(controller.layers[0].name, Is.EqualTo("Base Layer"));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        /// <summary>
+        /// A GameObject path that does not resolve costs nothing.
+        /// </summary>
+        /// <remarks>
+        /// The object was looked up after the old controller had already been deleted, so a typo
+        /// in object_path destroyed the asset the call was replacing and then failed.
+        /// </remarks>
+        [Test]
+        public void AnUnresolvableObjectPathLeavesTheExistingControllerAlone()
+        {
+            const string made = Folder + "/Survivor.controller";
+
+            try
+            {
+                AnimatorEditTools.AnimatorCreate(made);
+                AnimatorEditTools.AddParameter(made, null, "Speed", "Float");
+
+                Assert.Throws<McpToolException>(
+                    () => AnimatorEditTools.AnimatorCreate(made, "/NoSuchObjectAnywhere", true));
+
+                var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(made);
+
+                Assert.That(controller, Is.Not.Null, "the controller it was replacing is still there");
+                Assert.That(controller.parameters.Length, Is.EqualTo(1), "and still holds what it held");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        /// <summary>Replacing a clip keeps its file too, for the same reason.</summary>
+        [Test]
+        public void OverwritingAClipKeepsItsGuid()
+        {
+            const string clip = Folder + "/Replaced.anim";
+
+            try
+            {
+                AnimatorEditTools.AnimationClipCreate(clip, false);
+
+                var before = AssetDatabase.AssetPathToGUID(clip);
+                var again = AnimatorEditTools.AnimationClipCreate(clip, true, true);
+
+                Assert.That(AssetDatabase.AssetPathToGUID(clip), Is.EqualTo(before));
+                Assert.That(again["replaced"].Value<bool>(), Is.True);
+
+                var asset = AssetDatabase.LoadAssetAtPath<AnimationClip>(clip);
+
+                Assert.That(asset.name, Is.EqualTo("Replaced"), "and keeps its own name");
+                Assert.That(AnimationUtility.GetAnimationClipSettings(asset).loopTime, Is.True);
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(clip);
+            }
+        }
+
         /// <summary>A state needs a motion, and nothing else here made one.</summary>
         [Test]
         public void AClipIsCreatedAndAStateCanHoldIt()
@@ -632,7 +727,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionWithConditions()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "Count", ["mode"] = "Equals", ["threshold"] = 3 },
             };
@@ -662,7 +757,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionRefusesAModeTheParameterCannotAnswer()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "Toggle", ["mode"] = "Greater", ["threshold"] = 1 },
             };
@@ -677,7 +772,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionRefusesAnUnknownParameter()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "NoSuchParameter", ["mode"] = "If" },
             };

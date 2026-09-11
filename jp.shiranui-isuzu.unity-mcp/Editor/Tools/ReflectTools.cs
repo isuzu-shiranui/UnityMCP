@@ -53,7 +53,7 @@ namespace UnityMCP.Editor.Tools
             "A Collider's 'bounds' is the physics engine's copy of the box and lags the Transform " +
             "until physics next runs, so this syncs before reading one; Renderer.bounds never " +
             "lagged and is unaffected.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Unsafe)]
         public static JObject Read(
             // Not Required: either this or 'paths' answers the call, and the framework's own
             // check runs before the one that knows that.

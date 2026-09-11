@@ -423,7 +423,55 @@ namespace UnityMCP.Editor.Core
 
         internal static string CoerceString(JToken token, McpParameterBinding binding)
         {
+            return StringArgument(token, binding.Name);
+        }
+
+        /// <summary>A string argument's text. A list or an object is refused rather than flattened.</summary>
+        /// <remarks>
+        /// Flattened, a list became the text of a name: the CLI turns an option given twice into a
+        /// list, and gameobject_create --name A --name B made an object called ["A","B"] and
+        /// reported success.
+        /// </remarks>
+        private static string StringArgument(JToken token, string argumentName)
+        {
+            if (token is JArray || token is JObject)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{argumentName ?? "this argument"}' takes a single value, and a " +
+                    $"{(token is JArray ? "list" : "JSON object")} arrived. An option given more than once " +
+                    "on the command line becomes a list; give it once.");
+            }
+
             return token.Type == JTokenType.String ? token.Value<string>() : token.ToString(Formatting.None);
+        }
+
+        /// <summary>Refuses one text that is a JSON list with its quotes stripped off.</summary>
+        /// <remarks>
+        /// Windows PowerShell removes the double quotes from an argument, so ["a"] arrives as [a].
+        /// Taken as one value and wrapped into a one-item list, that asked for a path named [a],
+        /// and the error that came back was about an object that does not exist.
+        /// </remarks>
+        private static void RefuseFlattenedList(JToken token, string argumentName)
+        {
+            if (token.Type != JTokenType.String)
+            {
+                return;
+            }
+
+            var text = token.Value<string>().Trim();
+
+            // The comma is what a stripped list of several values always has and a name never
+            // does. Without it, [Managers] is a root object's name, which is a widespread
+            // convention, and refusing it left no way to name that object at all.
+            if (text.Length >= 2 && text[0] == '[' && text[text.Length - 1] == ']' && text.Contains(","))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{argumentName ?? "this argument"}' takes a list, and the single text '{text}' arrived, " +
+                    "which is what a JSON list looks like once a shell has stripped its quotes. Give the " +
+                    "option once per value, or send a real JSON array.");
+            }
         }
 
         internal static bool CoerceBoolean(JToken token, McpParameterBinding binding)
@@ -533,6 +581,7 @@ namespace UnityMCP.Editor.Core
 
             // A single value where an array is expected is a common client slip; treat it
             // as a one-element array rather than failing the whole call.
+            RefuseFlattenedList(token, binding.Name);
             return new[] { coerce(token, element) };
         }
 
@@ -552,6 +601,7 @@ namespace UnityMCP.Editor.Core
                 return items;
             }
 
+            RefuseFlattenedList(token, binding.Name);
             return new List<T>(1) { coerce(token, element) };
         }
 
@@ -690,7 +740,7 @@ namespace UnityMCP.Editor.Core
 
             if (underlying == typeof(string))
             {
-                return token.Type == JTokenType.String ? token.Value<string>() : token.ToString(Formatting.None);
+                return StringArgument(token, null);
             }
 
             if (underlying == typeof(bool))
@@ -886,6 +936,7 @@ namespace UnityMCP.Editor.Core
 
             // A single value where an array is expected is a common client slip; treat it
             // as a one-element array rather than failing the whole call.
+            RefuseFlattenedList(token, null);
             return new List<JToken> { token };
         }
 

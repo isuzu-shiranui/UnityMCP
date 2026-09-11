@@ -39,7 +39,7 @@ namespace UnityMCP.Editor.Core
                     // An unsigned field reports as Integer, and intValue hands back its bits read
                     // as signed: a physics layer mask of 4292870143 reads as -2097153. Written
                     // back, that number is clamped to 0 and the reply still says it was written.
-                    return Unsigned(prop, out var unsignedValue) ? unsignedValue : prop.intValue;
+                    return Unsigned(prop, out var unsignedValue) ? new JValue(unsignedValue) : new JValue(prop.longValue);
 
                 // A culling mask or a collision mask is where a "why is this not drawn / not hit"
                 // question ends up, and the bare bitmask is unreadable: Everything is -1 and one
@@ -51,8 +51,10 @@ namespace UnityMCP.Editor.Core
                         ["layers"] = LayerNames(prop.intValue),
                     };
 
+                // doubleValue widens a float field and prints the widening: 0.02 reads back as
+                // 0.019999999552965164. Only a double field has digits that floatValue would lose.
                 case SerializedPropertyType.Float:
-                    return prop.floatValue;
+                    return prop.type == "double" ? prop.doubleValue : prop.floatValue;
 
                 case SerializedPropertyType.Boolean:
                     return prop.boolValue;
@@ -129,13 +131,17 @@ namespace UnityMCP.Editor.Core
                     // left a caller no way to tell an empty list from one it could not read.
                     if (prop.isArray && prop.propertyType != SerializedPropertyType.String)
                     {
-                        return new JObject
+                        var summary = new JObject
                         {
                             ["isArray"] = true,
                             ["length"] = prop.arraySize,
                             ["elementPath"] = prop.propertyPath + ".Array.data[0]",
                             ["lengthPath"] = prop.propertyPath + ".Array.size",
                         };
+
+                        Elements(prop, summary);
+
+                        return summary;
                     }
 
                     // A struct holds its values in its leaves, and nothing else says the leaves
@@ -194,6 +200,48 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>The paths of a property's immediate children, or null when it has none.</summary>
+        /// <summary>Puts an array's own values in the reply beside its length.</summary>
+        /// <remarks>
+        /// "Is this list filled in?" is the question behind most null references at Start, and a
+        /// length alone cannot answer it: three empty slots and three references read the same.
+        /// It cost one call per slot to find out. Elements whose own value is a struct are left
+        /// out, because each one answers with its field paths and twenty of those is a page of
+        /// text nobody asked for; the caller descends into those by path as before.
+        /// </remarks>
+        private static void Elements(SerializedProperty prop, JObject summary)
+        {
+            if (prop.arraySize == 0)
+            {
+                return;
+            }
+
+            if (prop.GetArrayElementAtIndex(0).propertyType == SerializedPropertyType.Generic)
+            {
+                return;
+            }
+
+            var shown = Math.Min(prop.arraySize, MaxElements);
+            var elements = new JArray();
+
+            for (var i = 0; i < shown; i++)
+            {
+                elements.Add(Read(prop.GetArrayElementAtIndex(i)));
+            }
+
+            summary["elements"] = elements;
+
+            if (shown < prop.arraySize)
+            {
+                summary["elementsShown"] = shown;
+            }
+        }
+
+        /// <summary>
+        /// How many of an array's values travel with its length. A Transform's children run to
+        /// hundreds on a scene root, and the hierarchy tools are what that question belongs to.
+        /// </summary>
+        private const int MaxElements = 20;
+
         private static JArray Children(SerializedProperty prop)
         {
             if (!prop.hasChildren)
@@ -338,7 +386,7 @@ namespace UnityMCP.Editor.Core
             }
 
             var reader = typeof(SerializedProperty).GetProperty(
-                prop.type == "ulong" ? "ulongValue" : "uintValue");
+                prop.type == "ulong" || prop.type == "UInt64" ? "ulongValue" : "uintValue");
 
             if (reader == null)
             {
@@ -351,7 +399,70 @@ namespace UnityMCP.Editor.Core
             return true;
         }
 
+        /// <summary>Refuses a resize that would invalidate another property in the same batch.</summary>
+        internal static string BatchPathConflict(JObject values)
+        {
+            const string sizeSuffix = ".Array.size";
+            foreach (var pair in values)
+            {
+                if (!pair.Key.EndsWith(sizeSuffix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var arrayPath = pair.Key.Substring(0, pair.Key.Length - sizeSuffix.Length);
+                var elementPrefix = arrayPath + ".Array.data[";
+                if (values.Properties().Any(p => p.Name.StartsWith(elementPrefix, StringComparison.Ordinal)))
+                {
+                    return $"Cannot resize '{arrayPath}' and write its elements in the same batch. "
+                        + "Resize it in a separate call. Nothing was written.";
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>Whether this field holds a number that cannot be negative.</summary>
+        /// <summary>What each integer type Unity serializes can hold, by the name it reports.</summary>
+        private static readonly Dictionary<string, (decimal Min, decimal Max)> IntegerRanges =
+            new Dictionary<string, (decimal Min, decimal Max)>(StringComparer.Ordinal)
+            {
+                ["sbyte"] = (sbyte.MinValue, sbyte.MaxValue),
+                ["byte"] = (byte.MinValue, byte.MaxValue),
+                ["short"] = (short.MinValue, short.MaxValue),
+                ["ushort"] = (ushort.MinValue, ushort.MaxValue),
+                ["int"] = (int.MinValue, int.MaxValue),
+                ["uint"] = (uint.MinValue, uint.MaxValue),
+                ["UInt32"] = (uint.MinValue, uint.MaxValue),
+                ["long"] = (long.MinValue, long.MaxValue),
+                ["ulong"] = (ulong.MinValue, ulong.MaxValue),
+                ["UInt64"] = (ulong.MinValue, ulong.MaxValue),
+            };
+
+        /// <summary>Reads a JSON number, or a numeric string, as an exact whole number.</summary>
+        /// <remarks>
+        /// Through the text rather than Value&lt;long&gt;: a number past long.MaxValue arrives as a
+        /// BigInteger that no numeric cast accepts, and 2.5 would otherwise round to 2 unnoticed.
+        /// </remarks>
+        private static bool TryWholeNumber(JToken value, out decimal number)
+        {
+            number = 0;
+
+            if (value == null || value.Type == JTokenType.Null)
+            {
+                return false;
+            }
+
+            var text = value.Type == JTokenType.String
+                ? value.Value<string>()
+                : value.ToString(Newtonsoft.Json.Formatting.None);
+
+            return decimal.TryParse(
+                       text, System.Globalization.NumberStyles.Float,
+                       System.Globalization.CultureInfo.InvariantCulture, out number)
+                   && decimal.Truncate(number) == number;
+        }
+
         private static bool IsUnsigned(string fieldType)
         {
             return fieldType == "uint" || fieldType == "ulong"
@@ -367,19 +478,28 @@ namespace UnityMCP.Editor.Core
         /// </remarks>
         private static string WriteInteger(SerializedProperty prop, JToken value)
         {
-            if (!IsUnsigned(prop.type))
+            if (!TryWholeNumber(value, out var wanted))
             {
-                prop.intValue = value.Value<int>();
-                return null;
+                return $"'{prop.propertyPath}' is a {prop.type} and takes a whole number; {value} is not one.";
             }
 
-            var wanted = value.Value<long>();
+            // Unity clamps a value that does not fit into the field's range and reports nothing,
+            // so 4294967296 written to an int was stored as 2147483647 under a success.
+            (decimal Min, decimal Max) range = IntegerRanges.TryGetValue(prop.type, out var known)
+                ? known
+                : (long.MinValue, long.MaxValue);
 
-            if (wanted < 0)
+            if (wanted < range.Min || wanted > range.Max)
             {
-                return $"'{prop.propertyPath}' is a {prop.type}, which cannot be negative. "
-                       + $"Read it back to see the number it holds now; {wanted} would be stored "
-                       + "as 0.";
+                return $"'{prop.propertyPath}' is a {prop.type}, which holds {range.Min} to {range.Max}. "
+                       + $"{wanted} does not fit, and Unity would store "
+                       + $"{Math.Min(Math.Max(wanted, range.Min), range.Max)} instead.";
+            }
+
+            if (!IsUnsigned(prop.type) || prop.type == "ushort")
+            {
+                prop.longValue = (long)wanted;
+                return null;
             }
 
             var writer = typeof(SerializedProperty).GetProperty(
@@ -597,7 +717,7 @@ namespace UnityMCP.Editor.Core
                     return WriteLayerMask(prop, value);
 
                 case SerializedPropertyType.Float:
-                    prop.floatValue = value.Value<float>();
+                    prop.doubleValue = value.Value<double>();
                     return null;
 
                 case SerializedPropertyType.Boolean:

@@ -47,7 +47,8 @@ public static class TomlConfigEditor
     public static TomlServerEntry? Read(string content, string tableName)
     {
         var document = ParseOrThrow(content, "config.toml");
-        var table = document.Tables.FirstOrDefault(t => NameOf(t) == tableName);
+        var name = ParseName(tableName);
+        var table = document.Tables.FirstOrDefault(t => Segments(t.Name).SequenceEqual(name));
 
         if (table is null)
         {
@@ -59,18 +60,16 @@ public static class TomlConfigEditor
 
         foreach (var item in table.Items)
         {
-            var key = item.Key?.ToString().Trim();
-
-            if (key == "url" && item.Value is StringValueSyntax value)
+            if (IsKey(item.Key, "url") && item.Value is StringValueSyntax value)
             {
                 url = value.Value;
             }
-            else if (key == "http_headers" && item.Value is InlineTableSyntax headers)
+            else if (IsKey(item.Key, "http_headers") && item.Value is InlineTableSyntax headers)
             {
                 foreach (var header in headers.Items)
                 {
-                    if (header.KeyValue?.Key?.ToString().Trim() == "Authorization"
-                        && header.KeyValue.Value is StringValueSyntax headerValue)
+                    if (IsKey(header.KeyValue?.Key, "Authorization")
+                        && header.KeyValue!.Value is StringValueSyntax headerValue)
                     {
                         authorization = headerValue.Value;
                     }
@@ -85,8 +84,9 @@ public static class TomlConfigEditor
     public static string? ReadValue(string content, string tableName, string key)
     {
         var document = ParseOrThrow(content, "config.toml");
-        var table = document.Tables.FirstOrDefault(t => NameOf(t) == tableName);
-        var item = table?.Items.FirstOrDefault(candidate => candidate.Key?.ToString().Trim() == key);
+        var name = ParseName(tableName);
+        var table = document.Tables.FirstOrDefault(t => Segments(t.Name).SequenceEqual(name));
+        var item = table?.Items.FirstOrDefault(candidate => IsKey(candidate.Key, key));
 
         return item?.Value is StringValueSyntax value ? value.Value : null;
     }
@@ -107,8 +107,9 @@ public static class TomlConfigEditor
     /// <summary>Removes the table and every sub-table belonging to it, such as an <c>.env</c> block.</summary>
     private static int RemoveTables(DocumentSyntax document, string tableName)
     {
+        var name = ParseName(tableName);
         var doomed = document.Tables
-            .Where(table => NameOf(table) == tableName || NameOf(table).StartsWith(tableName + ".", StringComparison.Ordinal))
+            .Where(table => Segments(table.Name).Take(name.Length).SequenceEqual(name))
             .ToList();
 
         foreach (var table in doomed)
@@ -119,10 +120,37 @@ public static class TomlConfigEditor
         return doomed.Count;
     }
 
-    private static string NameOf(TableSyntaxBase table)
+    private static string[] ParseName(string tableName)
     {
-        return table.Name?.ToString().Trim() ?? "";
+        var table = ParseOrThrow($"[{tableName}]\n", "table-name.toml").Tables.FirstOrDefault();
+
+        if (table is null)
+        {
+            throw new TomlEditException($"'{tableName}' is not a table name.");
+        }
+
+        return Segments(table.Name).ToArray();
     }
+
+    /// <summary>A key written bare, in double quotes or in single quotes is the same key.</summary>
+    private static bool IsKey(KeySyntax? key, string name) =>
+        Segments(key).SequenceEqual(new[] { name }, StringComparer.Ordinal);
+
+    // Compare decoded segments: quotes, escapes and whitespace do not change a TOML key,
+    // whereas a dot inside a quoted segment is part of that key, not a sub-table separator.
+    private static IEnumerable<string> Segments(KeySyntax? key)
+    {
+        if (key is null) yield break;
+        yield return KeyValue(key.Key);
+        foreach (var part in key.DotKeys) yield return KeyValue(part.Key);
+    }
+
+    private static string KeyValue(BareKeyOrStringValueSyntax? key) => key switch
+    {
+        BareKeySyntax bare => bare.Key?.Text ?? "",
+        StringValueSyntax quoted => quoted.Value ?? "",
+        _ => ""
+    };
 
     private static DocumentSyntax ParseOrThrow(string content, string sourceName)
     {

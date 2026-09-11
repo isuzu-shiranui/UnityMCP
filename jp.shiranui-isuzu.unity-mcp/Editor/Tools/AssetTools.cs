@@ -27,6 +27,17 @@ namespace UnityMCP.Editor.Tools
         /// <summary>Dependencies listed. A production scene points at thousands.</summary>
         private const int MaxDependencies = 200;
 
+        /// <summary>A typed load returning null does not mean the destination is empty.</summary>
+        internal static void RefuseIncompatibleAsset(string path, UnityEngine.Object typedAsset)
+        {
+            if (typedAsset == null && (AssetDatabase.LoadMainAssetAtPath(path) != null
+                || File.Exists(path) || Directory.Exists(path)))
+            {
+                throw new McpToolException("invalid_params",
+                    $"'{path}' already exists but is not a compatible asset. Nothing was replaced.");
+            }
+        }
+
         [McpTool(
             "asset_find",
             "Search the project for assets. Combine a type filter with a folder to keep the search " +
@@ -314,16 +325,20 @@ namespace UnityMCP.Editor.Tools
             "materials, re-slices sprites or rewrites import settings, on a project with no version " +
             "control or one whose assets are not committed. It is also how to hand part of a project " +
             "to someone who does not have the repository. The file lands outside the project, so " +
-            "'file' has to be stated rather than guessed, and one that is already there is kept " +
-            "unless overwrite is set. include_dependencies follows the whole reference graph, where " +
-            "one character prefab can reach most of the project, so the reply reports the size that " +
-            "was actually written.",
+            "'destination' has to be stated rather than guessed, and one that is already there is " +
+            "kept unless overwrite is set. The package is written beside the destination and moved " +
+            "into place, so a failed export leaves whatever was there before it intact. " +
+            "include_dependencies follows the whole reference graph, where one character prefab can " +
+            "reach most of the project, so the reply reports the size that was actually written.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject ExportPackage(
             [McpArg("paths", "Project paths to export. A folder brings what is under it unless " +
                              "recurse is false.", Required = true)]
             string[] paths = null,
-            [McpArg("file", "Where to write the .unitypackage, including the file name.", Required = true)]
+            // Not 'file': the CLI keeps that name for itself, so --file never reached this tool and
+            // the documented command line failed with "'file' is required".
+            [McpArg("destination", "Where to write the .unitypackage, including the file name.",
+                    Required = true)]
             string file = null,
             [McpArg("recurse", "For a folder, include the assets inside it.")]
             bool recurse = true,
@@ -366,15 +381,36 @@ namespace UnityMCP.Editor.Tools
             {
                 throw new McpToolException(
                     "invalid_params",
-                    "'file' is required. The package is written outside the project, so the " +
-                    "destination has to be stated rather than assumed.");
+                    "'destination' is required. The package is written outside the project, so it " +
+                    "has to be stated rather than assumed.");
             }
 
             var target = file.Replace('\\', '/');
 
+            // A folder given without a trailing separator would otherwise take the extension onto
+            // its own name and write the package beside it: 'C:/Backups' produced
+            // 'C:/Backups.unitypackage', a file the caller never named and did not look for.
+            if (Directory.Exists(target.TrimEnd('/')))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{file}' names a folder, not a file. Give the file name too, for example " +
+                    $"'{target.TrimEnd('/')}/backup.unitypackage'.");
+            }
+
             if (!target.EndsWith(".unitypackage", StringComparison.OrdinalIgnoreCase))
             {
                 target += ".unitypackage";
+            }
+
+            // A directory that does not exist yet reaches here as '<dir>/.unitypackage', which is
+            // a hidden file with no name rather than the refusal the caller expects.
+            if (Path.GetFileName(target).Equals(".unitypackage", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{file}' names a folder, not a file. Give the file name too, for example " +
+                    $"'{target.Substring(0, target.Length - ".unitypackage".Length)}backup.unitypackage'.");
             }
 
             if (File.Exists(target) && !overwrite)
@@ -392,6 +428,7 @@ namespace UnityMCP.Editor.Tools
                 Directory.CreateDirectory(directory);
             }
 
+            var moved = false;
             var options = ExportPackageOptions.Default;
 
             if (recurse)
@@ -407,13 +444,66 @@ namespace UnityMCP.Editor.Tools
             // ExportPackageOptions.Interactive is deliberately absent. It runs the export
             // asynchronously and opens a file browser window when it finishes, so the call would
             // return before the file exists and leave a window open on the Editor.
-            AssetDatabase.ExportPackage(assets, target, options);
+            //
+            // Written beside the destination and moved into place afterwards. ExportPackage logs a
+            // failure and returns rather than throwing, so exporting straight onto the destination
+            // and then asking whether a file is there reports the previous export as this one's
+            // result — and a backup tool that answers with last week's file is worse than one that
+            // fails.
+            // Short on purpose: the staging name sits on the destination's own path, and a long
+            // suffix can push it past the limit a Windows path has without long paths enabled.
+            var staging = target + "." + Guid.NewGuid().ToString("N").Substring(0, 8) + ".partial";
 
-            if (!File.Exists(target))
+            try
             {
+                AssetDatabase.ExportPackage(assets, staging, options);
+
+                if (!File.Exists(staging) || new FileInfo(staging).Length == 0)
+                {
+                    throw new McpToolException(
+                        "tool_failed",
+                        $"Unity wrote nothing for '{target}', and reports an export failure to the " +
+                        "console rather than as an error, so console_read_logs carries the reason. " +
+                        "Anything already at that path is untouched.");
+                }
+
+                if (File.Exists(target))
+                {
+                    if (!overwrite)
+                        throw new McpToolException("already_exists", $"'{target}' appeared during export.");
+                    File.Replace(staging, target, null);
+                }
+                else
+                {
+                    File.Move(staging, target);
+                }
+
+                moved = true;
+            }
+            catch (IOException e) when (!moved)
+            {
+                // The export itself succeeded and only the move did not, which is a refusal the
+                // caller can act on rather than the 500 an escaping IOException becomes.
                 throw new McpToolException(
                     "tool_failed",
-                    $"Unity reported no error but nothing was written to '{target}'.");
+                    $"The package was written but could not be put at '{target}': {e.Message} " +
+                    "Anything already there is untouched. Nothing else was left behind, so the " +
+                    "same call works once the destination is free.");
+            }
+            finally
+            {
+                // The destination folder is left as it was found, and a failure to remove the
+                // staging file must not replace the error already on its way out.
+                if (File.Exists(staging))
+                {
+                    try
+                    {
+                        File.Delete(staging);
+                    }
+                    catch (IOException)
+                    {
+                    }
+                }
             }
 
             var result = new JObject
@@ -427,12 +517,72 @@ namespace UnityMCP.Editor.Tools
 
             if (includeDependencies)
             {
-                // The closure the flag reached, counting the listed assets themselves, so a
-                // package that came out larger than expected says why.
-                result["includedAssetCount"] = AssetDatabase.GetDependencies(assets, true).Length;
+                // GetDependencies follows references, and a folder has none, so a listed folder
+                // counted as a single entry however much was inside it. Its contents are expanded
+                // first; with recurse off there is no way to say which of them Unity took, so the
+                // count is left out rather than published wrong.
+                var folders = assets.Where(AssetDatabase.IsValidFolder).ToArray();
+
+                if (folders.Length == 0 || recurse)
+                {
+                    var listed = assets
+                        .SelectMany(a => AssetDatabase.IsValidFolder(a) ? Inside(a) : new[] { a })
+                        .Distinct()
+                        .ToArray();
+
+                    result["includedAssetCount"] = AssetDatabase.GetDependencies(listed, true)
+                        .Distinct()
+                        .Count();
+                }
+                else
+                {
+                    // Absent rather than wrong, and said so: a caller reading the key would
+                    // otherwise find it missing with nothing to explain the difference.
+                    result["note"] = "includedAssetCount is left out because a folder was listed " +
+                                     "with recurse false, and which of its assets Unity took " +
+                                     "cannot be worked out from here.";
+                }
             }
 
             return result;
+        }
+
+        /// <summary>The assets a folder holds, at any depth, leaving the folders themselves out.</summary>
+        private static string[] Inside(string folder)
+        {
+            return AssetDatabase.FindAssets(string.Empty, new[] { folder })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(p => !AssetDatabase.IsValidFolder(p))
+                .Distinct()
+                .ToArray();
+        }
+
+        /// <summary>Overwrite an asset in place, so its GUID and the references to it survive.</summary>
+        /// <remarks>
+        /// DeleteAsset followed by CreateAsset writes a new file with a new GUID, and every scene,
+        /// prefab and component pointing at the old one is left holding a missing reference — with
+        /// nothing in the reply to say a replacement had that cost. CopySerialized carries the
+        /// object's name across as well, so the asset's own name is put back afterwards.
+        /// </remarks>
+        internal static void ReplaceAssetContents(
+            UnityEngine.Object existing, UnityEngine.Object fresh, string assetPath)
+        {
+            try
+            {
+                // The whole object is overwritten, so the whole object is what has to be on
+                // the undo stack: RecordObject stores a property diff, which is not what
+                // CopySerialized produces.
+                Undo.RegisterCompleteObjectUndo(existing, "MCP Replace Asset");
+                EditorUtility.CopySerialized(fresh, existing);
+                existing.name = Path.GetFileNameWithoutExtension(assetPath);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(fresh);
+            }
+
+            EditorUtility.SetDirty(existing);
+            AssetDatabase.SaveAssetIfDirty(existing);
         }
 
         private static UnityEngine.Object Require(string path)
