@@ -92,4 +92,4 @@ A test run holds the main thread for its whole duration, so no other tool answer
 
 Running the package's tests needs `"testables": ["jp.shiranui-isuzu.unity-mcp"]` in the project's `Packages/manifest.json`.
 
-The EditMode suite is run on Unity 6000.0.35f1, and the run is recorded in `scripts/editmode-attestation.json`.
+The EditMode suite is run on Unity 6000.0.x, and the run is recorded in `scripts/attested/<source hash>.json`. Naming the record after the sources it covered is what lets two branches each record a run without colliding: CI finds the right one by computing the hash, so there is nothing to compare and nothing to merge.

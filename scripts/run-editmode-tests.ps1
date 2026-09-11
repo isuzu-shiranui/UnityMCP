@@ -236,11 +236,30 @@ $attestation = [ordered]@{
     ranAt        = (Get-Date).ToUniversalTime().ToString('o')
 }
 
-$path = Join-Path $repo 'scripts\editmode-attestation.json'
+# Named by the hash rather than by a fixed name, so two branches that each recorded a run write
+# different files and merge without a conflict. Under a fixed name they conflict whenever both
+# touched Editor sources, and resolving that teaches nothing: the merged result has a hash
+# neither run covers, which the gate catches on its own a moment later.
+$directory = Join-Path $repo 'scripts\attested'
+New-Item -ItemType Directory -Force -Path $directory | Out-Null
+$path = Join-Path $directory "$hash.json"
+
 [System.IO.File]::WriteAllText(
     $path,
     (($attestation | ConvertTo-Json) + "`n").Replace("`r`n", "`n"),
     (New-Object System.Text.UTF8Encoding($false)))
+
+# Only the run covering the sources on disk is ever read; the rest are history. Kept by the time
+# recorded inside them rather than the file's own: a checkout resets modification times, so
+# sorting by those would prune whichever files git happened to write last.
+$stale = Get-ChildItem -Path $directory -Filter '*.json' |
+    Sort-Object { (Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json).ranAt } -Descending |
+    Select-Object -Skip 10
+
+foreach ($old in $stale) {
+    Remove-Item -LiteralPath $old.FullName -Force
+    Write-Host "  pruned $($old.Name)"
+}
 
 Write-Host ''
 Write-Host "Wrote $path" -ForegroundColor Green

@@ -92,4 +92,4 @@ isuzu-unity-cli call test_results --include_passed true --limit 200
 
 Unity 側のテストを走らせるには、プロジェクトの `Packages/manifest.json` に `"testables": ["jp.shiranui-isuzu.unity-mcp"]` が必要です。
 
-EditMode スイートは Unity 6000.0.35f1 で実行し、その記録を `scripts/editmode-attestation.json` に残します。
+EditMode スイートは Unity 6000.0.x で実行し、その記録を `scripts/attested/<ソースのハッシュ>.json` に残します。覆ったソースの名前を記録のファイル名にしてあるので、2 つのブランチがそれぞれ実行を記録しても衝突しません。CI はハッシュを計算して該当するファイルを探すだけで、突き合わせもマージも発生しません。

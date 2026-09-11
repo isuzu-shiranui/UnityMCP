@@ -9,11 +9,15 @@ pwsh scripts/run-editmode-tests.ps1
 ```
 
 It creates a scratch project under `%TEMP%` on first use — a manifest and a junction back to
-this repository, nothing else — reuses it afterwards, and writes `editmode-attestation.json`
+this repository, nothing else — reuses it afterwards, and writes `attested/<source hash>.json`
 naming the sources it ran against.
 
 **Commit that file with the change it covers.** CI and the release both refuse Editor sources
-that no recorded run covers.
+that no recorded run covers, and both require the run to be on the pinned Editor generation.
+
+The file is named after the sources rather than given a fixed name, so two branches that each
+recorded a run write different files and merge without a conflict. After merging them neither
+run covers the result, which is what the gate says. The ten most recent are kept.
 
 ### Which Unity it runs
 
