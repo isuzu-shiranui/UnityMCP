@@ -55,6 +55,11 @@ public sealed class CommandContext
         return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
     }
 
+    public InstanceDescriptor RefreshInstance(InstanceDescriptor selected)
+    {
+        return InstanceResolver.Refresh(ReadDescriptors(), selected);
+    }
+
     /// <summary>
     /// Prints an envelope the way the user asked for it and returns the exit code. A call that is
     /// still running also gets the Editor's explanation on stderr, where a reader watching the

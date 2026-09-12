@@ -54,9 +54,13 @@ isuzu-unity-cli call play_mode_status
 
 `isuzu-unity-cli projects` marks that project with `containsWorkingDirectory`.
 
-Run from outside every project, the CLI does not guess. It lists the candidates and stops with exit code 3.
+Run from outside every project, the CLI selects the only running Editor. If several Editors are running, it lists the candidates and stops with exit code 3.
 
 `--project` matches an exact project name first. When nothing matches exactly, it falls back to a unique substring match.
+
+After selection, `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the same project path. A new port, token or product name is accepted; another project with the same name is not. If that path is missing or ambiguous, the command cannot switch to another Editor. Start a new command to select a different project.
+
+`mcp-stdio` can start before an Editor is open. It becomes bound when it first selects a project. Descriptors without an absolute project path can be used initially, but cannot be rediscovered safely after a connection failure.
 
 ## Exit codes
 
