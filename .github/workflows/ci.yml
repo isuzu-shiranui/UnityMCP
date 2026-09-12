@@ -152,14 +152,25 @@ jobs:
         run: |
           UNITY=$(jq -r .version jp.shiranui-isuzu.unity-mcp/package.json)
           CLI=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
-          echo "unity package: $UNITY"
-          echo "cli:           $CLI"
+          SERVER=$(jq -r .version server.json)
+          SERVER_PACKAGE=$(jq -r '.packages[0].version' server.json)
+          echo "unity package:  $UNITY"
+          echo "cli:            $CLI"
+          echo "server.json:    $SERVER"
+          echo "its nuget entry: $SERVER_PACKAGE"
           if [ -z "$CLI" ]; then
             echo "no <Version> in the csproj; this check has stopped checking anything"
             exit 1
           fi
           if [ "$UNITY" != "$CLI" ]; then
             echo "package versions disagree"
+            exit 1
+          fi
+          # server.json is what the MCP registry serves. Nothing reads it at build time, so a
+          # version left behind here is invisible until an agent installs the version the
+          # registry names and gets a different one.
+          if [ "$UNITY" != "$SERVER" ] || [ "$UNITY" != "$SERVER_PACKAGE" ]; then
+            echo "server.json disagrees. Run: bash scripts/set-version.sh $UNITY"
             exit 1
           fi
 
@@ -228,9 +239,9 @@ jobs:
       # A tool list that names 23 tools while the package publishes 57 is how v2's docs ended up
       # describing seven tools that did not exist. The catalogue is generated from the
       # attributes, so the only thing that can drift is the prose — checked here rather than
-      # remembered. The tool tables live in docs/tools.md and docs/en/tools.md; the tool count
-      # is written as a literal in those pages, in both READMEs and on both guide pages under
-      # site/, and every such literal has to equal the number of published tools.
+      # remembered. The tool tables live in docs/tools.md and docs/en/tools.md. A page may state
+      # a tool count or leave it out, but a count it does state has to equal the number of
+      # published tools.
       - name: Every tool is documented
         run: |
           node -e "
@@ -263,13 +274,13 @@ jobs:
               }
             }
 
-            // Timeline, Recorder and the test runner live in assemblies constrained on their
-            // packages, so a project without those packages publishes fewer tools. The prose
-            // quotes both numbers, and both are derived here rather than remembered.
+            // Timeline, Recorder, the test runner and the uGUI tool live in assemblies constrained
+            // on their packages, so a project without those packages publishes fewer tools. The
+            // prose quotes both numbers, and both are derived here rather than remembered.
             const gated = new Set();
             for (const f of walk(root)) {
               if (f.includes(path.sep + 'Tests' + path.sep)) continue;
-              const gatedArea = ['Timeline', 'Recorder', 'TestRunner']
+              const gatedArea = ['Timeline', 'Recorder', 'TestRunner', 'Ugui']
                 .some(a => f.includes(path.sep + a + path.sep));
               if (!gatedArea) continue;
               const src = fs.readFileSync(f, 'utf8');
@@ -282,33 +293,22 @@ jobs:
               failed = true;
             }
 
-            // Matches '74 tools' and '74 個のツール'. A page with no count at all fails too:
-            // a check that finds nothing to compare is not checking anything.
+            // Matches '74 tools' and '74 個のツール'.
             const counted = /(\d+)\s*(?:tools\b|個のツール)/g;
             for (const doc of ['docs/tools.md', 'docs/en/tools.md', 'README.md', 'README.en.md',
                                 'site/index.html', 'site/en/index.html']) {
               const text = fs.readFileSync(doc, 'utf8');
               const literals = [...text.matchAll(counted)].map(m => Number(m[1]));
-              if (literals.length === 0) {
-                console.error(doc + ' states no tool count');
-                failed = true;
-                continue;
-              }
               const wrong = literals.filter(n => n !== names.size && n !== bare);
               if (wrong.length) {
                 console.error(doc + ' says ' + wrong.join('/') + ' tools; the package publishes ' +
                   names.size + ', or ' + bare + ' without the optional packages');
                 failed = true;
               }
-
-              if (!literals.includes(names.size)) {
-                console.error(doc + ' never states the full count of ' + names.size);
-                failed = true;
-              }
             }
 
             if (failed) process.exit(1);
-            console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented and counted in docs/tools.md, docs/en/tools.md and both READMEs');
+            console.log(names.size + ' tools (' + bare + ' without the optional packages), all documented in docs/tools.md and docs/en/tools.md');
           "
 
       # The install scripts are fetched and piped into a shell, so their first byte is parsed
@@ -455,17 +455,48 @@ jobs:
             }
 
             // 2. Every compiled source and binary sits under an Editor folder, which Unity
-            //    excludes from player builds regardless of importer settings.
+            //    excludes from player builds regardless of importer settings. A native plugin
+            //    is covered by the same rule: it is not an assembly, so nothing else here
+            //    would have looked at it.
+            const NATIVE = ['.dylib', '.so', '.bundle', '.a', '.dll.so', '.jar', '.aar'];
+            const isBinary = f => f.endsWith('.dll') || NATIVE.some(e => f.endsWith(e));
             const inEditor = f => f.split(path.sep).includes('Editor');
-            for (const f of files.filter(f => f.endsWith('.cs') || f.endsWith('.dll'))) {
+            for (const f of files.filter(f => f.endsWith('.cs') || isBinary(f))) {
               if (!inEditor(f)) {
                 console.error(f + ' is outside an Editor folder and would ship in builds');
                 failed = true;
               }
             }
 
+            // 3. A native plugin is included per platform by its importer settings, which an
+            //    Editor folder does not override. Unity's default for a new one is every
+            //    platform, so the settings are what decide whether it reaches a game.
+            for (const f of files.filter(f => NATIVE.some(e => f.endsWith(e)))) {
+              const meta = f + '.meta';
+              if (!fs.existsSync(meta)) {
+                console.error(f + ' has no .meta, so its importer settings are whatever Unity invents');
+                failed = true;
+                continue;
+              }
+              const text = fs.readFileSync(meta, 'utf8');
+              if (!/first:\s*\n\s*Any:\s*\n\s*second:\s*\n\s*enabled: 0/.test(text)) {
+                console.error(meta + ' does not disable the Any platform');
+                failed = true;
+              }
+              if (!/first:\s*\n\s*Editor: Editor\s*\n\s*second:\s*\n\s*enabled: 1/.test(text)) {
+                console.error(meta + ' does not enable the Editor platform');
+                failed = true;
+              }
+              for (const platform of ['Standalone', 'Android', 'iPhone', 'WebGL']) {
+                if (new RegExp(platform + ':[^\\n]*\\n\\s*second:\\s*\\n\\s*enabled: 1').test(text)) {
+                  console.error(meta + ' enables ' + platform + ', which ships it in a game');
+                  failed = true;
+                }
+              }
+            }
+
             if (failed) process.exit(1);
-            console.log(files.filter(f => f.endsWith('.cs') || f.endsWith('.dll')).length +
+            console.log(files.filter(f => f.endsWith('.cs') || isBinary(f)).length +
                         ' source and binary files, all Editor-only');
           "
 
@@ -496,29 +527,53 @@ jobs:
       # names the sources, not the commit.
       - name: Editor tests cover these sources
         run: |
-          ATTESTATION=scripts/editmode-attestation.json
+          EXPECTED=$(dotnet run scripts/source-hash.cs)
+          ATTESTATION="scripts/attested/$EXPECTED.json"
 
+          echo "sources: $EXPECTED"
+
+          # The file is named by the hash, so finding it is the hash check. There is nothing to
+          # compare and nothing to conflict: a run that covered other sources sits under its own
+          # name and is simply not looked at.
           if [ ! -f "$ATTESTATION" ]; then
-            echo "$ATTESTATION is missing. Run: pwsh scripts/run-editmode-tests.ps1"
+            echo ""
+            echo "No recorded run covers these Editor sources."
+            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the file it writes."
             exit 1
           fi
 
-          EXPECTED=$(dotnet run scripts/source-hash.cs)
           RECORDED=$(jq -r .sourceHash "$ATTESTATION")
           TOTAL=$(jq -r .total "$ATTESTATION")
           FAILED=$(jq -r .failed "$ATTESTATION")
           PASSED=$(jq -r .passed "$ATTESTATION")
           SKIPPED=$(jq -r .skipped "$ATTESTATION")
+          RAN_ON=$(jq -r .unityVersion "$ATTESTATION")
+          PINNED=$(sed -n "s/^\$PinnedUnityVersion = '\([^']*\)'.*/\1/p" scripts/run-editmode-tests.ps1)
 
-          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL)"
-          echo "sources:  $EXPECTED"
+          echo "recorded: $PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL, on $RAN_ON"
 
+          # The name could be anything; the content says what it is.
           if [ "$EXPECTED" != "$RECORDED" ]; then
-            echo ""
-            echo "The Editor sources have changed since the tests were last run."
-            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the attestation it writes."
+            echo "$ATTESTATION records $RECORDED, which is not its own name."
             exit 1
           fi
+
+          # The generation is pinned so that what the gate means does not depend on which Editor
+          # happened to be installed. Without this the pin lives only in the script's default,
+          # and a run recorded on another generation passes unnoticed.
+          if [ -z "$PINNED" ]; then
+            echo "Could not read PinnedUnityVersion from scripts/run-editmode-tests.ps1."
+            exit 1
+          fi
+
+          case "$RAN_ON" in
+            "$PINNED".*) ;;
+            *)
+              echo "The run was recorded on $RAN_ON; the gate is pinned to $PINNED.x."
+              echo "A run on another generation is welcome beside it, not in place of it."
+              exit 1
+              ;;
+          esac
 
           if [ "$FAILED" != "0" ] || [ "$PASSED" = "0" ]; then
             echo "The recorded run is not a clean pass."

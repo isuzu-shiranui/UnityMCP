@@ -48,10 +48,10 @@
 
       <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Unity MCP のリポジトリを追加する</a></p>
 
-      <p class="code-label">リンクが働かないときは、この URL を貼り付けて追加します</p>
+      <p class="code-label">リンクで開かないときは、この URL を貼り付けて追加します</p>
       <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
 
-      <p class="aside">貼り付ける場所は、VCC では Settings ページの Packages タブにある Add Repository ボタンです。ALCOM では「パッケージ&amp;テンプレート」の「VPMリポジトリ」ページにある「VPMリポジトリを追加」ボタンです。追加すると、プロジェクトのパッケージ一覧に Unity MCP が並びます。この方法で入れた場合は、下の手順 A と手順 B の 1 番目を飛ばして、2 番目から読んでください。</p>
+      <p class="aside">貼り付ける先は、VCC では Settings ページの Packages タブにある Add Repository ボタンから開きます。ALCOM では「パッケージ&amp;テンプレート」の「VPMリポジトリ」ページにある「VPMリポジトリを追加」ボタンから開きます。追加すると、プロジェクトのパッケージ一覧に Unity MCP が並びます。この方法で入れた場合は、下の手順 A と手順 B の 1 番目を飛ばして、2 番目から読んでください。</p>
     </div>
   </section>
 
@@ -122,7 +122,7 @@
 
         <li>
           <h3>話しかけます</h3>
-          <p>対象のプロジェクトを Unity Editor で開いたまま、Claude Desktop に用件を書きます。Unity Editor を閉じていると何も動きません。</p>
+          <p>対象のプロジェクトを Unity Editor で開いたまま、Claude Desktop に用件を書きます。</p>
         </li>
       </ol>
     </div>
@@ -161,7 +161,7 @@
           <h3>クライアントに登録します</h3>
           <p>次の 1 行で、接続先の URL とトークンの登録まで終わります。トークンを自分で扱う必要はありません。</p>
           <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
-          <p class="aside"><code>--agent</code> には <code>claude-code</code>、<code>claude-desktop</code>、<code>codex</code>、<code>cursor</code>、<code>gemini</code>、<code>vscode</code> を指定できます。実行するには Unity Editor が起動している必要があります。全コマンドは <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/cli.md">CLI リファレンス</a>、クライアントごとの設定は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">MCP クライアントの接続</a> にあります。</p>
+          <p class="aside"><code>--agent</code> には <code>claude-code</code>、<code>claude-desktop</code>、<code>codex</code>、<code>cursor</code>、<code>gemini</code>、<code>vscode</code> を指定できます。このコマンドを実行するには、Unity Editor が起動している必要があります。全コマンドは <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/cli.md">CLI リファレンス</a>、クライアントごとの設定は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/mcp-clients.md">MCP クライアントの接続</a> にあります。</p>
         </li>
       </ol>
     </div>
@@ -179,7 +179,7 @@
         <li>マテリアルの現在の値を読み、変更します。</li>
         <li>Play Mode を開始したり停止したりします。</li>
       </ul>
-      <p>Unity Editor は最大で 88 個のツールを公開します。Timeline のツールは Timeline パッケージが入っているプロジェクトにだけ現れます。Recorder のツールには Recorder と Timeline の両方が要ります。テストのツールには Test Framework が要ります。3 つとも入っていないプロジェクトが公開するのは 75 個のツールです。Unity が既定で入れる Test Framework だけがある場合は 77 個です。一覧は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/tools.md">ツール一覧</a> にあります。</p>
+      <p>Timeline のツールは Timeline パッケージが入っているプロジェクトにだけ現れます。Recorder のツールには Recorder と Timeline の両方が、テストのツールには Test Framework が要ります。一覧は <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/tools.md">ツール一覧</a> にあります。</p>
     </div>
   </section>
 

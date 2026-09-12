@@ -48,6 +48,10 @@ public static class DescriptorStore
                 {
                     continue;
                 }
+                catch (UnauthorizedAccessException)
+                {
+                    continue;
+                }
 
                 if (parsed is not null && IsUsable(parsed) && isAlive(parsed.Pid))
                 {
@@ -78,6 +82,35 @@ public static class DescriptorStore
         {
             var name = reader.GetString();
             reader.Read();
+
+            // Refused only for what the connection is made of. A wrong type here cannot be read
+            // past: the descriptor would name a port or a token that is not there.
+            if (name is "projectPath" or "projectName" or "token" or "endpoint"
+                && reader.TokenType is not (JsonTokenType.String or JsonTokenType.Null))
+                throw new JsonException($"Descriptor field '{name}' must be a string or null.");
+            if (name is "port" or "pid"
+                && reader.TokenType is not (JsonTokenType.Number or JsonTokenType.String or JsonTokenType.Null))
+                throw new JsonException($"Descriptor field '{name}' must be numeric.");
+
+            // The rest is reported rather than connected through, so a field an Editor of another
+            // version writes differently is dropped instead of hiding a running project.
+            if (name is "unityVersion" or "protocolVersion" or "mcpUrl"
+                && reader.TokenType is not (JsonTokenType.String or JsonTokenType.Null))
+            {
+                reader.Skip();
+                continue;
+            }
+            if (name is "preferredPort"
+                && reader.TokenType is not (JsonTokenType.Number or JsonTokenType.String or JsonTokenType.Null))
+            {
+                reader.Skip();
+                continue;
+            }
+            if (name == "portMismatch" && reader.TokenType is not (JsonTokenType.True or JsonTokenType.False or JsonTokenType.Null))
+            {
+                reader.Skip();
+                continue;
+            }
 
             switch (name)
             {

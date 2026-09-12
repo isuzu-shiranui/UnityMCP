@@ -206,6 +206,38 @@ public sealed class ProjectMatcherTests
         Assert.Null(ProjectMatcher.ByWorkingDirectory(candidates, Path.GetTempPath()));
     }
 
+    /// <summary>
+    /// The project root, which is what a caller already holding a path will pass.
+    /// </summary>
+    /// <remarks>
+    /// An agent working in a project reached for its absolute path four times in a row and got
+    /// "No running Editor matches" each time. The error names the folder, so it recovered, but
+    /// the path it started with was never an unreasonable thing to send.
+    /// </remarks>
+    [Fact]
+    public void TheProjectRootPathSelectsTheEditor()
+    {
+        Assert.Equal("UnityMCP v3 Test", ProjectMatcher.ByName(Open, "/p/a").ProjectName);
+        Assert.Equal("UnityMCP v3 Test B", ProjectMatcher.ByName(Open, "/p/b/").ProjectName);
+    }
+
+    /// <summary>
+    /// A backslash path names the folder on Windows. Elsewhere a backslash is part of a file
+    /// name, so the same text names nothing, and the CI runs on Linux.
+    /// </summary>
+    [Fact]
+    public void TheSlashesDoNotHaveToMatch()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Equal("Other", ProjectMatcher.ByName(Open, @"\p\c").ProjectName);
+        }
+        else
+        {
+            Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, @"\p\c"));
+        }
+    }
+
     [Fact]
     public void CaseInsensitiveOnlyOnWindows()
     {

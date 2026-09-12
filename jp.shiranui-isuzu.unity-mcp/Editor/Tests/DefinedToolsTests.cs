@@ -52,6 +52,9 @@ namespace UnityMCP.Editor.Tests
                 throw new McpToolException("boom", "deliberate");
             }
 
+            [McpTool("seq_handler_fail", "Reports a handler failure.", MainThread = false)]
+            public static JObject HandlerFail() => new JObject { ["error"] = "handler failed", ["detail"] = "retained" };
+
             [McpTool("seq_wipe", "Pretends to wipe something.", Destructive = true, MainThread = false)]
             public static JObject Wipe([McpArg("what", "What to wipe")] string what)
             {
@@ -1044,6 +1047,78 @@ namespace UnityMCP.Editor.Tests
             Assert.That(steps.Count, Is.EqualTo(1));
             Assert.That(steps[0]["ok"].Value<bool>(), Is.False);
             Assert.That(steps[0]["error"]["code"].Value<string>(), Is.EqualTo("cancelled"));
+        }
+
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void HandlerFailuresRespectContinueOnErrorAndKeepEarlierResults(bool deferred, bool continueOnError)
+        {
+            var failureTool = deferred ? "seq_defer_worker" : "seq_handler_fail";
+            this.WriteSequence("seq_handler_error", $@"
+    {{ ""id"": ""before"", ""tool"": ""seq_echo"", ""arguments"": {{ ""text"": ""already applied"" }} }},
+    {{ ""id"": ""failure"", ""tool"": ""{failureTool}"", ""continue_on_error"": {continueOnError.ToString().ToLowerInvariant()} }},
+    {{ ""id"": ""after"", ""tool"": ""seq_echo"", ""arguments"": {{ ""text"": ""after"" }} }}");
+            StepTools.Pending = McpMainThreadDispatcher.CreateDeferred();
+            StepTools.Pending.Complete(StepTools.HandlerFail());
+            var (_, catalog, errors) = this.Load(typeof(StepTools));
+            Assert.That(errors, Is.Empty, string.Join("\n", errors));
+
+            var steps = (JArray)Call(Tool(catalog, "seq_handler_error"))["steps"];
+
+            Assert.That(steps.Count, Is.EqualTo(continueOnError ? 3 : 2));
+            Assert.That(steps[0]["result"]["text"].Value<string>(), Is.EqualTo("already applied"));
+            Assert.That(steps[1]["ok"].Value<bool>(), Is.False);
+            Assert.That(steps[1]["error"]["code"].Value<string>(), Is.EqualTo("invalid_params"));
+            Assert.That(steps[1]["result"]["detail"].Value<string>(), Is.EqualTo("retained"));
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void NestedDeferredResultsAreUnwrappedUntilTheirRealOutcome(bool fails)
+        {
+            this.WriteSequence("seq_nested_result", @"
+    { ""id"": ""first"", ""tool"": ""seq_defer_worker"" },
+    { ""id"": ""after"", ""tool"": ""seq_echo"", ""arguments"": { ""text"": ""{{first.answer}}"" } }");
+            var inner = McpMainThreadDispatcher.CreateDeferred();
+            StepTools.Pending = McpMainThreadDispatcher.CreateDeferred();
+            StepTools.Pending.Complete(new DeferredToolResult(inner));
+            if (fails) { inner.Fail(new McpToolException("inner_failed", "inner failed")); }
+            else { inner.Complete(new JObject { ["answer"] = "real result" }); }
+            var (_, catalog, _) = this.Load(typeof(StepTools));
+
+            var steps = (JArray)Call(Tool(catalog, "seq_nested_result"))["steps"];
+
+            Assert.That(steps.Count, Is.EqualTo(fails ? 1 : 2));
+            Assert.That(steps[0]["ok"].Value<bool>(), Is.EqualTo(!fails));
+            if (fails) { Assert.That(steps[0]["error"]["code"].Value<string>(), Is.EqualTo("inner_failed")); }
+            else { Assert.That(steps[1]["result"]["text"].Value<string>(), Is.EqualTo("real result")); }
+        }
+
+        [UnityTest]
+        public IEnumerator ASequenceWaitsForThePendingInnerDeferredItem()
+        {
+            this.WriteSequence("seq_nested_pending", @"
+    { ""id"": ""first"", ""tool"": ""seq_defer_worker"" },
+    { ""id"": ""after"", ""tool"": ""seq_echo"", ""arguments"": { ""text"": ""{{first.answer}}"" } }", extra: @", ""mainThread"": true");
+            var inner = McpMainThreadDispatcher.CreateDeferred();
+            StepTools.Pending = McpMainThreadDispatcher.CreateDeferred();
+            StepTools.Pending.Complete(new DeferredToolResult(inner));
+            var (_, catalog, _) = this.Load(typeof(StepTools));
+
+            try
+            {
+                var deferred = Call(Tool(catalog, "seq_nested_pending")) as DeferredToolResult;
+                Assert.That(deferred, Is.Not.Null);
+                Assert.That(deferred.Item.IsCompleted, Is.False);
+                inner.Complete(new JObject { ["answer"] = "settled" });
+                for (var frame = 0; frame < 10 && !deferred.Item.IsCompleted; frame++) { yield return null; }
+                Assert.That(deferred.Item.IsCompleted, Is.True);
+                Assert.That(deferred.Item.Error, Is.Null);
+                Assert.That(deferred.Item.Result["steps"][1]["result"]["text"].Value<string>(), Is.EqualTo("settled"));
+            }
+            finally { FrameSequencer.CancelAll("Test teardown."); }
         }
 
         [UnityTest]

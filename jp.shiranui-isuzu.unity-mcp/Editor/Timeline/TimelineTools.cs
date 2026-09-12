@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -71,7 +71,7 @@ namespace UnityMCP.Editor.Timeline
         {
             if (string.IsNullOrWhiteSpace(objectPath) && !instanceId.HasValue)
             {
-                var directors = UnityObject.FindObjectsByType<PlayableDirector>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+                var directors = AllDirectors();
 
                 return new JObject
                 {
@@ -179,6 +179,25 @@ namespace UnityMCP.Editor.Timeline
             };
         }
 
+        /// <summary>Every PlayableDirector in the open scenes, inactive ones included.</summary>
+        /// <remarks>
+        /// The overload without a FindObjectsSortMode is absent up to 6000.3 and present from
+        /// 6000.5, where the one taking it becomes obsolete. Which of the two 6000.4 has is not
+        /// established, so the older branch suppresses the warning rather than the guard moving
+        /// down a version and failing to compile where the replacement is not there yet.
+        /// </remarks>
+        private static PlayableDirector[] AllDirectors()
+        {
+#if UNITY_6000_5_OR_NEWER
+            return UnityObject.FindObjectsByType<PlayableDirector>(FindObjectsInactive.Include);
+#else
+#pragma warning disable CS0618
+            return UnityObject.FindObjectsByType<PlayableDirector>(
+                FindObjectsInactive.Include, FindObjectsSortMode.None);
+#pragma warning restore CS0618
+#endif
+        }
+
         private static JObject DescribeDirector(
             PlayableDirector director, bool includeClips, string trackFilter, int nestDepth, HashSet<long> visited)
         {
@@ -210,7 +229,7 @@ namespace UnityMCP.Editor.Timeline
 
             var tracks = new JArray();
 
-            foreach (var t in timeline.GetOutputTracks())
+            foreach (var t in TimelineResolve.AllTracks(timeline))
             {
                 if (!string.IsNullOrWhiteSpace(trackFilter) &&
                     t.name.IndexOf(trackFilter, StringComparison.OrdinalIgnoreCase) < 0)
@@ -234,6 +253,13 @@ namespace UnityMCP.Editor.Timeline
                     // reason "the animation does nothing", and it does not show in the window.
                     ["binding"] = binding == null ? null : (JToken)DescribeBinding(binding),
                 };
+
+                // Only for a track that sits under another. A track nested under an AnimationTrack
+                // overrides it rather than playing beside it, which changes what a clip on it does.
+                if (t.parent is TrackAsset owner)
+                {
+                    entry["parentTrack"] = owner.name;
+                }
 
                 if (includeClips || IsControlTrack(t))
                 {

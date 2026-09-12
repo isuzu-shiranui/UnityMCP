@@ -1,4 +1,6 @@
-using System.Linq;
+﻿using System.Linq;
+
+using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
@@ -26,7 +28,6 @@ namespace UnityMCP.Editor.Tests
             ("asset_move", "destination"),
             ("asset_delete", "path"),
             ("asset_reimport", "path"),
-            ("reflect_read", "path"),
             ("reflect_find_type", "name"),
             ("render_compare", "before"),
             ("render_compare", "after"),
@@ -60,10 +61,12 @@ namespace UnityMCP.Editor.Tests
 
         /// <summary>
         /// Arguments a handler wants only in some situations. Marking one of these required would
-        /// refuse a call that works — a drag needs 'to', a move does not.
+        /// refuse a call that works — a drag needs 'to', a move does not, and reflect_read answers
+        /// from 'paths' when 'path' is absent.
         /// </summary>
         private static readonly (string Tool, string Argument)[] Conditional =
         {
+            ("reflect_read", "path"),
             ("material_set", "value"),
             ("material_read", "slot"),
             ("material_set", "slot"),
@@ -86,6 +89,39 @@ namespace UnityMCP.Editor.Tests
 
             return descriptor.InputSchema["required"]?.Select(t => t.ToString()).ToArray()
                    ?? new string[0];
+        }
+
+        /// <summary>
+        /// An argument the tool does not declare has to be refused, not dropped.
+        /// </summary>
+        /// <remarks>
+        /// Dropped, a mistyped filter is the worst kind of wrong answer: 'nmae' asked
+        /// scene_browse_hierarchy to narrow and was handed the whole scene, with nothing in the
+        /// reply to say the filter never ran. Argument names get guessed constantly, so this is
+        /// a routine mistake rather than a rare one.
+        /// </remarks>
+        [Test]
+        public void AnArgumentTheToolDoesNotDeclareIsRefused()
+        {
+            var browse = catalog.Tools.First(t => t.Name == "scene_browse_hierarchy");
+
+            var thrown = Assert.Throws<McpToolException>(
+                () => ToolInvoker.Invoke(
+                    browse, JObject.Parse("{\"nmae\":\"Nothing\",\"limit\":1}")));
+
+            Assert.That(thrown.Code, Is.EqualTo("invalid_params"));
+            Assert.That(thrown.Message, Does.Contain("nmae"));
+            Assert.That(thrown.Message, Does.Contain("name"),
+                "and the names it does take, so the caller can correct it in one step");
+        }
+
+        [Test]
+        public void TheArgumentsAToolDoesDeclareStillGoThrough()
+        {
+            var browse = catalog.Tools.First(t => t.Name == "scene_browse_hierarchy");
+
+            Assert.DoesNotThrow(() => ToolInvoker.Invoke(
+                browse, JObject.Parse("{\"name\":\"NothingIsCalledThis\",\"limit\":1}")));
         }
 
         [Test]

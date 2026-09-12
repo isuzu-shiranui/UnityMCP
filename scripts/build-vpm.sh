@@ -112,9 +112,10 @@ while read -r candidate; do
   VERSION=$(jq -r .version "$WORK/manifest.json")
   echo "  $TAG carries $VERSION"
 
-  # The author is converted to the object form the VPM documentation describes and every
-  # published listing uses. package.json keeps the plain string, which is what Unity's own
-  # Package Manager reads and where the string is valid.
+  # A VPM client takes the author only as an object, and the listing is not the only place it
+  # reads one: the resolver in a VRChat project also parses the package.json unpacked from the
+  # zip, where a string is a fatal deserialization error on every Editor start. Releases up to
+  # 4.2.0 shipped the string, so their entries are still converted here.
   jq -c --arg url "$URL" --arg sha "$SHA" --arg version "$VERSION" '
     {
       version: $version,

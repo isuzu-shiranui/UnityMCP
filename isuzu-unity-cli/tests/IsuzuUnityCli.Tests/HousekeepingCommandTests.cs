@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Agents;
 using IsuzuUnityCli.Commands;
@@ -13,6 +13,38 @@ namespace IsuzuUnityCli.Tests;
 public sealed class HousekeepingCommandTests
 {
     private const string Token = "49a51eb3a3ee324b048ef1c0f040a5047deaf5335f0183f8dc03db3278ba6645";
+
+    /// <summary>
+    /// The descriptor has carried protocolVersion all along and nothing compared it, so a CLI and
+    /// a package from different releases failed in whatever way the missing piece happened to
+    /// fail, with nothing pointing at the version.
+    /// </summary>
+    [Theory]
+    [InlineData("3.2.0", "4.2.0", "Package Manager")]
+    [InlineData("5.0.0", "4.2.0", "upgrade")]
+    public void SkewNamesTheSideThatIsBehind(string editor, string cli, string advice)
+    {
+        var reported = DoctorCommand.Skew(editor, cli);
+
+        Assert.NotNull(reported);
+        Assert.Contains(editor, reported);
+        Assert.Contains(cli, reported);
+        Assert.Contains(advice, reported);
+    }
+
+    /// <summary>
+    /// Within one major the two are meant to work together, so a warning on every patch
+    /// difference would be noise nobody reads.
+    /// </summary>
+    [Theory]
+    [InlineData("4.2.0", "4.2.0")]
+    [InlineData("4.0.1", "4.9.9")]
+    [InlineData("", "4.2.0")]
+    [InlineData("not-a-version", "4.2.0")]
+    public void NoSkewIsReportedWhereThereIsNothingToSay(string editor, string cli)
+    {
+        Assert.Null(DoctorCommand.Skew(editor, cli));
+    }
 
     [Fact]
     public async Task SetupInstallsTheSkillAndLeavesTheServerListAlone()
@@ -326,6 +358,109 @@ public sealed class HousekeepingCommandTests
     private static (CommandContext Context, StringWriter Out, StringWriter Err) Closed(TempHome home, params InstanceDescriptor[] descriptors)
     {
         return Build(home, [], descriptors);
+    }
+
+    /// <summary>
+    /// A folder under Packages/ wins over the manifest entry of the same name, and Unity says
+    /// nothing about it. Without this, "update through the Package Manager" is advice that
+    /// cannot work and gives no sign of why.
+    /// </summary>
+    [Fact]
+    public void AnEmbeddedCopyIsNamedAsWhatTheEditorActuallyLoads()
+    {
+        var project = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var embedded = Path.Combine(project, "Packages", "jp.shiranui-isuzu.unity-mcp");
+
+        try
+        {
+            Directory.CreateDirectory(embedded);
+            File.WriteAllText(Path.Combine(embedded, "package.json"), "{}");
+
+            var said = DoctorCommand.EmbeddedCopy(Path.Combine(project, "Assets"));
+
+            Assert.NotNull(said);
+            Assert.Contains("wins over the manifest entry", said);
+        }
+        finally
+        {
+            if (Directory.Exists(project))
+            {
+                Directory.Delete(project, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AProjectWithoutAnEmbeddedCopyIsNotAccusedOfOne()
+    {
+        var project = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, "Assets"));
+
+            Assert.Null(DoctorCommand.EmbeddedCopy(Path.Combine(project, "Assets")));
+        }
+        finally
+        {
+            if (Directory.Exists(project))
+            {
+                Directory.Delete(project, recursive: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A sample copied into Assets/ outlives every upgrade after it.
+    /// </summary>
+    /// <remarks>
+    /// The 1.1.1 samples were written against an IMcpCommandHandler that no longer exists, so a
+    /// project still holding them stops compiling and Unity opens asking about Safe Mode, with
+    /// nothing connecting that to a package update.
+    /// </remarks>
+    [Fact]
+    public void SamplesLeftFromAnOlderReleaseAreNamed()
+    {
+        var project = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var samples = Path.Combine(project, "Assets", "Samples", "Unity MCP", "1.1.1");
+
+        try
+        {
+            Directory.CreateDirectory(samples);
+
+            var said = DoctorCommand.LeftBehindSamples(Path.Combine(project, "Assets"));
+
+            Assert.NotNull(said);
+            Assert.Contains("1.1.1", said);
+            Assert.Contains("Delete that folder", said);
+        }
+        finally
+        {
+            if (Directory.Exists(project))
+            {
+                Directory.Delete(project, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AProjectWithNoSamplesIsNotToldToDeleteAnything()
+    {
+        var project = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, "Assets"));
+
+            Assert.Null(DoctorCommand.LeftBehindSamples(Path.Combine(project, "Assets")));
+        }
+        finally
+        {
+            if (Directory.Exists(project))
+            {
+                Directory.Delete(project, recursive: true);
+            }
+        }
     }
 
     private static (CommandContext Context, StringWriter Out, StringWriter Err) Build(

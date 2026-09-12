@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -33,7 +33,7 @@ namespace UnityMCP.Editor.Core
         /// answer for an assembly that is not loaded from a package, and CI checks that it too
         /// stays in step.
         /// </remarks>
-        private const string FallbackVersion = "4.2.0";
+        private const string FallbackVersion = "4.3.0";
 
         private static string ProtocolVersion
         {
@@ -233,6 +233,7 @@ namespace UnityMCP.Editor.Core
             this.cancellationTokenSource = new CancellationTokenSource();
             this.ConnectedSince = DateTime.Now;
             this.requestCount = 0;
+            this.dispatcher.Resume();
             this.running = true;  // ← must precede thread start
 
             // Step 4: start background threads inside try/catch.
@@ -273,6 +274,7 @@ namespace UnityMCP.Editor.Core
             {
                 // Roll back — threads/broadcaster failed to start.
                 this.running = false;
+                this.dispatcher.DrainAndFail("Unity MCP server failed to start.");
                 try { this.cancellationTokenSource?.Cancel(); this.cancellationTokenSource?.Dispose(); }
                 catch { }
                 this.cancellationTokenSource = null;
@@ -305,6 +307,7 @@ namespace UnityMCP.Editor.Core
         public void Stop(bool withdrawDescriptor = true)
         {
             this.running = false;  // signals ListenerLoop to exit
+            this.dispatcher.DrainAndFail("Unity MCP server stopped before this work started.");
             this.cancellationTokenSource?.Cancel();
             this.loopWaker.AlwaysOn = false;
 
@@ -635,11 +638,20 @@ namespace UnityMCP.Editor.Core
             string json;
             try
             {
-                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
-                json = reader.ReadToEnd();
+                json = ReadRequestBody(request.InputStream, request.ContentEncoding, request.ContentLength64);
+            }
+            catch (McpToolException oversized)
+            {
+                // What was not read is still queued on the socket, and the next request on a
+                // kept-open connection would be parsed starting inside those leftover bytes.
+                response.KeepAlive = false;
+                this.WriteError(response, oversized);
+                parameters = null;
+                return false;
             }
             catch (Exception ioEx)
             {
+                response.KeepAlive = false;
                 this.WriteEnvelope(response, 400, null, errorCode: "invalid_params", errorMessage: $"Failed to read request body: {ioEx.Message}");
                 parameters = null;
                 return false;
@@ -838,8 +850,18 @@ namespace UnityMCP.Editor.Core
             string body = null;
             if (request.HasEntityBody)
             {
-                using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
-                body = reader.ReadToEnd();
+                try
+                {
+                    body = ReadRequestBody(request.InputStream, request.ContentEncoding, request.ContentLength64);
+                }
+                catch (McpToolException oversized)
+                {
+                    // The unread remainder stays on the socket, so the connection cannot carry
+                    // another request: the next one would be read starting inside this body.
+                    response.KeepAlive = false;
+                    this.WriteError(response, oversized);
+                    return;
+                }
             }
 
             var result = this.mcpEndpoint.Handle(request.HttpMethod, headers, body, request.QueryString["group"]);
@@ -863,6 +885,29 @@ namespace UnityMCP.Editor.Core
             }
 
             this.WriteRaw(response, result.Status, result.Body);
+        }
+
+        internal const int MaxRequestBodyBytes = 8 * 1024 * 1024;
+
+        // Bound raw bytes before decoding or building a JSON object, including chunked bodies.
+        internal static string ReadRequestBody(Stream input, Encoding encoding, long declaredLength)
+        {
+            if (declaredLength > MaxRequestBodyBytes)
+                throw new McpToolException("request_too_large", "Request body exceeds 8 MiB. Split the operation into smaller calls.", 413);
+
+            using var bytes = new MemoryStream();
+            var buffer = new byte[8192];
+            while (true)
+            {
+                var read = input.Read(buffer, 0, (int)Math.Min(buffer.Length, MaxRequestBodyBytes - bytes.Length + 1));
+                if (read == 0) break;
+                if (bytes.Length + read > MaxRequestBodyBytes)
+                    throw new McpToolException("request_too_large", "Request body exceeds 8 MiB. Split the operation into smaller calls.", 413);
+                bytes.Write(buffer, 0, read);
+            }
+            bytes.Position = 0;
+            using var reader = new StreamReader(bytes, encoding);
+            return reader.ReadToEnd();
         }
 
         /// <summary>Writes pre-rendered UTF-8 segments as one JSON body without joining them first.</summary>
@@ -1027,7 +1072,7 @@ namespace UnityMCP.Editor.Core
 
             if (!this.jobs.TryGet(id, out var entry))
             {
-                this.WriteEnvelope(response, 404, null, errorCode: "job_not_found", errorMessage: $"No job with id '{id}'. It may have completed long enough ago to be evicted.");
+                this.WriteEnvelope(response, 404, null, errorCode: "job_not_found", errorMessage: $"No job with id '{id}'. A record is kept for ten minutes and none survives a domain reload, so this cannot say whether the work ran: read back what it would have changed.");
                 return;
             }
 
@@ -1078,6 +1123,11 @@ namespace UnityMCP.Editor.Core
             var body = this.BuildHealthResponse();
             this.WriteEnvelope(response, 200, body);
         }
+
+        /// <summary>
+        /// The health payload, for the tool that answers the same question over MCP.
+        /// </summary>
+        public JObject HealthPayload() => this.BuildHealthResponse();
 
         /// <summary>
         /// Builds the /health response payload (goes under the envelope's `result`).

@@ -12,7 +12,7 @@ Window addressing is shared with `capture_screenshot`. The accepted values are `
 
 Coordinates are points measured from the top-left of the window's content area, below the tab bar. The 0..1 fractions `normalized: true` takes, and the bounds a point is checked against, are of the whole window including the tab bar. Normalized 0.5 therefore sits slightly past the content centre. Give points directly when the position has to be exact.
 
-A drag can be spread across Editor frames with `steps` and `frames_per_step`. A time-based effect reacts to that spread itself, so a drag sent in a single frame does not reproduce one.
+A drag can be spread across Editor frames with `steps` and `frames_per_step`, each capped at 1000. A time-based effect reacts to that spread itself, so a drag sent in a single frame does not reproduce one.
 
 A right-drag is FPS Look, and an Alt+left-drag is Orbit. The window that had focus before the send gets it back by default, and `restore_focus: false` leaves it alone. `input_key` and `input_replay` take the same argument.
 

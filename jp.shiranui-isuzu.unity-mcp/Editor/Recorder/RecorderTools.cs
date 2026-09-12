@@ -6,6 +6,9 @@ using Newtonsoft.Json.Linq;
 
 using UnityEditor;
 using UnityEditor.Recorder;
+#if UNITY_RECORDER_ENCODER_SETTINGS
+using UnityEditor.Recorder.Encoder;
+#endif
 using UnityEditor.Recorder.Input;
 using UnityEditor.Recorder.Timeline;
 
@@ -96,8 +99,26 @@ namespace UnityMCP.Editor.Recorder
                     $"'{ObjectResolve.PathOf(director.gameObject)}' has no TimelineAsset to add a track to.");
             }
 
+            if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(timeline)))
+                throw new McpToolException("invalid_params", "Save the Timeline asset before adding a Recorder track.");
+            if (double.IsNaN(start) || double.IsInfinity(start) || start < 0
+                || (duration.HasValue && (double.IsNaN(duration.Value) || double.IsInfinity(duration.Value) || duration.Value <= 0)))
+                throw new McpToolException("invalid_params", "start must be finite and non-negative; duration must be finite and positive.");
+
             var settings = BuildSettings(type, format, outputPath, captureAlpha, timeline.name);
-            ApplySource(settings, source, cameraTag, renderTexturePath, width, height);
+
+            try
+            {
+                ApplySource(settings, source, cameraTag, renderTexturePath, width, height);
+            }
+            catch
+            {
+                // Created before it could be refused, and belonging to no asset yet, so nothing
+                // else would ever destroy it: it would sit in memory until the next domain reload.
+                UnityEngine.Object.DestroyImmediate(settings);
+                throw;
+            }
+
             settings.name = trackName + " Settings";
 
             // The settings live as a sub-asset of the timeline, so they are saved and loaded with
@@ -109,11 +130,34 @@ namespace UnityMCP.Editor.Recorder
 
             var track = timeline.CreateTrack<RecorderTrack>(null, trackName);
             var clip = track.CreateDefaultClip();
+
+            // Timeline logs and returns null when the clip's own creation hook throws, having
+            // already attached the clip. Dereferenced, that leaves the settings sub-asset and the
+            // new track inside the timeline under a 500 that says nothing about either.
+            if (clip == null || clip.asset is not RecorderClip recorderClip)
+            {
+                var orphan = track.GetClips().FirstOrDefault();
+
+                if (orphan != null)
+                {
+                    timeline.DeleteClip(orphan);
+                }
+
+                timeline.DeleteTrack(track);
+                Undo.DestroyObjectImmediate(settings);
+                EditorUtility.SetDirty(timeline);
+                AssetDatabase.SaveAssets();
+
+                throw new McpToolException(
+                    "tool_failed",
+                    $"Timeline could not create a Recorder clip on '{trackName}'. The Recorder " +
+                    "package reports the reason to the console, which console_read_logs carries.");
+            }
+
             clip.start = start;
             clip.duration = duration ?? Math.Max(director.duration, 0.001);
             clip.displayName = trackName;
 
-            var recorderClip = (RecorderClip)clip.asset;
             recorderClip.settings = settings;
 
             EditorUtility.SetDirty(timeline);
@@ -194,9 +238,21 @@ namespace UnityMCP.Editor.Recorder
                 case "video":
                 {
                     var movie = ScriptableObject.CreateInstance<MovieRecorderSettings>();
-                    movie.OutputFormat = ParseMovieFormat(format);
-                    movie.CaptureAlpha = captureAlpha;
-                    ApplyOutputPath(movie, outputPath, defaultName);
+
+                    // Destroyed on the way out: it belongs to no asset yet, so a refusal from
+                    // either call below would leave it in memory until the next domain reload.
+                    try
+                    {
+                        ApplyMovieFormat(movie, format);
+                        movie.CaptureAlpha = captureAlpha;
+                        ApplyOutputPath(movie, outputPath, defaultName);
+                    }
+                    catch
+                    {
+                        UnityEngine.Object.DestroyImmediate(movie);
+                        throw;
+                    }
+
                     return movie;
                 }
 
@@ -207,9 +263,19 @@ namespace UnityMCP.Editor.Recorder
                 case "image":
                 {
                     var image = ScriptableObject.CreateInstance<ImageRecorderSettings>();
-                    image.OutputFormat = ParseImageFormat(type);
-                    image.CaptureAlpha = captureAlpha;
-                    ApplyOutputPath(image, outputPath, defaultName);
+
+                    try
+                    {
+                        image.OutputFormat = ParseImageFormat(type);
+                        image.CaptureAlpha = captureAlpha;
+                        ApplyOutputPath(image, outputPath, defaultName);
+                    }
+                    catch
+                    {
+                        UnityEngine.Object.DestroyImmediate(image);
+                        throw;
+                    }
+
                     return image;
                 }
 
@@ -264,25 +330,56 @@ namespace UnityMCP.Editor.Recorder
             absolutePath.SetValue(generator, generator.Leaf);
         }
 
-        private static MovieRecorderSettings.VideoRecorderOutputFormat ParseMovieFormat(string format)
+        /// <summary>
+        /// Sets what the movie is encoded as, through whichever API this Recorder has.
+        /// </summary>
+        /// <remarks>
+        /// Recorder 4 moved the choice from OutputFormat onto an encoder object and deprecated
+        /// the property; the warning that leaves lands in the user's console on every compile.
+        /// The mapping is the one the deprecated setter itself performs, so what a caller gets
+        /// does not change: mov is a ProRes encoder with its own defaults, and mp4 and webm are
+        /// codecs of the built-in one.
+        /// </remarks>
+        private static void ApplyMovieFormat(MovieRecorderSettings movie, string format)
         {
-            switch ((format ?? "mp4").Trim().ToLowerInvariant())
-            {
-                case "mp4":
-                case "h264":
-                    return MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+            var wanted = (format ?? "mp4").Trim().ToLowerInvariant();
 
+            if (wanted != "mp4" && wanted != "h264" && wanted != "webm" && wanted != "mov")
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{format}' is not a movie format. Use mp4, webm or mov.");
+            }
+
+#if UNITY_RECORDER_ENCODER_SETTINGS
+            if (wanted == "mov")
+            {
+                movie.EncoderSettings = new ProResEncoderSettings();
+                return;
+            }
+
+            movie.EncoderSettings = new CoreEncoderSettings
+            {
+                Codec = wanted == "webm"
+                    ? CoreEncoderSettings.OutputCodec.WEBM
+                    : CoreEncoderSettings.OutputCodec.MP4,
+            };
+#else
+            switch (wanted)
+            {
                 case "webm":
-                    return MovieRecorderSettings.VideoRecorderOutputFormat.WebM;
+                    movie.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.WebM;
+                    break;
 
                 case "mov":
-                    return MovieRecorderSettings.VideoRecorderOutputFormat.MOV;
+                    movie.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MOV;
+                    break;
 
                 default:
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"'{format}' is not a movie format. Use mp4, webm or mov.");
+                    movie.OutputFormat = MovieRecorderSettings.VideoRecorderOutputFormat.MP4;
+                    break;
             }
+#endif
         }
 
         private static ImageRecorderSettings.ImageRecorderOutputFormat ParseImageFormat(string type)

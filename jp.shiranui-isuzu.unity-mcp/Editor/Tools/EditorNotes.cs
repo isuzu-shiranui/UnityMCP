@@ -21,8 +21,18 @@ namespace UnityMCP.Editor.Tools
         /// survive. The asymmetry is the dangerous part, so it is said out loud at the moment it
         /// applies rather than left in a description that is read once.
         /// </remarks>
-        public static JObject SceneChange(JObject result)
+        /// <param name="target">
+        /// What was changed, where the caller knows. An asset survives Play Mode, so warning about
+        /// one says the opposite of what is true. Null keeps the older behaviour of warning
+        /// whenever Play Mode is running.
+        /// </param>
+        public static JObject SceneChange(JObject result, UnityEngine.Object target = null)
         {
+            if (target != null && EditorUtility.IsPersistent(target))
+            {
+                return result;
+            }
+
             if (result != null && EditorApplication.isPlaying)
             {
                 result["playModeWarning"] =

@@ -18,7 +18,10 @@ namespace UnityMCP.Editor.Tools
     {
         [McpTool(
             "play_mode_status",
-            "Report whether the Editor is currently playing, paused, or compiling.",
+            "Report whether the Editor is currently playing, paused, or compiling, and the frame " +
+            "it is on. Playing and running are not the same: an Editor without focus stops " +
+            "ticking, so 'isPlaying' stays true while nothing advances. Read 'frameCount' twice " +
+            "to tell the difference, and use play_mode_step to advance it by hand.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Status()
         {
@@ -49,9 +52,7 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_pause",
-            "Pause play mode. Outside play mode this does nothing and answers with an error field " +
-            "explaining why, rather than failing the call; read the reply instead of assuming it " +
-            "took effect.",
+            "Pause play mode. Outside play mode the call fails with an error saying so.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Pause()
         {
@@ -60,9 +61,7 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_unpause",
-            "Resume a paused play mode. Outside play mode this does nothing and answers with an " +
-            "error field explaining why, rather than failing the call; read the reply instead of " +
-            "assuming it took effect.",
+            "Resume a paused play mode. Outside play mode the call fails with an error saying so.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Unpause()
         {
@@ -71,13 +70,36 @@ namespace UnityMCP.Editor.Tools
 
         [McpTool(
             "play_mode_step",
-            "Advance play mode by a single frame, pausing first if needed. Outside play mode this " +
-            "does nothing and answers with an error field explaining why, rather than failing the " +
-            "call; read the reply instead of assuming it took effect.",
+            "Advance play mode, pausing first if needed. The reply carries the frame it reached " +
+            "and how far into the run that is, so anything measured in seconds needs no second " +
+            "call, and 'paths' reads whatever else you were going to look at while the frame is " +
+            "still that one. Outside play mode the call fails with an error saying so.",
             Idempotency = McpIdempotency.Unsafe)]
-        public static JObject Step()
+        public static JObject Step(
+            [McpArg("count", "How many frames to advance, 1 to 1000. Watching something happen a " +
+                             "frame at a time is a call for each frame; a slow animation took " +
+                             "1,255 of them.")]
+            int count = 1,
+            [McpArg("paths", "Read these while the frame is still the one just reached, in the " +
+                             "same form reflect_read takes: '@scene:/Turnstile/Transform/" +
+                             "localEulerAngles'. Watching something over time is a step and a " +
+                             "look, over and over, and twenty-one steps once came with " +
+                             "forty-six reads behind them.")]
+            string[] paths = null,
+            [McpArg("animators", "Scene paths of objects whose Animator to report on at the frame " +
+                                 "reached: the state each layer is in, how far through it is, " +
+                                 "whether it is in transition, and the parameter values. This is " +
+                                 "what animator_inspect returns under 'runtime', without the " +
+                                 "controller asset around it, because a state's progress is not a " +
+                                 "property 'paths' can read. Twenty-one steps came with " +
+                                 "twenty-one animator_inspect calls behind them.")]
+            string[] animators = null)
         {
-            return PlayModeControl.Control(ToolArgs.Of(("action", "step")));
+            return PlayModeControl.Control(ToolArgs.Of(
+                ("action", "step"),
+                ("count", count),
+                ("paths", paths == null ? null : new JArray(paths)),
+                ("animators", animators == null ? null : new JArray(animators))));
         }
     }
 }

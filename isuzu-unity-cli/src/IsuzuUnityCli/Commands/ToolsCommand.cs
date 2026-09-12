@@ -7,14 +7,34 @@ public static class ToolsCommand
 {
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
+        if (parsed.Positional.Count > 1)
+            throw new CliException("tools accepts at most one exact tool name.", 2);
+        var name = parsed.Positional.SingleOrDefault();
         var raw = parsed.HasFlag("raw");
         var instance = context.ResolveInstance(parsed);
         var envelope = await context.Client.GetAsync(instance, CatalogPath(parsed.Option("group")), context.Cancellation);
 
-        if (raw || envelope.IsError)
+        if (envelope.IsError)
         {
             return context.Report(envelope, raw);
         }
+
+        if (name is not null)
+        {
+            // Indexed through JsonObject: the string indexer on an array or a scalar throws, and
+            // a reply of another shape would leave the process on an undocumented exit code.
+            var tool = ((envelope.Result as JsonObject)?["tools"] as JsonArray)?
+                .OfType<JsonObject>().FirstOrDefault(candidate => candidate["name"]?.ToString() == name);
+            if (tool is null)
+                throw new CliException($"No tool named '{name}' in this catalog. Run tools (with the same --group, if set) to list available names.", 2);
+            // Keep the complete description, schema and annotations. Filtering reduces output,
+            // not the contract an agent needs to call the tool correctly. --raw is identical here.
+            JsonOutput.Print(context.Out, tool, context.Indented);
+            return 0;
+        }
+
+        if (raw)
+            return context.Report(envelope, raw);
 
         context.Out.Write(Render(envelope.Result));
         return 0;
@@ -34,7 +54,7 @@ public static class ToolsCommand
     {
         var text = new System.Text.StringBuilder();
 
-        if (result?["tools"] is not JsonArray tools)
+        if ((result as JsonObject)?["tools"] is not JsonArray tools)
         {
             return "";
         }

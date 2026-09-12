@@ -35,6 +35,28 @@ public sealed class TomlConfigEditorTests
 
     private const string Table = "mcp_servers.isuzu-unity";
 
+    [Theory]
+    [InlineData("mcp_servers.\"isuzu-unity\"")]
+    [InlineData("'mcp_servers'.'isuzu-unity'")]
+    [InlineData("mcp_servers . isuzu-unity")]
+    [InlineData("mcp_servers.\"isuzu-\\u0075nity\"")]
+    public void QuotedAndSpacedTableNamesAreReadUpdatedAndRemoved(string name)
+    {
+        var config = $"[{name}]\nurl = \"old\"\n[{name}.env]\nFOO = \"bar\"\n"
+            + "[mcp_servers.\"isuzu-unity.env\"]\nurl = \"unrelated\"\n";
+
+        Assert.Equal("old", TomlConfigEditor.Read(config, Table)!.Url);
+        Assert.Equal("old", TomlConfigEditor.ReadValue(config, Table, "url"));
+        var updated = TomlConfigEditor.Upsert(config, Table, "url = \"new\"\n");
+        Assert.Equal("new", TomlConfigEditor.Read(updated, Table)!.Url);
+        Assert.DoesNotContain("FOO", updated);
+        Assert.Contains("unrelated", updated);
+        var removed = TomlConfigEditor.Remove(config, Table)!;
+        Assert.DoesNotContain("FOO", removed);
+        Assert.DoesNotContain("\"old\"", removed);
+        Assert.Contains("unrelated", removed);
+    }
+
     private const string Body = """
         url = "http://127.0.0.1:27186/mcp"
         http_headers = { Authorization = "Bearer abc" }

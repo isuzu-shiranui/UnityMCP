@@ -233,7 +233,7 @@ namespace UnityMCP.Editor.Timeline.Tests
         [Test]
         public void AControlSourceOnAnOrdinaryClipIsRefused()
         {
-            this.Stage();
+            var playable = this.Stage();
             TimelineCreateTools.CreateTrack(instanceId: this.Id, type: "activation", name: "Shots");
             this.child = new GameObject("Other");
 
@@ -241,6 +241,13 @@ namespace UnityMCP.Editor.Timeline.Tests
                 instanceId: this.Id, track: "Shots", controlSource: ObjectResolve.PathOf(this.child)));
 
             Assert.That(error.Code, Is.EqualTo("invalid_params"));
+
+            // The clip is created before its contents can be checked, so a refusal that stopped
+            // there would leave an empty clip on the track.
+            var track = ((TimelineAsset)playable.playableAsset).GetOutputTracks().Single();
+
+            Assert.That(track.GetClips().Count(), Is.EqualTo(0),
+                        "a refused call should not leave a clip behind");
         }
 
         [Test]

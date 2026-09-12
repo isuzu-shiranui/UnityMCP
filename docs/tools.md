@@ -1,10 +1,12 @@
 # ツール一覧
 
-Editor が公開する 88 個のツールを、グループごとの表で説明します。[README に戻る](../README.md)
+Editor が公開するツールを、グループごとの表で説明します。[README に戻る](../README.md)
 
-この数は、パッケージがすべて揃った Editor での最大値です。Timeline の 9 個と Recorder の 2 個は、`com.unity.timeline` と `com.unity.recorder` があるときだけ現れます。`test_run` と `test_results` は、`com.unity.test-framework` があるときだけ現れます。どれも入っていないプロジェクトが公開するのは、75 個のツールです。
+利用できるツールは接続先のパッケージ構成で変わります。Timeline と Recorder のツールは、それぞれ`com.unity.timeline`と`com.unity.recorder`があるときだけ現れます。`test_run`と`test_results`には`com.unity.test-framework`が必要です。
 
-冪等性の列は、接続失敗時に自動リトライしてよいかだけを示します。`safe` は副作用が無いという意味ではありません。`reflect_read` はシーンを変える getter を呼ぶことがあります。`capture_screenshot` はウィンドウを手前に出してファイルを書きます。
+冪等性の列は、接続失敗時に自動リトライしてよいかを示します。組込みツールはread-onlyかつ再試行可能なものだけを`safe`としています。任意getterを呼ぶ`reflect_read`/`gpu_readback`と、ファイル出力を行える`capture_screenshot`は`unsafe`です。
+
+Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で返ります。64 ビットの EntityId は JSON の数値では正確に表せないためです。引数の `instance_id` は数値と文字列のどちらでも受け付けます。
 
 実際に公開されているツールは `isuzu-unity-cli tools` で確認できます。一覧は Editor から取得するので、接続先のバージョンと必ず一致します。
 
@@ -12,7 +14,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `console_read_logs` | safe | コンソールのエントリを読む。件数も `total` / `errors` / `warnings` で返します |
+| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 2,872 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（Editor が固まっていても動く） |
@@ -22,19 +24,21 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |
 | `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
 | `test_results` | safe | 実行中・直近のテスト結果（実行中でも読める） |
-| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります |
+| `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。**一致したものの子は、その子自身が一致しない限り出ません** — 親の名前で絞ると親1つだけが返るので、その下に何個あるかは `childrenNotShown` で分かります。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。`object_path` を渡すと、シーンのルートではなくそのオブジェクトから下だけを返します。特定のオブジェクトの下に何があるかを訊くのに、シーン全体を取る必要はありません。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります。snapshot はスクリプトの再読み込みを越えないので、失効していれば `sinceExpired` を付けて木が返ります。`limit` や `offset` で一部しか返らなかった応答の snapshot は、差分の基準にできません |
 | `scene_list` | safe | 開いているシーンとビルド設定のシーン |
-| `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です |
-| `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと GameObject 自身が対象です |
+| `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です。配列は長さと要素の指定方法に加えて、中身も `elements` として返します（先頭20件まで。それ以上あるときは `elementsShown` が付きます）。要素が構造体のときは中身を返しません |
+| `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと、その GameObject が持つコンポーネントの一覧になります。`detail: "full"` を付ければ全コンポーネントのプロパティが1回で返るので、コンポーネントごとに呼ぶ必要はありません |
 | `asset_find` | safe | 型 / 名前 / フォルダー / ラベルでアセット検索。応答は `limit` で打ち切ります。一致件数は `total` に入ります |
 | `asset_info` | safe | 型・GUID・importer・ラベル。依存は `include_dependencies` を渡したときだけ返します |
 | `play_mode_status` | safe | 再生中 / 一時停止中 / コンパイル中 |
 | `project_assemblies` | safe | ロード済みアセンブリ一覧 |
 | `project_packages` | safe | UPM パッケージ一覧 |
-| `capture_screenshot` | safe | Game / Scene ビューや Editor パネルの画像。パネルは画面から読み取るので、Editor に重なっているものが一緒に写ります。ウィンドウを手前に出してから撮ります。`save_path` を渡すとファイルに出力します。途中のディレクトリは作成し、既存のファイルは上書きします |
-| `job_status` | safe | 長い呼び出しが返した job id の状態と結果 |
+| `capture_screenshot` | unsafe | Game / Scene ビューや Editor パネルの画像。パネルは画面から読み取るので、Editor に重なっているものが一緒に写ります。ウィンドウを手前に出してから撮ります。`save_path` を渡すとファイルに出力します。途中のディレクトリは作成し、既存のファイルは上書きします。`focus` に写したいオブジェクトを渡すと、カメラの視野に入っていないときは撮らずに断ります |
+| `job_status` | safe | 長い呼び出しが返した job id の状態と結果。記録は完了から10分で消え、**ドメインリロードを跨ぐと残りません**。そのため「終わった job」と「リロードで中断された job」は区別できず、どちらも見つからないと答えます。自分の仕事がリロードを起こす job（アセットを保存する設定変更・再コンパイル・Play Mode 開始）は必ずこうなるので、job を追わずに、変えたはずのものを読み直して確かめます |
 | `animator_inspect` | safe | Animator Controller の読み取り。`layer` を省くと、パラメーターと各レイヤーの 1 行ずつの要約だけを返します。ステートは返しません。レイヤーが 20 あるコントローラーでは、ステートが数百になるためです。`layer` を渡すと、そのレイヤーのステート（モーション、速度、Write Defaults、ノード位置）と、各ステートから出る遷移とその条件、レイヤーの Any State と Entry の遷移を返します。サブステートマシンの中のステートは `マシン名/ステート名` で指します |
 | `animator_audit` | safe | Editor が何も知らせてくれない問題を Animator Controller から洗い出す。何も変更しません。報告するのは、どこからも参照されていないパラメーター、モーションが空のステート、既定ステートから到達できないステート、ステートが 1 つも無いレイヤー、名前が重複したレイヤー、条件も Exit Time も無い遷移、そして 1 つのレイヤーの中で Write Defaults が食い違っているステートです |
+| `memory_usage` | safe | 読み込まれているオブジェクトの重さを、**プロジェクトの資産かどうかで分けて**大きい順に返す。この切り分けが要点で、Editor は自前のレンダーターゲットやアイコンアトラスを抱えており、それらがメモリ上の最大のテクスチャになることが普通にあります。混ぜて報告しても開発者にできることがありません。種類ごとの合計を先に返し、そのあと重い順に個別のアセットをパスつきで挙げます。**今読み込まれているものの大きさ**であって、ディスク上のファイルサイズでも、ビルドしたプレイヤーが抱える量でもありません。Editor はビルドが持たない形でテクスチャを保持するので、予算ではなく順位として読みます |
+| `ui_hit_test` | safe | 画面のある点をクリックしたとき、実際にどの uGUI 要素に届くか。「ボタンを押しても何も起きない」に答えるためのものです。点の下にある要素をイベントシステムが見る順に並べるので、先頭が実際にクリックを受け取るものです。`object_path` に本来押したい要素を渡すと、何がその上に被っているかを名前で答えます。あわせて、点の下にありながら当たり判定に出てこない要素を理由つきで列挙します（Raycast Target が off、オブジェクトが非アクティブ、CanvasGroup の Blocks Raycasts が off、ルートの Canvas に GraphicRaycaster が無い）。**Play モード中でないと使えません。** `EventSystem.current` が動作中にしか設定されないためで、Edit モードではどの点も「何も無い」と答えてしまい、壊れた UI と見分けがつかなくなります。uGUI 専用で、UI Toolkit は対象外です。com.unity.ugui が入っていないプロジェクトでは、このツール自体が現れません |
 | `definitions_list` | safe | 定義ツールの一覧と読み込みエラー |
 
 ## オーサリング（作る・変える）
@@ -53,7 +57,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `gameobject_create` | unsafe | GameObject / プリミティブの生成。生成したオブジェクトが選択状態になります |
+| `gameobject_create` | unsafe | GameObject / プリミティブの生成。生成したオブジェクトが選択状態になります。プリミティブには Unity と同じく Collider が付きますが、`collider: false` で外した状態で作れます（見せるだけの形に、あとから外す呼び出しを足さずに済みます） |
 | `gameobject_delete` | unsafe | 削除（Undo で戻せる） |
 | `gameobject_duplicate` | unsafe | 複製。コピーは Prefab とのリンクを持たないただの GameObject なので `prefab_apply` は受け付けません。そのコピーが選択状態になります |
 | `gameobject_reparent` | unsafe | 親子付け。ワールド位置は既定で維持します。`keep_world_position: false` ではローカル位置とローカル回転をリセットするので、親の原点に移動します |
@@ -66,6 +70,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `asset_move` | unsafe | 移動・リネーム（GUID を維持） |
 | `asset_delete` | unsafe | 削除。OS のゴミ箱へ移動するので、通常はそこから戻せます。フォルダーを渡すと配下すべてが対象です |
 | `asset_reimport` | unsafe | 再インポート |
+| `asset_export_package` | unsafe | 指定したアセットを `.unitypackage` に書き出します。`.meta` ごと入るので、読み込み直すと GUID が戻り、そのアセットを指していた参照も残ります。マテリアルの一括変換やスプライトの再スライスのように参照を壊しうる操作の前に、退避を取る用途で使えます。書き出し先はプロジェクトの外なので `destination` は必須で、既にファイルがあるときは `overwrite` を渡さない限り残します。書き出しは一時ファイルに行ってから置き換えるので、失敗したときは前のファイルがそのまま残ります。`include_dependencies` は参照グラフをすべて辿るため、キャラクター1体でプロジェクトの大半に届くことがあります。応答は実際に書けたバイト数を返します |
 | `scene_open` | unsafe | シーンを開く（未保存があれば拒否） |
 | `scene_save` | unsafe | 保存。`path` を渡すと Save As になります。コピーを書き出すのではなく、開いているシーンがそのパスに切り替わります |
 | `scene_create` | unsafe | 新規シーン |
@@ -75,9 +80,12 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `menu_execute` | unsafe | メニュー項目の実行 |
 | `play_mode_play` | unsafe | 再生開始。Enter Play Mode Settings で Reload Domain を無効にしていなければ、ドメインリロードで接続が一瞬切れます |
 | `play_mode_stop` | unsafe | 停止。こちらも Reload Domain が有効なら接続が一瞬切れます |
-| `play_mode_pause` | unsafe | 一時停止。Play Mode の外では何もせず、失敗ではなく理由を `error` フィールドに入れて返します |
-| `play_mode_unpause` | unsafe | 一時停止解除。Play Mode の外では同じく `error` フィールドを付けて返します |
-| `play_mode_step` | unsafe | 1フレーム進める。必要なら先に一時停止します。Play Mode の外では同じく `error` フィールドを付けて返します |
+| `play_mode_pause` | unsafe | 一時停止。Play Mode の外では、その旨のエラーで失敗します |
+| `play_mode_unpause` | unsafe | 一時停止解除。Play Mode の外では同じくエラーで失敗します |
+| `play_mode_step` | unsafe | フレームを進める。必要なら先に一時停止します。`count` で 1〜1000 フレームをまとめて進められ、応答には到達フレームと経過秒数が入ります。`paths` を渡すと、進めた直後のそのフレームのまま `reflect_read` と同じ形で読めます。`animators` にオブジェクトのパスを渡すと、そのフレームでの Animator の状態（各レイヤーの状態名・進行度・遷移中か・パラメータの値）が同じ応答に入ります。状態の進行度はプロパティではないので `paths` では読めません。Play Mode の外では同じくエラーで失敗し、測定値は付きません |
+| `animator_create` | unsafe | Animator Controller のアセットを作り、`object_path` を渡せばその GameObject に付けます（Animator が無ければ足します）。編集する `animator_*` は11本あるのに作る手段が無く、空のプロジェクトからは11本すべてに手が届きませんでした。作られるのは Base Layer が1つだけの空の Controller で、中身は `animator_add_state` と `animator_add_parameter` で埋めます |
+| `animation_clip_create` | unsafe | 空の AnimationClip アセットを作ります。状態にはモーションが要り、他に作る手段がありませんでした。カーブは持ちません。クリップの長さはカーブから決まるので、ここで設定する長さはありません。カーブを入れるのは `animation_clip_write_curves` です。ループはカーブではなく設定なので、ここにあります |
+| `animation_clip_write_curves` | unsafe | AnimationClip に float カーブを書きます。1本ずつではなく複数まとめて渡します（揺れ・回り込み・うなずきで3本になるため）。各カーブは対象の子パス・コンポーネント型・シリアライズされたプロパティ名・キー列で指定します。接線は Animation ウィンドウの Auto と同じ形に均されます。1本でも解決できなければ何も書きません。長さはキーから決まるので応答で返します |
 | `animator_add_layer` | unsafe | 空のステートマシンを持つレイヤーを追加。Unity では `weight` の既定が 0 なので、無効にした状態で始めるのでなければ 1 を渡します |
 | `animator_remove_layer` | unsafe | レイヤーと、その中のステート・遷移・ステートマシンを削除。後ろのレイヤーは番号が 1 つずつ繰り上がります |
 | `animator_add_state` | unsafe | ステートを追加。空のステートマシンに最初に入れたステートが既定ステートになります。名前は Unity が一意にするので、実際に付いた名前を返します |
@@ -94,13 +102,20 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | ツール | 冪等性 | 用途 |
 |---|---|---|
 | `render_compare` | safe | 2枚のキャプチャの差を数値で返す（差分画素数・平均/最大デルタ・矩形・グリッド） |
+| `render_capture_ab` | unsafe | そのままの状態で 1 枚撮り、指定したオブジェクトを隠してもう 1 枚撮って、何が変わったかと、何もしなくてもどれだけ変わるかを一緒に返します。止まっているつもりのシーンでも 2 枚は一致しません。アニメーション、水面、パーティクル、時間方向のアンチエイリアスはフレームごとに動くので、その動きより小さい差には意味がありません。これは 2 枚の絵を見比べても分からない判断です。オブジェクトは応答を返す前に戻します。呼び出しが取り消されたときもドメインリロードが起きたときも戻ります（`execute_code` で隠した場合、Editor が止まると隠れたままになります）。PNG を 3 枚 `save_path_prefix` の下に書きます。`settle_frames` は、シーンを変えてから撮るまでに通す Editor のフレーム数です |
+| `render_capture_buffer` | unsafe | 描画パイプラインが途中で作るバッファを画像として保存します。`depth` / `normals` / `motion` / `opaque` のいずれか。泡・霧・輪郭線などのパスが実際に読んでいるのはこちらで、画面に見えているシルエットとは限りません。深度は灰色の濃淡と、写っている最短・最長の距離（メートル）で返るので、画素の値を距離に戻せます。灰色 0 は遠平面で、そこには何も描かれていません。パイプラインがそのバッファを作っていないときは、有効にする設定の名前を挙げて断ります（そのまま撮ると全画素 0 の画像になり、深度では「何も無いシーン」に見えてしまうため）。スクリプタブルレンダーパイプライン専用です |
+| `render_profile_frame` | safe | 一定フレーム数を採って、1 フレームの時間と確保したメモリがどこへ行ったかを返す。CPU 合計、メインスレッド、レンダースレッド、GPU の各時間を中央値と最悪フレームで、あわせて 1 フレームあたりの確保バイト数と確保回数を返します。ドローコールや三角形の数は返しません（`render_stats` が最後のフレームのものを返すため）。`markers` に自前の ProfilerMarker 名を渡すと一緒に採ります。**数字が意味を持つのは Play モード中**で、Edit モードでは Editor が自分のウィンドウを描いている時間になります。どちらを測ったかは応答の `playing` に出ます。メインスレッド・レンダースレッド・GPU の時間は frame timing manager が値を出したときだけ返り、出なかったものは 0 を返さずに `silent` に名前だけ挙げます（Player Settings の Frame Timing Stats が必要で、Editor ではそれだけでは足りません。実機ビルドで正しく出ます） |
 | `render_pipeline_info` | safe | 実効 RP、色空間、Graphics API、品質レベル。Quality 側の RP 上書きも併記 |
 | `render_camera_info` | safe | カメラと view / projection / GPU projection 行列 |
 | `shader_errors` | safe | シェーダーのコンパイルエラー。シェーダーはエラーを出さずに magenta 表示になるので、明示的に確認する必要があります。パスを省いた一括チェックの対象は Assets 配下だけです。パッケージ内のシェーダーは含みません |
 | `shader_info` | safe | パス数、プロパティ、キーワード空間、render queue |
-| `material_read` | safe | マテリアルの現在値・有効キーワード・render queue。`path` でマテリアルアセットを指定できます。`object_path` でシーン上の GameObject を指定すると、その Renderer が描画に使っているマテリアルをスロットごとに返します。全スロットを読むときは、値ではなくプロパティ数だけを返します。Renderer 1 つに数十のマテリアルが設定され、その 1 つずつが数百のプロパティを持つことがあるためです。値が必要なときは `slot` で 1 つに絞ります。シェーダーが見つからない・サポートされていない場合は、その理由を `shaderProblem` に入れます（magenta になる原因はこれです）。アセットではないマテリアルも、`path` が null の項目として省かずに返します |
+| `shader_batching_check` | safe | SRP Batcher がそのシェーダーのマテリアルデータを GPU に置いたままにできるか、できないなら何が妨げているか。「SetPass が何千も出ているのはなぜか」に答えるためのものです。**非互換なシェーダーが 1 本あると、それで描かれるものすべてのバッチが切れます**が、Editor はシェーダーインスペクターで 1 本ずつ見る以外に知らせてくれません。返す理由には原因になっているシェーダー変数の名前が入るので、どれを宣言し直すか移すかが分かります（例: `UnityPerMaterial var is not declared in shader property section (_Downscaling)`）。`scope: scene` で開いているシーンが描画に使う全シェーダーを、`path` / `name` / `object_path` で 1 本ずつ調べます。**Built-in パイプラインでは断ります。** 比較する相手のバッチャーが無いためです。サブシェーダーが 0 本（コンパイルに失敗している）のシェーダーは、検査せずその旨を返します |
+| `material_read` | safe | マテリアルの現在値・有効キーワード・render queue。`path` でマテリアルアセットを指定できます。`object_path` でシーン上の GameObject を指定すると、その Renderer が描画に使っているマテリアルをスロットごとに返します。全スロットを読むときは、値ではなくプロパティ数だけを返します。Renderer 1 つに数十のマテリアルが設定され、その 1 つずつが数百のプロパティを持つことがあるためです。値が必要なときは `slot` で 1 つに絞ります。`property` に文字列を渡すと、名前にそれを含むプロパティだけを返します。lilToon のような数百のプロパティを持つシェーダーでは、1 つ確認するのに応答が 32,743 バイトから 653 バイトになります。シェーダーが見つからない・サポートされていない場合は、その理由を `shaderProblem` に入れます（magenta になる原因はこれです）。アセットではないマテリアルも、`path` が null の項目として省かずに返します。複数のオブジェクトをまとめて読むときは `object_paths` に最大50件渡します。`group` を付けると、同じ内容のマテリアルを1つにまとめ、それを使っているオブジェクトのパスを並べて返します（「この300個は同じマテリアルか」を訊くのに300個分の全文は要らないため。実測 104,142バイト → 3,213バイト）。まとめる基準は内容で、個体でも名前でもありません（同じ設定なら別名でも1つにまとめ、名前は `names` に並べて返します）。読めなかったものはその項目だけが `error` になり、他は返ります。300個を1件ずつ読むと300回・744KBかかりました |
+| `material_create` | unsafe | マテリアルアセットを作ります。`shader` を省くと、そのプロジェクトのレンダーパイプラインが描くシェーダーを使います。URP のプロジェクトに `Standard` を当てて紫にしないためです。`Assets/` 配下の足りないフォルダは作り、`.mat` は省いても付きます。同じ場所に既にあるときは拒否し、`overwrite` で置き換えます。値の設定は `material_set`、Renderer への割り当ては `inspect_write` です |
 | `material_set` | unsafe | プロパティ / キーワード / render queue を変更。色やベクトルは `[x,y,z,w]` の配列でも渡せます。`object_path` と `slot` で Renderer 経由でも指定できます。その場合は共有マテリアルを書き換えます。Renderer ごとのコピーは作らないので、そのマテリアルを使っている他の Renderer も変わります。アセットの .mat ファイルはその場でディスクに書かれます。Undo してもファイルの内容は戻りません |
-| `gpu_readback` | safe | バッファ / テクスチャを読み戻し、統計（min / max / mean / zeroCount / allZero / histogram）と `samples` 件の生の値を返す。テクスチャは 32 bit の 1 チャンネルとして読むので、数値は赤成分だけを表します |
+| `scene_settings` | unsafe | シーンが GameObject の外に持つ照明と環境。skybox、環境光、フォグ、反射の 20 項目を `property` / `value` で読み書きします。これらは `RenderSettings` にあり、シーン全体で 1 つでパスを持たないので `inspect_write` からは届きません。`sun` にはシーン上の Light をパスで、`skybox` と `customReflection` にはアセットパスを渡します。空文字を渡すと参照を外します。`customReflection` は `defaultReflectionMode` を `Custom` にしないと反射に使われません。変更は Undo でき、シーンを dirty にするので `scene_save` で保存します |
+| `render_stats` | safe | 最後に描かれた1フレームの費用。draw call、SetPass、三角形、頂点、影を落とす数と、バッチングが何をどれだけまとめたか。安くする変更の前後で取ると、主張が形からの推測でなく実測になります。開いている全シーンを含む Game ビュー全体の数字で、特定のオブジェクトのものではありません。Game ビューが閉じている・隠れていると値は古いままなので、変更後は開いてから読み直します。**複数フレーム進めた直後の値は1フレーム分とは限りません** — 5フレーム進めて読むと draw call が 80、1フレームなら 16 でした。比べる2つの値は、同じフレーム数だけ進めてから取ること。1フレーム分の数字が要るなら1フレームだけ進めて読みます。frameTime と renderTime は Unity 側が非推奨としていて Editor では異常値を返すため、載せません |
+| `gpu_readback` | unsafe | バッファ / テクスチャを読み戻し、統計（min / max / mean / zeroCount / allZero / histogram）と `samples` 件の生の値を返す。テクスチャは 32 bit の 1 チャンネルとして読むので、数値は赤成分だけを表します |
 
 ## Timeline（動画制作・ライブ）
 
@@ -112,7 +127,7 @@ Editor が公開する 88 個のツールを、グループごとの表で説明
 | `timeline_evaluate` | unsafe | director を時刻 / フレームに評価（Play mode 不要）。`capture_screenshot` と組んで1コマ検証。評価した値はシーンオブジェクトに書き込まれ、Undo では戻せません |
 | `timeline_edit_clip` | unsafe | 1クリップの start / duration / 表示名 / ease / blend / 速度。要求値でなく実効値を返します。効かなかった引数は、理由付きで `ignored` に入れます |
 | `timeline_shift_clips` | unsafe | リップル編集。指定時刻以降をまとめてずらす。0秒を割る場合は1つも動かさず拒否 |
-| `timeline_set_track` | unsafe | mute / lock / リネーム / バインディング。トラックの型に必要なコンポーネントを自前で解決（Animation なら Animator） |
+| `timeline_set_track` | unsafe | mute / lock / リネーム / バインディング。トラックの型に必要なコンポーネントを自前で解決（Animation なら Animator）。バインディングは PlayableDirector に入るシーン側の情報なので `.playable` は書き換わらず、`scene_save` が要る。mute / lock / リネームは資産側なので `.playable` が保存される |
 | `timeline_delete` | unsafe | トラック / クリップの削除。グループは配下ごと。Undo 可能なので確認を求めない |
 | `timeline_create` | unsafe | Timeline アセットの新規作成。`object_path` か `instance_id` を渡したときだけ、その GameObject に PlayableDirector を付けます。トラック追加の前提となる唯一の入口。アセットを書き込む際に、プロジェクト内の未保存アセットをすべて保存します |
 | `timeline_create_track` | unsafe | トラック追加（activation / animation / audio / control / group / playable / signal）。グループへのネストとバインド同時指定可 |
@@ -139,7 +154,11 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `reflect_read` | safe | 型とメンバーパスで private を含む live な状態を読む。`Renderer.material` のような getter は読むだけで共有アセットをインスタンス化するので、`sharedMaterial` を読んでください |
+| `search_query` | safe | Editor の検索を1回の問い合わせで使います。`h:` はシーン、`p:` はプロジェクト、`t:` は型、`ref:` は参照、`p(name)` は serialize されたプロパティの比較です。`h: t:meshrenderer p(castshadows)!="Off"` のような複合条件が1回で書けます。シーンの結果には他のツールが取る `objectPath` が付きます。**Unity のクエリ言語なので、理解されない語は失敗せず絞り込みが効かないだけ**です。件数を期待値と突き合わせてください |
+| `asset_broken_references` | safe | 参照先を失ったフィールドを探します。**id は残っていて中身が null** のものだけを挙げるので、もともと未設定のフィールドとは区別されます。スクリプトが解決できないコンポーネントも一緒に報告します。`scope` は `scene` / `assets` / `both`。アセット走査は `max_assets` と `max_seconds` で打ち切り、どちらで止まったかを返します |
+| `editor_state` | safe | Editor がいま応答できるかを、他のツールが要るメインスレッドを使わずに読みます。取り込み・コンパイル・モーダルダイアログがメインスレッドを掴んでいる間は、**それを報告するはずのツールも含めて全部が列に積まれます**。`queueDepth` が伸びて `reqCount` が動かないのが詰まりの形で、ダイアログが掴んでいればその名前も出ます。呼び出しが返ってこないときに最初に聞くもの |
+| `animator_set_parameter` | unsafe | 実行中の Animator のパラメータを設定します（Bool / Trigger / Int / Float）。**Play mode 限定**で、停止中は「既定値は controller 側にある」と案内して拒否します。無い名前を渡すと、現存するパラメータの一覧を添えて拒否します |
+| `reflect_read` | unsafe | 型とメンバーパスで private を含む live な状態を読む。`Renderer.material` のような getter は読むだけで共有アセットをインスタンス化するので、`sharedMaterial` を読んでください。複数まとめて読むなら `paths`（最大50本）。結果は要求したパスをキーにした辞書で返り、読めなかった1本はその要素だけが `error` になります。Collider の `bounds` を読むときは物理へ同期してから返します |
 | `reflect_find_type` | safe | ロード済み型の検索 |
 | `execute_code` | unsafe | C# スニペットのコンパイル・実行（専用ツールで届かないときの最後の手段） |
 
@@ -160,7 +179,9 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 |---|---|---|
 | `build_settings` | safe | 実効ビルドターゲット、ビルドに入るシーン、モジュールの有無 |
 | `build_player` | unsafe | プレイヤービルド。`syncWaitMs`（既定 3 秒）を超えれば job になります |
+| `build_report` | safe | 直前のビルドに何が入っていて、どれだけ重かったか。Unity が Library の横に書くレポートを読みます。**ビルドの中を見る手段はこれまでありませんでした**（`build_player` は作って終わりです）。返すのは、結果と合計サイズと所要時間、アセット種別ごとの合計、重い順の個別アセットとそのパス、そして時間のかかったビルドステップです。`compare_with` に 2 つ目のレポートを渡すと、**2 つのビルドの差**——何が増え、何が太り、何バイト変わったか——を返します。「なぜ大きくなったのか」に答えられるのはこの形だけです。ビルドフォルダーではなくレポートを読むので、出力を消したあとでも答えられます |
 | `build_switch_target` | unsafe | ビルドターゲット切替（再インポートを伴う） |
+| `project_settings` | unsafe | `ProjectSettings/` 配下の設定を読み書き。`section` は player / quality / graphics / tags / physics / physics2d / time / audio / input / editor / build / memory / navigation / presets の 14 種です。`property` にはシリアライズ名（`m_Gravity`）を渡します。丸ごとの名前に当たらなければ部分一致で検索し、`m_QualitySettings.Array.data[0].shadowDistance` のように配列や構造体の中まで降りて探します。一覧は最上位だけで、200 件で打ち切ると `truncated` が付きます。書き込みは Undo でき、ディスクへは `AssetDatabase.SaveAssets` で届きます。**この保存はプロジェクト内の未保存アセットをすべて書き出します**。設定ファイル1つだけを書く手段は Unity 側にありません。応答にもその旨が入ります。`properties` に配列を渡すとまとめて読み、`values` にオブジェクトを渡すとまとめて書きます。**まとめ書きは1つでもパスが見つからなければ何も書きません** — レイヤーの衝突行列のように、片方だけ書くと行列が自分と矛盾するためです |
 
 ## 公開条件と制限
 
@@ -179,6 +200,5 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 
   アセットは OS のゴミ箱へ移動し、フォルダーを渡した場合は配下すべてが移動します。GameObject は Undo で戻せます。ただし未保存シーンへの上書きは拒否します。これだけは Undo でも戻せないためです。
 - `gameobject_set_transform` は RectTransform も動かしますが、書き込むのは `localPosition` です。そのため `m_AnchoredPosition` の値は 1 回分遅れて追いつきます。書き込んだ直後に `inspect_read` で読み直すと、実際には動いているのに古い値が返ります。読み直して確かめるなら `reflect_read` を使うか、1 呼び出し置いてください。
-- `inspect_write` は、他のオブジェクトへの参照を持つプロパティを書けません。スプライト、マテリアル、イベントの呼び出し先などが該当します。これらは `execute_code` で代入してください。
 - `execute_code` のコードはメソッドの本体に置かれるので、using ディレクティブを書くとコンパイルエラーになります。`System`、`System.Collections`、`System.Collections.Generic`、`System.Linq`、`System.Threading.Tasks`、`UnityEngine`、`UnityEditor` は最初から取り込まれています。それ以外の型は `UnityEngine.Rendering.Volume` のように完全な形で書いてください。
 - `execute_code` は Undo の対象になりません。オーサリングは専用ツールを使ってください。

@@ -28,7 +28,9 @@ namespace UnityMCP.Editor.Tools
             "gameobject_create",
             "Create a GameObject, optionally as a primitive and optionally parented to an existing " +
             "object. Returns the path to address it by later. The new object becomes the Editor's " +
-            "selection.",
+            "selection. A primitive arrives with a collider, which is what Unity's own menu does; " +
+            "pass collider:false for geometry that is only meant to be looked at, rather than " +
+            "removing it afterwards.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Create GameObject")]
         public static JObject Create(
@@ -45,24 +47,64 @@ namespace UnityMCP.Editor.Tools
             [McpArg("rotation", "Local euler angles, as {x, y, z}.")]
             JObject rotation = null,
             [McpArg("scale", "Local scale, as {x, y, z}.")]
-            JObject scale = null)
+            JObject scale = null,
+            [McpArg("collider", "Keep the collider a primitive is created with. Only means " +
+                                "something with 'primitive'; an empty object has none either way.")]
+            bool collider = true)
         {
-            GameObject go;
+            // Everything that can refuse is checked before the object exists. Checked afterwards, a
+            // parent that does not resolve or a position holding a non-number failed the call and
+            // left the object it had already made in the scene.
+            Transform parent = null;
 
-            if (string.IsNullOrWhiteSpace(primitive))
+            if (!string.IsNullOrWhiteSpace(parentPath) || parentInstanceId.HasValue)
             {
-                go = new GameObject(string.IsNullOrWhiteSpace(name) ? "GameObject" : name);
+                parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id").transform;
             }
-            else
+
+            foreach (var (vector, argument) in new[] { (position, "position"), (rotation, "rotation"), (scale, "scale") })
             {
-                if (!Enum.TryParse<PrimitiveType>(primitive, true, out var type))
+                if (vector != null)
+                {
+                    ReadVector(vector, Vector3.zero, argument);
+                }
+            }
+
+            PrimitiveType? type = null;
+
+            if (!string.IsNullOrWhiteSpace(primitive))
+            {
+                if (!Enum.TryParse<PrimitiveType>(primitive, true, out var parsed))
                 {
                     throw new McpToolException(
                         "invalid_params",
                         $"'{primitive}' is not a primitive. Use one of: {string.Join(", ", Enum.GetNames(typeof(PrimitiveType)))}.");
                 }
 
-                go = GameObject.CreatePrimitive(type);
+                type = parsed;
+            }
+
+            GameObject go;
+
+            if (type == null)
+            {
+                go = new GameObject(string.IsNullOrWhiteSpace(name) ? "GameObject" : name);
+            }
+            else
+            {
+                go = GameObject.CreatePrimitive(type.Value);
+
+                if (!collider)
+                {
+                    // CreatePrimitive always attaches one, and a mock-up made of primitives is
+                    // usually there to be seen rather than hit.
+                    var attached = go.GetComponent<Collider>();
+
+                    if (attached != null)
+                    {
+                        UnityEngine.Object.DestroyImmediate(attached);
+                    }
+                }
 
                 if (!string.IsNullOrWhiteSpace(name))
                 {
@@ -72,10 +114,9 @@ namespace UnityMCP.Editor.Tools
 
             Undo.RegisterCreatedObjectUndo(go, "MCP Create GameObject");
 
-            if (!string.IsNullOrWhiteSpace(parentPath) || parentInstanceId.HasValue)
+            if (parent != null)
             {
-                var parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id");
-                Undo.SetTransformParent(go.transform, parent.transform, "MCP Create GameObject");
+                Undo.SetTransformParent(go.transform, parent, "MCP Create GameObject");
             }
 
             ApplyTransform(go.transform, position, rotation, scale);
@@ -311,7 +352,7 @@ namespace UnityMCP.Editor.Tools
             return Describe(go, components: true);
         }
 
-        private static Type FindComponentType(string typeName)
+        internal static Type FindComponentType(string typeName)
         {
             if (string.IsNullOrWhiteSpace(typeName))
             {

@@ -9,11 +9,15 @@ pwsh scripts/run-editmode-tests.ps1
 ```
 
 It creates a scratch project under `%TEMP%` on first use — a manifest and a junction back to
-this repository, nothing else — reuses it afterwards, and writes `editmode-attestation.json`
+this repository, nothing else — reuses it afterwards, and writes `attested/<source hash>.json`
 naming the sources it ran against.
 
 **Commit that file with the change it covers.** CI and the release both refuse Editor sources
-that no recorded run covers.
+that no recorded run covers, and both require the run to be on the pinned Editor generation.
+
+The file is named after the sources rather than given a fixed name, so two branches that each
+recorded a run write different files and merge without a conflict. After merging them neither
+run covers the result, which is what the gate says. The ten most recent are kept.
 
 ### Which Unity it runs
 
@@ -50,7 +54,11 @@ run with nothing tagged and nothing published. The checksums are generated after
 
 ## `source-hash.cs`
 
-Hashes every `.cs` and `.asmdef` under the Unity package.
+Hashes every `.cs`, `.asmdef`, bundled `.dll`, and their `.meta` files under the Unity package,
+plus the package manifest's `unity`, `unityRelease`, and `dependencies` fields. DLLs are hashed
+as raw bytes; only text inputs have line endings normalized. Manifest dependency order and
+formatting do not matter. A package version or documentation-only manifest edit does not
+invalidate the attestation.
 
 ```sh
 dotnet run scripts/source-hash.cs
@@ -84,8 +92,14 @@ single test having run. This closes that specific hole for the price of one comm
 the day-to-day loop where it already was: run the tests on the machine that has Unity on it.
 
 The attestation names the *sources*, not the commit, so a documentation change releases without
-re-running anything — while any edit to a `.cs` or `.asmdef` file requires a fresh run. CI checks
+re-running anything — while any edit to a compilation input listed above requires a fresh run. CI checks
 it too, which makes a stale attestation a failed pull request rather than a failed publish.
+
+The hash does not identify the consumer project's resolved package graph or platform. The
+attestation records the actual Unity version; optional Timeline/Recorder/Test Framework and
+resolved dependency versions belong in the validation report for that run. Passing one Editor
+does not attest every supported Unity version or operating system. The hash is a stale-input
+check, not a cryptographic proof that tests were executed.
 
 ## Publishing to NuGet
 
@@ -147,14 +161,19 @@ Four calls, each run through all three paths:
 - the tool catalog (`GET /tools` / `tools --raw` / `tools/list`) — kept separate because its
   Editor-side allocation was optimised and is worth watching on its own.
 
-Before any timing, it runs an equivalence pass: for each of the first three calls, the REST
-`result`, the MCP `structuredContent`, and the parsed CLI stdout must match once the `truncated`
-and `next` pagination keys are stripped from both sides (MCP's `structuredContent` carries them
-where the REST/CLI envelope hoists them out, so leaving them in would report a mismatch that
-is not one). For the catalog, only the REST and CLI catalogs are compared byte-for-byte and only
-the tool *names* are compared against MCP's `tools/list` — its JSON Schema shape legitimately
-differs from the REST/CLI catalog's. Any mismatch, or an unreachable Editor, ends the run with a
-non-zero exit code before a single timed request is sent.
+Before timing, the script decodes MCP's JSON text content and compares it with the
+REST and CLI results. REST/CLI pagination fields are restored from the response envelope,
+so `truncated` and `next` are checked as data (absent and null `next` are equivalent).
+Only the top-level `snapshotId` value is normalized because each hierarchy read creates a
+new identifier. Object key order is ignored; array order and string case must match.
+MCP protocol errors and `isError` tool results fail the run.
+
+The complete REST and CLI `tools --raw` catalogs are compared as JSON. MCP catalog tool
+names are compared with REST; schema shapes differ between the two transports. A mismatch
+or failed request ends the run with a non-zero exit code. Failed timed requests also abort
+instead of silently reducing the sample count.
+Run `powershell -File scripts\bench-cli-vs-mcp.ps1 -SelfTest` for offline regression fixtures
+covering content parsing, pagination, snapshot normalization, case sensitivity, and tool errors.
 
 Around each path's timed loop it snapshots `GC.CollectionCount(0)` and `GC.GetTotalMemory`
 through `execute_code`, collecting once before the loop so the heap starts from a floor, and

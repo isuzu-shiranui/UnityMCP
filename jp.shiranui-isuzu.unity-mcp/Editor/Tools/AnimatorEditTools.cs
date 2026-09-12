@@ -46,6 +46,357 @@ namespace UnityMCP.Editor.Tools
             "returns. One Ctrl+Z reverses the whole call in memory, but not the file, so until " +
             "something saves again the file holds a change the Editor no longer shows.";
 
+        // ── creating the asset ────────────────────────────────────────────────────
+
+        [McpTool(
+            "animator_create",
+            "Create an Animator Controller asset, and optionally hang it on a GameObject's " +
+            "Animator. Eleven animator_* tools edit a controller and none of them could make " +
+            "one, so an empty project could not reach any of them without execute_code. The new " +
+            "controller has one layer named Base Layer and no states; animator_add_state and " +
+            "animator_add_parameter fill it in.",
+            Idempotency = McpIdempotency.Unsafe,
+            UndoGroup = "MCP Create Animator Controller",
+            Group = "authoring")]
+        public static JObject AnimatorCreate(
+            [McpArg("path", "Where to write the .controller, e.g. Assets/Art/Hero.controller. " +
+                            "Missing folders under Assets/ are created, and '.controller' is " +
+                            "added when it is left off.", Required = true)]
+            string path = null,
+            [McpArg("object_path", "Scene path of a GameObject to hang it on. An Animator is " +
+                                   "added when it has none. Omit to only create the asset.")]
+            string objectPath = null,
+            [McpArg("overwrite", "Replace an existing controller at this path rather than refusing.")]
+            bool overwrite = false)
+        {
+            var target = AssetPath(path, ".controller");
+
+            var existing = AssetDatabase.LoadAssetAtPath<AnimatorController>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
+
+            if (existing != null && !overwrite)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{target}' already exists. Pass overwrite to replace it, or edit the one "
+                    + "that is there with animator_add_state and animator_add_layer.");
+            }
+
+            // Resolved before the old controller is destroyed. Looking the object up afterwards
+            // meant a path that does not resolve took the controller with it: the call failed and
+            // the asset it was replacing was already gone.
+            var host = string.IsNullOrWhiteSpace(objectPath)
+                ? null
+                : ObjectResolve.Object(objectPath, null, "object_path", null);
+
+            EnsureFolder(target);
+
+            AnimatorController controller;
+
+            if (existing != null)
+            {
+                // Emptied in place rather than deleted and remade. A new file carries a new GUID,
+                // and every Animator, prefab and override controller pointing at this one is left
+                // holding a missing reference. RemoveLayer destroys the layer's state machine, so
+                // nothing is orphaned inside the file either.
+                //
+                // Recorded through AnimatorResolve, which takes the controller and everything
+                // stored inside its file: the states, transitions and behaviours the layers take
+                // with them are separate objects there, and the controller alone leaves them off
+                // the undo stack.
+                AnimatorResolve.RecordUndo(existing, "MCP Create Animator Controller");
+
+                for (var i = existing.layers.Length - 1; i >= 0; i--)
+                {
+                    existing.RemoveLayer(i);
+                }
+
+                for (var i = existing.parameters.Length - 1; i >= 0; i--)
+                {
+                    existing.RemoveParameter(i);
+                }
+
+                existing.AddLayer("Base Layer");
+
+                EditorUtility.SetDirty(existing);
+                AssetDatabase.SaveAssetIfDirty(existing);
+
+                controller = existing;
+            }
+            else
+            {
+                controller = AnimatorController.CreateAnimatorControllerAtPath(target);
+            }
+
+            var created = new JObject
+            {
+                ["path"] = target,
+                ["layer"] = controller.layers[0].name,
+                // False when the asset was already there: its GUID and every reference to it
+                // survive, and a caller keying off created cannot tell the two apart otherwise.
+                ["created"] = existing == null,
+            };
+
+            if (existing != null)
+            {
+                created["replaced"] = true;
+            }
+
+            if (host != null)
+            {
+                var animator = host.GetComponent<Animator>();
+
+                if (animator == null)
+                {
+                    animator = Undo.AddComponent<Animator>(host);
+                }
+                else
+                {
+                    Undo.RecordObject(animator, "MCP Create Animator Controller");
+                }
+
+                animator.runtimeAnimatorController = controller;
+                created["attachedTo"] = ObjectResolve.PathOf(host);
+            }
+
+            return created;
+        }
+
+        [McpTool(
+            "animation_clip_create",
+            "Create an empty AnimationClip asset. A controller's states need a motion, and " +
+            "nothing else here makes one. The clip holds no curves, and a clip's length comes " +
+            "from its curves, so there is no length to set until something animates it: " +
+            "animation_clip_write_curves is what puts a motion in it. Looping is a setting rather " +
+            "than a curve, so it is here.",
+            Idempotency = McpIdempotency.Unsafe,
+            UndoGroup = "MCP Create Animation Clip",
+            Group = "authoring")]
+        public static JObject AnimationClipCreate(
+            [McpArg("path", "Where to write the .anim, e.g. Assets/Art/Idle.anim. Missing folders " +
+                            "under Assets/ are created, and '.anim' is added when it is left off.",
+                    Required = true)]
+            string path = null,
+            [McpArg("loop", "Whether the clip loops.")]
+            bool loop = false,
+            [McpArg("overwrite", "Replace an existing clip at this path rather than refusing.")]
+            bool overwrite = false)
+        {
+            var target = AssetPath(path, ".anim");
+
+            var existing = AssetDatabase.LoadAssetAtPath<AnimationClip>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
+
+            if (existing != null && !overwrite)
+            {
+                throw new McpToolException(
+                    "invalid_params", $"'{target}' already exists. Pass overwrite to replace it.");
+            }
+
+            EnsureFolder(target);
+
+            var clip = new AnimationClip { name = System.IO.Path.GetFileNameWithoutExtension(target) };
+
+            // loopTime is not on AnimationClip; it lives in the settings the importer writes.
+            var settings = AnimationUtility.GetAnimationClipSettings(clip);
+            settings.loopTime = loop;
+            AnimationUtility.SetAnimationClipSettings(clip, settings);
+
+            if (existing != null)
+            {
+                AssetTools.ReplaceAssetContents(existing, clip, target);
+
+                return new JObject
+                {
+                    ["path"] = target,
+                    ["loop"] = loop,
+                    ["created"] = false,
+                    ["replaced"] = true,
+                };
+            }
+
+            AssetDatabase.CreateAsset(clip, target);
+            AssetDatabase.SaveAssetIfDirty(clip);
+
+            return new JObject
+            {
+                ["path"] = target,
+                ["loop"] = loop,
+                ["created"] = true,
+            };
+        }
+
+        [McpTool(
+            "animation_clip_write_curves",
+            "Write float curves into an AnimationClip. animation_clip_create makes the asset and " +
+            "leaves it empty, so a state with a motion in it meant execute_code and " +
+            "AnimationUtility. Each curve names what it drives: a child path from the animated " +
+            "root, a component type, and a serialized property. Several curves go in one call " +
+            "because a motion is never one curve — a bob, a sway and a nod are three. A clip's " +
+            "length comes from its keys, so the reply says what it became.",
+            Idempotency = McpIdempotency.Unsafe,
+            Group = "authoring",
+            Examples = new[]
+            {
+                @"{""path"":""Assets/Art/Walk.anim"",""curves"":[{""target"":""Hips"",""type"":""Transform""," +
+                @"""property"":""m_LocalPosition.y"",""keys"":[{""time"":0,""value"":1},{""time"":0.4,""value"":1.08}," +
+                @"{""time"":0.8,""value"":1}]}]}",
+            })]
+        public static JObject AnimationClipWriteCurves(
+            [McpArg("path", "The .anim to write into, e.g. Assets/Art/Walk.anim.", Required = true)]
+            string path = null,
+            [McpArg("curves", "The curves, as an array. Each takes 'target' (the child path from " +
+                              "the animated root, empty for the root itself), 'type' (component " +
+                              "type name, e.g. Transform), 'property' (serialized property name, " +
+                              "e.g. m_LocalPosition.y) and 'keys' (an array of {time, value}). " +
+                              "Tangents are smoothed the way the Animation window's Auto does. " +
+                              "Nothing is written unless every curve resolves.", Required = true)]
+            JObject[] curves = null,
+            [McpArg("frame_rate", "Clip frame rate.")]
+            float frameRate = 60f,
+            [McpArg("replace", "Clear the clip's existing curves first. Without it a curve " +
+                               "replaces whatever shares its binding and the rest are left alone.")]
+            bool replace = false)
+        {
+            var target = AssetPath(path, ".anim");
+            var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(target);
+
+            if (clip == null)
+            {
+                throw new McpToolException(
+                    "not_found", $"No AnimationClip at '{target}'. animation_clip_create makes one.");
+            }
+
+            if (curves == null || curves.Length == 0)
+            {
+                throw new McpToolException("invalid_params", "'curves' needs at least one curve.");
+            }
+
+            // Everything is resolved before anything is written, so a type name that turns out to
+            // be wrong halfway through does not leave a clip holding half a motion.
+            var resolved = new List<(EditorCurveBinding Binding, AnimationCurve Curve)>();
+
+            foreach (var spec in curves)
+            {
+                var property = spec?["property"]?.ToString();
+
+                if (string.IsNullOrWhiteSpace(property))
+                {
+                    throw new McpToolException("invalid_params", "A curve needs a 'property'.");
+                }
+
+                var type = GameObjectTools.FindComponentType(spec["type"]?.ToString());
+                var binding = EditorCurveBinding.FloatCurve(spec["target"]?.ToString() ?? "", type, property);
+
+                resolved.Add((binding, CurveFrom(spec["keys"] as JArray, property)));
+            }
+
+            Undo.RegisterCompleteObjectUndo(clip, "MCP Write Curves");
+
+            if (replace)
+            {
+                clip.ClearCurves();
+            }
+
+            clip.frameRate = frameRate;
+
+            foreach (var (binding, curve) in resolved)
+            {
+                AnimationUtility.SetEditorCurve(clip, binding, curve);
+            }
+
+            EditorUtility.SetDirty(clip);
+            AssetDatabase.SaveAssetIfDirty(clip);
+
+            return new JObject
+            {
+                ["path"] = target,
+                ["curves"] = AnimationUtility.GetCurveBindings(clip).Length,
+                ["written"] = resolved.Count,
+                ["length"] = clip.length,
+                ["frameRate"] = clip.frameRate,
+            };
+        }
+
+        /// <summary>One curve's keys, smoothed the way the Animation window smooths its own.</summary>
+        /// <remarks>
+        /// Keyframes left with their default tangents hold their value and then jump, which is not
+        /// what a caller describing a bob with three keys is asking for.
+        /// </remarks>
+        private static AnimationCurve CurveFrom(JArray keys, string property)
+        {
+            if (keys == null || keys.Count == 0)
+            {
+                throw new McpToolException("invalid_params", $"The curve for '{property}' has no keys.");
+            }
+
+            var frames = new Keyframe[keys.Count];
+
+            for (var i = 0; i < keys.Count; i++)
+            {
+                if (keys[i] is not JObject key || key["time"] == null || key["value"] == null)
+                {
+                    throw new McpToolException(
+                        "invalid_params", $"A key of '{property}' is not a {{time, value}} pair.");
+                }
+
+                frames[i] = new Keyframe(key["time"].Value<float>(), key["value"].Value<float>());
+            }
+
+            var curve = new AnimationCurve(frames);
+
+            for (var i = 0; i < curve.length; i++)
+            {
+                curve.SmoothTangents(i, 0f);
+            }
+
+            return curve;
+        }
+
+        /// <summary>An asset path under Assets/, with the extension the AssetDatabase needs.</summary>
+        private static string AssetPath(string path, string extension)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                throw new McpToolException("invalid_params", "'path' is required.");
+            }
+
+            var target = path.Replace('\\', '/');
+
+            if (!target.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                target += extension;
+            }
+
+            if (!target.StartsWith("Assets/", StringComparison.Ordinal))
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'{target}' is outside Assets/. The asset has to live in the project.");
+            }
+
+            return target;
+        }
+
+        /// <summary>Creates the folders a path needs, the way the Project window would.</summary>
+        private static void EnsureFolder(string assetPath)
+        {
+            var parts = assetPath.Split('/');
+            var built = parts[0];
+
+            for (var i = 1; i < parts.Length - 1; i++)
+            {
+                var next = built + "/" + parts[i];
+
+                if (!AssetDatabase.IsValidFolder(next))
+                {
+                    AssetDatabase.CreateFolder(built, parts[i]);
+                }
+
+                built = next;
+            }
+        }
+
         // ── layers ────────────────────────────────────────────────────────────────
 
         [McpTool(
@@ -526,7 +877,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("conditions", "Array of {parameter, mode, threshold}. Modes: If and IfNot for a " +
                                   "bool or trigger, Greater and Less for a float or int, Equals and " +
                                   "NotEqual for an int. The threshold is ignored by If and IfNot.")]
-            JToken conditions = null,
+            JObject[] conditions = null,
             [McpArg("has_exit_time", "Let the transition fire when the source clip reaches 'exit_time', " +
                                      "with no condition needed.")]
             bool hasExitTime = false,
@@ -664,6 +1015,118 @@ namespace UnityMCP.Editor.Tools
         // ── parameters ────────────────────────────────────────────────────────────
 
         [McpTool(
+            "animator_set_parameter",
+            "Drive a parameter on a running Animator, the way a script would. Play Mode only: " +
+            "this is the value the Animator holds right now, not the controller's default, and " +
+            "Unity discards it when Play Mode ends. Setting a parameter is how a transition is " +
+            "made to fire on purpose, which is what checking that a gimmick works comes down to. " +
+            "Use animator_add_parameter to add one to the asset, and animator_inspect to read " +
+            "what the running Animator currently holds.",
+            Idempotency = McpIdempotency.Unsafe,
+            Group = "authoring")]
+        public static JObject AnimatorSetParameter(
+            [McpArg("object_path", "Scene path of the GameObject carrying the Animator.",
+                    Required = true)]
+            string objectPath = null,
+            [McpArg("name", "Parameter name, as animator_inspect reports it. Names are case " +
+                            "sensitive.", Required = true)]
+            string name = null,
+            [McpArg("value", "The value to hold: a number for Float and Int, true or false for " +
+                             "Bool. A Trigger is set by true and cleared by false.")]
+            JToken value = null)
+        {
+            if (!EditorApplication.isPlaying)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    "Nothing is running, so there is no Animator to drive. A parameter's starting "
+                    + "value belongs to the controller: set it with animator_add_parameter, or "
+                    + "enter Play Mode with play_mode_play first.");
+            }
+
+            var go = ObjectResolve.Object(objectPath, null, "object_path", null);
+            var animator = go.GetComponent<Animator>();
+
+            if (animator == null)
+            {
+                throw new McpToolException("not_found", $"'{objectPath}' has no Animator.");
+            }
+
+            var parameter = animator.parameters.FirstOrDefault(
+                p => string.Equals(p.name, name, StringComparison.Ordinal));
+
+            if (parameter == null)
+            {
+                var present = string.Join(", ", animator.parameters.Select(p => p.name));
+
+                throw new McpToolException(
+                    "not_found",
+                    $"This Animator has no parameter named '{name}'. It has: "
+                    + (present.Length > 0 ? present : "none")
+                    + ". animator_add_parameter adds one to the controller.");
+            }
+
+            switch (parameter.type)
+            {
+                case AnimatorControllerParameterType.Bool:
+                    animator.SetBool(name, value != null && value.Value<bool>());
+                    break;
+
+                case AnimatorControllerParameterType.Trigger:
+                    // Both directions: a trigger left set fires again on the next transition, and
+                    // resetting it is the only way to take that back.
+                    if (value != null && !value.Value<bool>())
+                    {
+                        animator.ResetTrigger(name);
+                    }
+                    else
+                    {
+                        animator.SetTrigger(name);
+                    }
+
+                    break;
+
+                case AnimatorControllerParameterType.Int:
+                    animator.SetInteger(name, value == null ? 0 : value.Value<int>());
+                    break;
+
+                default:
+                    animator.SetFloat(name, value == null ? 0f : value.Value<float>());
+                    break;
+            }
+
+            return new JObject
+            {
+                ["object"] = ObjectResolve.PathOf(go),
+                ["parameter"] = name,
+                ["type"] = parameter.type.ToString(),
+                ["value"] = Current(animator, parameter),
+                ["written"] = true,
+
+                // The same thing inspect_write says, for the same reason.
+                ["playModeWarning"] = "This is the running Animator's value. Unity discards it "
+                                      + "when Play Mode ends; the controller's default is unchanged.",
+            };
+        }
+
+        /// <summary>What the running Animator holds for this parameter now.</summary>
+        private static JToken Current(Animator animator, AnimatorControllerParameter parameter)
+        {
+            switch (parameter.type)
+            {
+                case AnimatorControllerParameterType.Bool:
+                case AnimatorControllerParameterType.Trigger:
+                    return animator.GetBool(parameter.name);
+
+                case AnimatorControllerParameterType.Int:
+                    return animator.GetInteger(parameter.name);
+
+                default:
+                    return animator.GetFloat(parameter.name);
+            }
+        }
+
+        [McpTool(
             "animator_add_parameter",
             "Add a parameter to an Animator Controller. A parameter is what a script or a menu drives " +
             "to make a transition fire; adding one changes nothing on its own until a condition " +
@@ -797,29 +1260,17 @@ namespace UnityMCP.Editor.Tools
             public float Threshold { get; }
         }
 
-        private static List<ParsedCondition> ParseConditions(AnimatorController controller, JToken conditions)
+        private static List<ParsedCondition> ParseConditions(AnimatorController controller, JObject[] conditions)
         {
             var parsed = new List<ParsedCondition>();
 
-            if (conditions == null || conditions.Type == JTokenType.Null)
+            if (conditions == null)
             {
                 return parsed;
             }
 
-            if (!(conditions is JArray array))
+            foreach (var item in conditions)
             {
-                throw new McpToolException(
-                    "invalid_params",
-                    "'conditions' is an array of objects, e.g. [{\"parameter\":\"Grounded\",\"mode\":\"If\"}].");
-            }
-
-            foreach (var entry in array)
-            {
-                if (!(entry is JObject item))
-                {
-                    throw new McpToolException("invalid_params", "Each condition is an object with 'parameter' and 'mode'.");
-                }
-
                 var name = item["parameter"]?.ToString();
 
                 if (string.IsNullOrWhiteSpace(name))

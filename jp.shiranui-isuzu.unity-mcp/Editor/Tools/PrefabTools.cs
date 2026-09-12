@@ -112,6 +112,8 @@ namespace UnityMCP.Editor.Tools
                 parent = ObjectResolve.Object(parentPath, parentInstanceId, "parent_path", "parent_instance_id").transform;
             }
 
+            var wantedPosition = position == null ? (Vector3?)null : ReadVector(position, asset.transform.localPosition, "position");
+            var wantedRotation = rotation == null ? (Vector3?)null : ReadVector(rotation, asset.transform.localEulerAngles, "rotation");
             var instance = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
 
             if (instance == null)
@@ -128,13 +130,13 @@ namespace UnityMCP.Editor.Tools
 
             if (position != null)
             {
-                instance.transform.localPosition = ReadVector(position, instance.transform.localPosition, "position");
+                instance.transform.localPosition = wantedPosition.Value;
             }
 
             if (rotation != null)
             {
                 instance.transform.localEulerAngles =
-                    ReadVector(rotation, instance.transform.localEulerAngles, "rotation");
+                    wantedRotation.Value;
             }
 
             Selection.activeGameObject = instance;

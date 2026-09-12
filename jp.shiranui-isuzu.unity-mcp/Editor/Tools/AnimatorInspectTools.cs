@@ -6,6 +6,8 @@ using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEditor.Animations;
 
+using UnityEngine;
+
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
 
@@ -45,7 +47,10 @@ namespace UnityMCP.Editor.Tools
             "them. Name a 'layer' to get that layer's states with their motion, speed, Write " +
             "Defaults flag and position, every transition out of each with its conditions, and the " +
             "layer's Any State and Entry transitions. States inside sub-state machines are included, " +
-            "addressed as 'Machine/State'. This reads and changes nothing.",
+            "addressed as 'Machine/State'. In Play mode, naming an 'object_path' also reports what " +
+            "that Animator is doing right now: the state each layer is in, how far through it is, " +
+            "and what every parameter currently holds — which the asset cannot say. This reads and " +
+            "changes nothing.",
             Idempotency = McpIdempotency.Safe)]
         public static JObject Inspect(
             [McpArg("path", "Controller asset path, e.g. Assets/Animation/Avatar_FX.controller.")]
@@ -66,9 +71,18 @@ namespace UnityMCP.Editor.Tools
                 return listing;
             }
 
-            return string.IsNullOrWhiteSpace(layer)
+            var described = string.IsNullOrWhiteSpace(layer)
                 ? Overview(controller)
                 : LayerDetail(controller, AnimatorResolve.LayerIndex(controller, layer));
+
+            var running = Runtime(objectPath, controller);
+
+            if (running != null)
+            {
+                described["runtime"] = running;
+            }
+
+            return described;
         }
 
         /// <summary>
@@ -79,6 +93,156 @@ namespace UnityMCP.Editor.Tools
         /// <see cref="AnimatorResolve.Controller"/> does. For a read it is the wrong answer: the
         /// caller asked what is there, and "there are four of them" is that answer.
         /// </remarks>
+        /// <summary>The name of the state a layer is in, or null when nothing matches.</summary>
+        /// <remarks>
+        /// IsName rather than a hash computed here: it is the API that knows how Unity spells a
+        /// state's full path, including the sub-state machines a hand-built string would miss.
+        /// </remarks>
+        private static string StateName(
+            AnimatorController controller, int layerIndex, AnimatorStateInfo state)
+        {
+            if (controller == null || layerIndex >= controller.layers.Length)
+            {
+                return null;
+            }
+
+            var layer = controller.layers[layerIndex];
+
+            return Match(state, layer.name, layer.stateMachine, string.Empty);
+        }
+
+        /// <summary>Walks a machine and its children, looking for the state that is running.</summary>
+        private static string Match(
+            AnimatorStateInfo state, string layerName, AnimatorStateMachine machine, string prefix)
+        {
+            foreach (var child in machine.states)
+            {
+                var name = prefix + child.state.name;
+
+                if (state.IsName(layerName + "." + name) || state.IsName(name))
+                {
+                    return name;
+                }
+            }
+
+            // A sub-state machine's states are addressed through it, which is the spelling
+            // animator_inspect uses for them elsewhere.
+            foreach (var sub in machine.stateMachines)
+            {
+                var found = Match(state, layerName, sub.stateMachine, prefix + sub.stateMachine.name + ".");
+
+                if (found != null)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// What the Animator on this object is doing, without the controller asset around it.
+        /// </summary>
+        /// <remarks>
+        /// Watching an animation is a step and a look, and the look was a whole animator_inspect:
+        /// twenty-one of them behind twenty-one steps in one run, each carrying the asset's states
+        /// and transitions again for the sake of the few live numbers at the end of it. This is
+        /// that end on its own, so play_mode_step can hand it back with the frame it belongs to.
+        /// </remarks>
+        internal static JObject LiveState(string objectPath)
+        {
+            var controller = ResolveOrList(null, objectPath, out var listing);
+
+            return listing != null ? null : Runtime(objectPath, controller);
+        }
+
+        /// <summary>What the Animator on this object is doing, or null when nothing is playing.</summary>
+        /// <remarks>
+        /// The asset says what can happen; only the running Animator says what is happening. A
+        /// gimmick that does not fire is usually in a state, or holding a parameter, that the
+        /// controller alone cannot show — and reaching it meant execute_code.
+        /// </remarks>
+        private static JObject Runtime(string objectPath, AnimatorController controller)
+        {
+            if (!EditorApplication.isPlaying || string.IsNullOrWhiteSpace(objectPath))
+            {
+                return null;
+            }
+
+            var go = ObjectResolve.Object(objectPath, null, "object_path", null);
+            var animator = go.GetComponent<Animator>();
+
+            if (animator == null || animator.runtimeAnimatorController == null)
+            {
+                return null;
+            }
+
+            var layers = new JArray();
+
+            for (var i = 0; i < animator.layerCount; i++)
+            {
+                var state = animator.GetCurrentAnimatorStateInfo(i);
+
+                var described = new JObject
+                {
+                    ["layer"] = animator.GetLayerName(i),
+                    ["weight"] = animator.GetLayerWeight(i),
+                    ["normalizedTime"] = state.normalizedTime,
+                    ["loop"] = state.loop,
+                    ["inTransition"] = animator.IsInTransition(i),
+                };
+
+                // The name, where the controller can supply one. A hash alone made "which state
+                // is it in" answerable only by taking a second reading and comparing, which is a
+                // roundabout way to learn something the controller already knows.
+                var name = StateName(controller, i, state);
+
+                if (name != null)
+                {
+                    described["state"] = name;
+                }
+                else
+                {
+                    described["stateHash"] = state.fullPathHash;
+                }
+
+                layers.Add(described);
+            }
+
+            var values = new JObject();
+
+            foreach (var parameter in animator.parameters)
+            {
+                switch (parameter.type)
+                {
+                    case AnimatorControllerParameterType.Bool:
+                    case AnimatorControllerParameterType.Trigger:
+                        values[parameter.name] = animator.GetBool(parameter.name);
+                        break;
+
+                    case AnimatorControllerParameterType.Int:
+                        values[parameter.name] = animator.GetInteger(parameter.name);
+                        break;
+
+                    default:
+                        values[parameter.name] = animator.GetFloat(parameter.name);
+                        break;
+                }
+            }
+
+            return new JObject
+            {
+                ["speed"] = animator.speed,
+                ["layers"] = layers,
+                ["parameters"] = values,
+
+                // Only where the name could not be worked out. Saying it every time would be
+                // noise on a reply that already answers the question.
+                ["note"] = "A layer reported as stateHash rather than state is in something this "
+                           + "controller does not list, such as a state added at runtime.",
+            };
+        }
+
         private static AnimatorController ResolveOrList(string path, string objectPath, out JObject listing)
         {
             listing = null;

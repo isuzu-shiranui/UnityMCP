@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -47,6 +47,11 @@ namespace UnityMCP.Editor.Settings
             ["isuzu-unity-cli found"] = "isuzu-unity-cli が見つかりました",
             ["isuzu-unity-cli not found on PATH"] = "isuzu-unity-cli が PATH にありません",
             ["Install"] = "インストール",
+            ["Register"] = "登録",
+            ["Registered in {0} client configuration(s)"] = "{0} 個のクライアント設定に登録済み",
+            ["No MCP client points at this Editor"] = "この Editor を指している MCP クライアントがありません",
+            ["setup --mcp finished without saying anything."] = "setup --mcp は何も出力せずに終了しました。",
+            ["Could not run {0}: {1}"] = "{0} を実行できませんでした: {1}",
             ["Refresh"] = "再確認",
             ["Copy command"] = "コマンドをコピー",
             ["Register an MCP client with the configuration below, or run isuzu-unity-cli setup --mcp."] =

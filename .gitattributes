@@ -12,3 +12,13 @@
 *.dll   binary
 *.pdb   binary
 *.unitypackage binary
+
+# Native plugins. Git's own heuristic already treats a Mach-O or an ELF file as binary because
+# of the NUL bytes in it, so nothing is broken without these; stating them keeps that heuristic
+# from being what the protection rests on.
+*.dylib  binary
+*.so     binary
+*.bundle binary
+*.a      binary
+*.jar    binary
+*.aar    binary

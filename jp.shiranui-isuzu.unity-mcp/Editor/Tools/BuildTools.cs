@@ -11,6 +11,7 @@ using UnityEngine;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
+using UnityMCP.Editor.Handlers;
 
 namespace UnityMCP.Editor.Tools
 {
@@ -29,6 +30,71 @@ namespace UnityMCP.Editor.Tools
     /// </remarks>
     internal static class BuildTools
     {
+        /// <summary>Assets named individually. The per-type totals carry where the weight is.</summary>
+        private const int DefaultTop = 20;
+
+        private const int MaxTop = 200;
+
+        [McpTool(
+            "build_report",
+            "What the last build contained and what it weighed, read back from the report Unity " +
+            "writes beside the Library. Nothing else in the tool set can see inside a build: " +
+            "build_player produces one and then loses sight of it. The reply gives the summary, a " +
+            "row per asset type, the heaviest individual assets with their paths, and the slowest " +
+            "build steps. Pass 'compare_with' and a second report to get what changed between two " +
+            "builds - which assets appeared, which grew, and by how much. That is the only form " +
+            "of the question that answers 'why did this get bigger', and reading the report rather " +
+            "than the build folder means the answer survives the output being deleted.",
+            Idempotency = McpIdempotency.Safe,
+            MaxResultSizeChars = 200000)]
+        public static JObject Report(
+            [McpArg("path", "The .buildreport to read. Defaults to the last build's.")]
+            string path = null,
+            [McpArg("compare_with", "A second .buildreport; the reply then says what changed.")]
+            string compareWith = null,
+            [McpArg("top", "How many individual assets to name.")]
+            int top = DefaultTop,
+            [McpArg("fields", "Comma-separated keys to keep on each named asset.")]
+            string fields = null)
+        {
+            if (top < 0 || top > MaxTop)
+            {
+                throw new McpToolException(
+                    "invalid_params",
+                    $"'top' takes 0 to {MaxTop}; {top} is outside that.");
+            }
+
+            var report = BuildReportReader.Load(path ?? BuildReportReader.LastBuildPath);
+            var packed = BuildReportReader.Contents(report);
+
+            packed.Sort((a, b) => b.Bytes.CompareTo(a.Bytes));
+
+            var result = ListResponseBuilder.Build(
+                packed, 0, top <= 0 ? 1 : top, BuildReportReader.Describe,
+                ListResponseBuilder.ParseFieldsParam(fields), new[] { "path", "bytes" });
+
+            result["summary"] = BuildReportReader.Summarise(report);
+            result["byType"] = BuildReportReader.ByType(packed);
+            result["packedCount"] = packed.Count;
+            result["slowestSteps"] = BuildReportReader.SlowestSteps(report, 5);
+
+            if (!string.IsNullOrWhiteSpace(compareWith))
+            {
+                var other = BuildReportReader.Load(compareWith);
+
+                result["comparedWith"] = new JObject
+                {
+                    ["path"] = compareWith,
+                    ["summary"] = BuildReportReader.Summarise(other),
+                };
+
+                result["changes"] = BuildReportReader.Compare(
+                    BuildReportReader.Contents(other), packed, top <= 0 ? DefaultTop : top);
+            }
+
+            return result;
+        }
+
         [McpTool(
             "build_settings",
             "Report the active build target, the scenes in the build, and whether the required " +

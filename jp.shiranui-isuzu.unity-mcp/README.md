@@ -9,7 +9,7 @@ reference, MCP client configuration and troubleshooting.
 
 ## Requirements
 
-- Unity 2022.3 or later. The EditMode suite is verified on 2022.3.22f1, 6000.0.35f1 and 6000.5.10f1.
+- Unity 2022.3 or later. The EditMode suite is run on Unity 6000.0.35f1.
 - A Git client, 2.14.0 or newer, on `PATH`. Unity's Package Manager runs it to fetch a package from a git URL.
 - `com.unity.nuget.newtonsoft-json` 3.2.1. It is resolved automatically as a dependency.
 - Node.js is not required. The downloaded CLI is a native binary and needs no runtime. The `dotnet tool` package instead runs on the .NET 10 SDK you install it with.
@@ -64,7 +64,7 @@ public static string[] FindByType(
 
 Tools that declare `MainThread = false` answer from a worker thread, and so do `/health`, `/jobs` and `/tools`. They keep working while the Editor main thread is blocked.
 
-A call that takes longer than `syncWaitMs`, three seconds by default, returns a job id instead of a timeout. The `job_status` tool reports the result once it is ready. `job_status` is itself safe.
+A call that takes longer than `syncWaitMs`, three seconds by default, returns a job id instead of a timeout. The `job_status` tool reports the result once it is ready. `job_status` is itself marked safe, so a client may retry it.
 
 Timeline tools appear only when `com.unity.timeline` is installed. Recorder tools appear only when both `com.unity.recorder` and `com.unity.timeline` are installed. `test_run` and `test_results` appear only when `com.unity.test-framework` is installed.
 
@@ -87,7 +87,7 @@ These live in Unity's preferences folder. Every project on the machine shares th
 - The server binds to `127.0.0.1` only. Every request that reaches a tool needs a bearer token. A CORS preflight `OPTIONS` is answered before the check and returns no data.
 - No CORS headers are sent. A web page open in a browser cannot call the server.
 - Treat the descriptor file and the token file as credentials. Anyone who can read them can run code inside the Editor. The token is stored under `%LOCALAPPDATA%\UnityMCP\tokens\`, and under `~/.local/share/UnityMCP/tokens/` with owner-only permissions on macOS and Linux. Preferences can regenerate it.
-- `execute_code` and `menu_execute` run with the Editor's full permissions. Do not feed them untrusted code.
+- `execute_code` and `menu_execute` run with the Editor's full permissions. Do not pass untrusted code to them.
 
 Nothing in this package reaches a player build, Development Build included. All sources are under `Editor/`, and every assembly definition is restricted to the Editor platform. CI checks both on every change.
 

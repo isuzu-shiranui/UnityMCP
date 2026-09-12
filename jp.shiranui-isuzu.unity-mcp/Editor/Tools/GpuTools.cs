@@ -39,7 +39,7 @@ namespace UnityMCP.Editor.Tools
             "channel, so every number describes red alone and a target written only in green or " +
             "blue reads as all zero. The readback blocks the main thread until the transfer " +
             "finishes.",
-            Idempotency = McpIdempotency.Safe)]
+            Idempotency = McpIdempotency.Unsafe)]
         public static JObject Readback(
             [McpArg("path", "Path to a GraphicsBuffer, ComputeBuffer or Texture, as reflect_read takes.")]
             string path = null,

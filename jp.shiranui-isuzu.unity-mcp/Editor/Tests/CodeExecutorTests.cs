@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 
 using Newtonsoft.Json.Linq;
@@ -210,6 +210,31 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(result["error"], Is.Null, (string)result["error"]);
             Assert.That(result["returnValue"].Value<bool>(), Is.True);
+        }
+
+        /// <summary>
+        /// The exception that happened, not the wrapper around the wrapper.
+        /// </summary>
+        /// <remarks>
+        /// A snippet reaches Unity's internals by reflection as often as this executor reaches
+        /// the snippet, so unwrapping one layer left the reply saying "Exception has been thrown
+        /// by the target of an invocation" — the wrapper's own message, which names nothing. The
+        /// cause behind one of those was a settings file that would not parse.
+        /// </remarks>
+        [Test]
+        public void AnExceptionThrownThroughReflectionIsReportedByItsCause()
+        {
+            var result = Run(
+                "typeof(System.IO.File).GetMethod(\"ReadAllText\", new[] { typeof(string) })" +
+                ".Invoke(null, new object[] { \"H:/no/such/file/at/all.txt\" }); return 0;");
+
+            var error = (string)result["error"];
+
+            Assert.That(error, Is.Not.Null, "the call has to fail");
+            Assert.That(error, Does.Not.Contain("target of an invocation"),
+                "that is the wrapper talking about itself");
+            Assert.That(error, Does.Contain("all.txt").IgnoreCase,
+                "the reply has to name what could not be found");
         }
     }
 }

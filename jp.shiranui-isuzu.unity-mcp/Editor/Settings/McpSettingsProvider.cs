@@ -1,6 +1,8 @@
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 
 using UnityEditor;
 using UnityEngine;
@@ -45,6 +47,9 @@ namespace UnityMCP.Editor.Settings
         private bool showSnippet;
         private string cliPath;
         private bool cliLooked;
+        private List<string> registeredIn;
+        private bool registrationLooked;
+        private string registerReport;
 
         // EditorStyles はドメインリロード直後の OnActivate では未初期化で NullReferenceException になり、
         // SettingsWindow が選択復元を無限再帰してエディタが固まる。GUI リソースは OnGUI 内で遅延初期化する。
@@ -117,11 +122,12 @@ namespace UnityMCP.Editor.Settings
 
             this.DrawServerRow();
             this.DrawCliRow();
+            this.DrawRegistrationRow();
 
-            EditorGUILayout.Space(4);
-            EditorGUILayout.HelpBox(
-                McpEditorText.Tr("Register an MCP client with the configuration below, or run isuzu-unity-cli setup --mcp."),
-                MessageType.Info);
+            if (this.registerReport != null)
+            {
+                EditorGUILayout.HelpBox(this.registerReport, MessageType.None);
+            }
 
             if (this.mcpServer != null && this.mcpServer.IsRunning && this.mcpServer.PortMismatch)
             {
@@ -214,6 +220,112 @@ namespace UnityMCP.Editor.Settings
                 MessageType.None);
         }
 
+        /// <summary>
+        /// The last step: is a client on this machine pointed at this Editor, and if not, do it.
+        /// </summary>
+        /// <remarks>
+        /// Until this row the checklist stopped at "the CLI exists" and left the step that
+        /// actually connects something to a sentence telling the reader to go and run it
+        /// elsewhere. Nothing on the page said whether it had been done.
+        /// </remarks>
+        private void DrawRegistrationRow()
+        {
+            var url = this.mcpServer != null && this.mcpServer.IsRunning ? this.mcpServer.McpUrl : null;
+
+            if (string.IsNullOrEmpty(url))
+            {
+                return;
+            }
+
+            if (!this.registrationLooked)
+            {
+                this.registrationLooked = true;
+                this.registeredIn = McpClientRegistration.Registered(
+                    url, ProjectRoot(), Application.productName);
+            }
+
+            if (this.registeredIn.Count > 0)
+            {
+                var label = string.Format(
+                    McpEditorText.Tr("Registered in {0} client configuration(s)"), this.registeredIn.Count);
+
+                if (this.DrawCheckRow(true, label, McpEditorText.Tr("Refresh")))
+                {
+                    this.registrationLooked = false;
+                    this.registerReport = string.Join("\n", this.registeredIn);
+                }
+
+                return;
+            }
+
+            // Without the CLI the row can still say what is missing, which is the part the page
+            // never said. Registering needs the CLI, so that button waits for it.
+            if (this.cliPath == null)
+            {
+                this.DrawCheckRow(false, McpEditorText.Tr("No MCP client points at this Editor"), string.Empty);
+                return;
+            }
+
+            if (this.DrawCheckRow(
+                    false, McpEditorText.Tr("No MCP client points at this Editor"), McpEditorText.Tr("Register")))
+            {
+                this.registerReport = RunSetup(this.cliPath, ProjectRoot());
+                this.registrationLooked = false;
+            }
+        }
+
+        /// <summary>The Unity project folder, which is the parent of Assets.</summary>
+        private static string ProjectRoot()
+        {
+            var assets = Application.dataPath;
+            var parent = Directory.GetParent(assets);
+            return parent == null ? string.Empty : parent.FullName;
+        }
+
+        /// <summary>Runs the CLI's own registration and returns what it said.</summary>
+        /// <remarks>
+        /// The CLI is asked to do this rather than the Editor writing the files itself: it already
+        /// knows every client's format, where each configuration lives and how to leave the rest
+        /// of the file alone, and two implementations of that would drift.
+        /// </remarks>
+        private static string RunSetup(string cli, string projectRoot)
+        {
+            try
+            {
+                var start = new ProcessStartInfo
+                {
+                    FileName = cli,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    WorkingDirectory = projectRoot.Length > 0 ? projectRoot : Path.GetTempPath(),
+                };
+
+                start.ArgumentList.Add("setup");
+                start.ArgumentList.Add("--mcp");
+
+                using (var process = Process.Start(start))
+                {
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+
+                    process.WaitForExit(30000);
+
+                    var said = (output + error).Trim();
+
+                    return said.Length > 0
+                        ? said
+                        : McpEditorText.Tr("setup --mcp finished without saying anything.");
+                }
+            }
+            catch (Exception e)
+            {
+                return string.Format(
+                    McpEditorText.Tr("Could not run {0}: {1}"), cli, e.Message);
+            }
+        }
+
         /// <summary>One checklist row. Returns true on the frame its button is pressed.</summary>
         private bool DrawCheckRow(bool done, string label, string button)
         {
@@ -221,7 +333,11 @@ namespace UnityMCP.Editor.Settings
             GUILayout.Label(done ? "✓" : "✗", GUILayout.Width(16));
             GUILayout.Label(label);
             GUILayout.FlexibleSpace();
-            var pressed = GUILayout.Button(button, GUILayout.Width(90));
+
+            // An empty label means the row has nothing to offer yet, and a blank button would
+            // read as one that does nothing.
+            var pressed = button.Length > 0 && GUILayout.Button(button, GUILayout.Width(90));
+
             EditorGUILayout.EndHorizontal();
             return pressed;
         }
@@ -268,6 +384,8 @@ namespace UnityMCP.Editor.Settings
             }
             EditorGUILayout.EndHorizontal();
 
+            this.DrawToolGroups();
+
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(McpEditorText.Tr("Configuration for"), GUILayout.Width(LabelWidth));
             this.snippetIndex = EditorGUILayout.Popup(this.snippetIndex, SnippetLabels);
@@ -293,9 +411,95 @@ namespace UnityMCP.Editor.Settings
                 MessageType.Info);
         }
 
+        /// <summary>Lets the reader choose which groups a generated configuration asks for.</summary>
+        /// <remarks>
+        /// The endpoint has taken <c>?group=</c> all along and nothing wrote it, so every client
+        /// loaded all of the tools. The count beside the field is the point of the control: the
+        /// number is what the client pays on every request for the rest of the conversation.
+        /// </remarks>
+        private void DrawToolGroups()
+        {
+            var settings = McpSettings.instance;
+            var chosen = McpToolGroups.Parse(settings.toolGroups, out _);
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(McpEditorText.Tr("Tool groups"), GUILayout.Width(LabelWidth));
+
+            var mask = 0;
+            for (var i = 0; i < McpToolGroups.Known.Length; i++)
+            {
+                if (chosen.Contains(McpToolGroups.Known[i]))
+                {
+                    mask |= 1 << i;
+                }
+            }
+
+            var picked = EditorGUILayout.MaskField(mask, McpToolGroups.Known);
+
+            if (picked != mask)
+            {
+                var names = new List<string>();
+                for (var i = 0; i < McpToolGroups.Known.Length; i++)
+                {
+                    if ((picked & (1 << i)) != 0)
+                    {
+                        names.Add(McpToolGroups.Known[i]);
+                    }
+                }
+
+                // Everything selected is the same set as nothing selected, and the shorter URL
+                // is the one to hand out.
+                settings.toolGroups = names.Count == McpToolGroups.Known.Length
+                    ? string.Empty
+                    : string.Join(",", names);
+                settings.Save();
+            }
+
+            GUILayout.Label(
+                string.Format(McpEditorText.Tr("{0} tools"), this.ToolCount()),
+                EditorStyles.miniLabel,
+                GUILayout.Width(70));
+            EditorGUILayout.EndHorizontal();
+
+            if (string.IsNullOrEmpty(settings.toolGroups))
+            {
+                EditorGUILayout.HelpBox(
+                    McpEditorText.Tr("Every tool is offered. A client pays for each one's description on every request, so narrow this to the groups the client actually needs."),
+                    MessageType.None);
+            }
+        }
+
+        /// <summary>How many tools the current selection offers.</summary>
+        private int ToolCount()
+        {
+            var groups = McpToolGroups.Parse(McpSettings.instance.toolGroups, out _);
+
+            try
+            {
+                return ToolCatalog.Build().Select(groups.Count == 0 ? null : groups).Count();
+            }
+            catch (Exception)
+            {
+                // Building the catalog runs the definition loader, and a broken definition file
+                // is the reader's problem to fix elsewhere rather than a reason for this row to
+                // throw while the window draws.
+                return 0;
+            }
+        }
+
+        /// <summary>The MCP URL with the chosen groups on it.</summary>
+        private string NarrowedUrl()
+        {
+            var groups = McpSettings.instance.toolGroups;
+
+            return string.IsNullOrEmpty(groups)
+                ? this.mcpServer.McpUrl
+                : this.mcpServer.McpUrl + "?group=" + Uri.EscapeDataString(groups);
+        }
+
         private string Snippet()
         {
-            var url = this.mcpServer.McpUrl;
+            var url = this.NarrowedUrl();
             var token = this.mcpServer.Token;
 
             switch (this.snippetIndex)

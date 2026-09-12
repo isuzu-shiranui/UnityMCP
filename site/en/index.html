@@ -48,10 +48,10 @@
 
       <p><a href="vcc://vpm/addRepo?url=https%3A%2F%2Funity-mcp.shiranui-isuzu.dev%2Fvpm.json">Add the Unity MCP repository</a></p>
 
-      <p class="code-label">If the link does nothing, add this URL by hand</p>
+      <p class="code-label">If the link does not open, add this URL by hand</p>
       <pre><code>https://unity-mcp.shiranui-isuzu.dev/vpm.json</code></pre>
 
-      <p class="aside">In VCC that is the Add Repository button on the Packages tab of the Settings page. In ALCOM it is the Add Repository button on the Repositories tab of the Packages page. Once the repository is added, Unity MCP appears in the project's package list. If you install this way, skip the first step of route A and of route B and start from the second.</p>
+      <p class="aside">In VCC, paste it into the Add Repository button on the Packages tab of the Settings page. In ALCOM, paste it into the Add Repository button on the Repositories tab of the Packages page. Once the repository is added, Unity MCP appears in the project's package list. If you install this way, skip the first step of route A and of route B and start from the second.</p>
     </div>
   </section>
 
@@ -122,7 +122,7 @@
 
         <li>
           <h3>Ask it something</h3>
-          <p>With the project open in the Unity Editor, write what you want in Claude Desktop. Nothing works while the Editor is closed.</p>
+          <p>With the project open in the Unity Editor, write what you want in Claude Desktop.</p>
         </li>
       </ol>
     </div>
@@ -161,7 +161,7 @@
           <h3>Register your client</h3>
           <p>One line registers the endpoint and the token. You never handle the token yourself.</p>
           <pre><code>isuzu-unity-cli setup --mcp --agent claude-code</code></pre>
-          <p class="aside"><code>--agent</code> takes <code>claude-code</code>, <code>claude-desktop</code>, <code>codex</code>, <code>cursor</code>, <code>gemini</code> or <code>vscode</code>. The Unity Editor has to be running for it to work. Every command is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/cli.md">CLI reference</a>, and the per-client configuration is in <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">connecting an MCP client</a>.</p>
+          <p class="aside"><code>--agent</code> takes <code>claude-code</code>, <code>claude-desktop</code>, <code>codex</code>, <code>cursor</code>, <code>gemini</code> or <code>vscode</code>. The Unity Editor has to be running for this command to work. Every command is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/cli.md">CLI reference</a>, and the per-client configuration is in <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/mcp-clients.md">connecting an MCP client</a>.</p>
         </li>
       </ol>
     </div>
@@ -179,7 +179,7 @@
         <li>Read a material's current values and change them.</li>
         <li>Start and stop Play Mode.</li>
       </ul>
-      <p>The Editor publishes at most 88 tools. The Timeline tools appear only where the Timeline package is installed, the Recorder tools need Recorder and Timeline both, and the test tools need the Test Framework. A project with none of the three publishes 75 tools; with the Test Framework alone, which Unity installs by default, 77. The full list is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/tools.md">tool reference</a>.</p>
+      <p>The Timeline tools appear only where the Timeline package is installed, the Recorder tools need Recorder and Timeline both, and the test tools need the Test Framework. The full list is in the <a href="https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/tools.md">tool reference</a>.</p>
     </div>
   </section>
 

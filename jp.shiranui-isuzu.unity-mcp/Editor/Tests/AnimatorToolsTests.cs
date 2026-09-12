@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 
 using Newtonsoft.Json.Linq;
 
@@ -154,6 +154,223 @@ namespace UnityMCP.Editor.Tests
         private AnimatorStateMachine Root => this.controller.layers[0].stateMachine;
 
         // ── the array-copy trap ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Eleven tools edit a controller and, until this one, none made one — so an empty
+        /// project could reach none of them without execute_code.
+        /// </summary>
+        /// <summary>
+        /// Driving a parameter is a Play Mode act, and asking for it in Edit Mode is a mistake
+        /// worth naming rather than a value silently written somewhere it does not belong.
+        /// </summary>
+        /// <remarks>
+        /// The controller's default and the running Animator's value are different things. Writing
+        /// the default when the caller meant "make the transition fire now" would change the asset
+        /// for every scene using it, which is the opposite of a throwaway test.
+        /// </remarks>
+        [Test]
+        public void DrivingAParameterOutsidePlayModeIsRefusedWithWhereTheDefaultLives()
+        {
+            var go = new GameObject("AnimatorSetParameterTarget");
+
+            try
+            {
+                var thrown = Assert.Throws<McpToolException>(
+                    () => AnimatorEditTools.AnimatorSetParameter(
+                        "/AnimatorSetParameterTarget", "IsWalking", true));
+
+                Assert.That(thrown.Message, Does.Contain("animator_add_parameter"));
+                Assert.That(thrown.Message, Does.Contain("play_mode_play"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void AControllerIsCreatedAndTheEditingToolsThenReachIt()
+        {
+            const string made = Folder + "/Made.controller";
+
+            try
+            {
+                var created = AnimatorEditTools.AnimatorCreate(made);
+
+                Assert.That(created["created"].Value<bool>(), Is.True);
+                Assert.That(created["layer"].ToString(), Is.EqualTo("Base Layer"));
+
+                // The point of creating one is that the rest of the toolset can then act on it.
+                var parameter = AnimatorEditTools.AddParameter(made, null, "IsWalking", "Bool");
+
+                Assert.That(parameter["parameterCount"].Value<int>(), Is.EqualTo(1));
+
+                var thrown = Assert.Throws<McpToolException>(
+                    () => AnimatorEditTools.AnimatorCreate(made));
+
+                Assert.That(thrown.Message, Does.Contain("overwrite"));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        [Test]
+        public void AControllerCanBeHungOnAGameObjectAsItIsCreated()
+        {
+            const string made = Folder + "/Attached.controller";
+            var go = new GameObject("AnimatorCreateTarget");
+
+            try
+            {
+                var created = AnimatorEditTools.AnimatorCreate(made, "/AnimatorCreateTarget");
+
+                Assert.That(created["attachedTo"].ToString(), Is.EqualTo("/AnimatorCreateTarget"));
+
+                var animator = go.GetComponent<Animator>();
+
+                Assert.That(animator, Is.Not.Null, "an Animator was added where there was none");
+                Assert.That(animator.runtimeAnimatorController, Is.Not.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        /// <summary>
+        /// Replacing a controller keeps its file, so what pointed at it still does.
+        /// </summary>
+        /// <remarks>
+        /// Deleting and re-creating gave the .controller a new GUID, and every Animator, prefab
+        /// and override controller holding the old one was left with a missing reference — while
+        /// the reply said nothing but "created".
+        /// </remarks>
+        [Test]
+        public void OverwritingAControllerKeepsItsGuidAndEmptiesIt()
+        {
+            const string made = Folder + "/Replaced.controller";
+
+            try
+            {
+                AnimatorEditTools.AnimatorCreate(made);
+                AnimatorEditTools.AddParameter(made, null, "IsWalking", "Bool");
+
+                var before = AssetDatabase.AssetPathToGUID(made);
+
+                var again = AnimatorEditTools.AnimatorCreate(made, null, true);
+
+                Assert.That(AssetDatabase.AssetPathToGUID(made), Is.EqualTo(before));
+                Assert.That(again["replaced"].Value<bool>(), Is.True);
+
+                var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(made);
+
+                Assert.That(controller.parameters, Is.Empty, "the replacement starts empty");
+                Assert.That(controller.layers.Length, Is.EqualTo(1));
+                Assert.That(controller.layers[0].name, Is.EqualTo("Base Layer"));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        /// <summary>
+        /// A GameObject path that does not resolve costs nothing.
+        /// </summary>
+        /// <remarks>
+        /// The object was looked up after the old controller had already been deleted, so a typo
+        /// in object_path destroyed the asset the call was replacing and then failed.
+        /// </remarks>
+        [Test]
+        public void AnUnresolvableObjectPathLeavesTheExistingControllerAlone()
+        {
+            const string made = Folder + "/Survivor.controller";
+
+            try
+            {
+                AnimatorEditTools.AnimatorCreate(made);
+                AnimatorEditTools.AddParameter(made, null, "Speed", "Float");
+
+                Assert.Throws<McpToolException>(
+                    () => AnimatorEditTools.AnimatorCreate(made, "/NoSuchObjectAnywhere", true));
+
+                var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(made);
+
+                Assert.That(controller, Is.Not.Null, "the controller it was replacing is still there");
+                Assert.That(controller.parameters.Length, Is.EqualTo(1), "and still holds what it held");
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        /// <summary>Replacing a clip keeps its file too, for the same reason.</summary>
+        [Test]
+        public void OverwritingAClipKeepsItsGuid()
+        {
+            const string clip = Folder + "/Replaced.anim";
+
+            try
+            {
+                AnimatorEditTools.AnimationClipCreate(clip, false);
+
+                var before = AssetDatabase.AssetPathToGUID(clip);
+                var again = AnimatorEditTools.AnimationClipCreate(clip, true, true);
+
+                Assert.That(AssetDatabase.AssetPathToGUID(clip), Is.EqualTo(before));
+                Assert.That(again["replaced"].Value<bool>(), Is.True);
+
+                var asset = AssetDatabase.LoadAssetAtPath<AnimationClip>(clip);
+
+                Assert.That(asset.name, Is.EqualTo("Replaced"), "and keeps its own name");
+                Assert.That(AnimationUtility.GetAnimationClipSettings(asset).loopTime, Is.True);
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(clip);
+            }
+        }
+
+        /// <summary>A state needs a motion, and nothing else here made one.</summary>
+        [Test]
+        public void AClipIsCreatedAndAStateCanHoldIt()
+        {
+            const string clip = Folder + "/Made.anim";
+            const string made = Folder + "/WithClip.controller";
+
+            try
+            {
+                var created = AnimationClipCreateLooping(clip);
+
+                Assert.That(created["created"].Value<bool>(), Is.True);
+                Assert.That(created["loop"].Value<bool>(), Is.True);
+
+                var asset = AssetDatabase.LoadAssetAtPath<AnimationClip>(clip);
+
+                Assert.That(asset, Is.Not.Null);
+                Assert.That(AnimationUtility.GetAnimationClipSettings(asset).loopTime, Is.True);
+
+                AnimatorEditTools.AnimatorCreate(made);
+
+                var state = AnimatorEditTools.AddState(made, null, "Base Layer", "Idle", clip);
+
+                Assert.That(state["state"].ToString(), Is.EqualTo("Idle"));
+            }
+            finally
+            {
+                AssetDatabase.DeleteAsset(clip);
+                AssetDatabase.DeleteAsset(made);
+            }
+        }
+
+        private static JObject AnimationClipCreateLooping(string path)
+        {
+            return AnimatorEditTools.AnimationClipCreate(path, true);
+        }
 
         [Test]
         public void TheLayerAndStateArraysAreCopiesSoWritingThroughThemDoesNothing()
@@ -510,7 +727,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionWithConditions()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "Count", ["mode"] = "Equals", ["threshold"] = 3 },
             };
@@ -540,7 +757,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionRefusesAModeTheParameterCannotAnswer()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "Toggle", ["mode"] = "Greater", ["threshold"] = 1 },
             };
@@ -555,7 +772,7 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void AddingATransitionRefusesAnUnknownParameter()
         {
-            var conditions = new JArray
+            var conditions = new[]
             {
                 new JObject { ["parameter"] = "NoSuchParameter", ["mode"] = "If" },
             };
@@ -710,6 +927,103 @@ namespace UnityMCP.Editor.Tests
             Assert.That(this.controller.layers[1].stateMachine.states.Length, Is.EqualTo(1));
 
             Undo.ClearAll();
+        }
+
+        /// <summary>
+        /// A clip gets its motion here rather than through execute_code.
+        /// </summary>
+        /// <remarks>
+        /// animation_clip_create leaves the asset empty, and a hands-on run reached for
+        /// AnimationUtility through execute_code to fill it, which was the only snippet in that
+        /// whole run. A clip's length is not a field: it follows from the keys.
+        /// </remarks>
+        [Test]
+        public void CurvesGoIntoAClipThroughANamedTool()
+        {
+            var reply = AnimatorEditTools.AnimationClipWriteCurves(
+                ClipPath,
+                new[]
+                {
+                    new JObject
+                    {
+                        ["target"] = "Hips",
+                        ["type"] = "Transform",
+                        ["property"] = "m_LocalPosition.y",
+                        ["keys"] = new JArray
+                        {
+                            new JObject { ["time"] = 0f, ["value"] = 1f },
+                            new JObject { ["time"] = 0.4f, ["value"] = 1.08f },
+                            new JObject { ["time"] = 0.8f, ["value"] = 1f },
+                        },
+                    },
+                },
+                frameRate: 60f,
+                replace: true);
+
+            Assert.That(reply["written"].Value<int>(), Is.EqualTo(1));
+            Assert.That(reply["length"].Value<float>(), Is.EqualTo(0.8f).Within(0.001f),
+                "the length follows from the keys");
+
+            var bindings = AnimationUtility.GetCurveBindings(this.clip);
+
+            Assert.That(bindings.Length, Is.EqualTo(1));
+            Assert.That(bindings[0].path, Is.EqualTo("Hips"));
+            Assert.That(bindings[0].propertyName, Is.EqualTo("m_LocalPosition.y"));
+
+            var curve = AnimationUtility.GetEditorCurve(this.clip, bindings[0]);
+
+            Assert.That(curve.keys.Length, Is.EqualTo(3));
+            Assert.That(curve.Evaluate(0.4f), Is.EqualTo(1.08f).Within(0.001f));
+        }
+
+        /// <summary>
+        /// A curve that cannot be resolved leaves the clip as it was.
+        /// </summary>
+        /// <remarks>
+        /// Writing curve by curve would leave a clip holding the first half of a motion and no
+        /// sign of the rest, which reads as the tool having worked.
+        /// </remarks>
+        [Test]
+        public void NoCurveIsWrittenWhenOneOfThemDoesNotResolve()
+        {
+            AnimatorEditTools.AnimationClipWriteCurves(
+                ClipPath,
+                new[]
+                {
+                    new JObject
+                    {
+                        ["target"] = "",
+                        ["type"] = "Transform",
+                        ["property"] = "m_LocalScale.x",
+                        ["keys"] = new JArray { new JObject { ["time"] = 0f, ["value"] = 1f } },
+                    },
+                },
+                replace: true);
+
+            var before = AnimationUtility.GetCurveBindings(this.clip).Length;
+
+            Assert.Throws<McpToolException>(() => AnimatorEditTools.AnimationClipWriteCurves(
+                ClipPath,
+                new[]
+                {
+                    new JObject
+                    {
+                        ["target"] = "Hips",
+                        ["type"] = "Transform",
+                        ["property"] = "m_LocalPosition.y",
+                        ["keys"] = new JArray { new JObject { ["time"] = 0f, ["value"] = 1f } },
+                    },
+                    new JObject
+                    {
+                        ["target"] = "Hips",
+                        ["type"] = "NoSuchComponentType",
+                        ["property"] = "m_LocalPosition.x",
+                        ["keys"] = new JArray { new JObject { ["time"] = 0f, ["value"] = 0f } },
+                    },
+                }));
+
+            Assert.That(AnimationUtility.GetCurveBindings(this.clip).Length, Is.EqualTo(before),
+                "the first curve of the pair must not have been written on its own");
         }
     }
 }

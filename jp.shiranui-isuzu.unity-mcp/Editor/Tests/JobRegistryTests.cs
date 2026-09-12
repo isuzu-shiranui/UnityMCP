@@ -49,6 +49,18 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void AnOldRegistryIdCannotIdentifyANewRegistrysWork()
+        {
+            var oldId = this.registry.Track(McpMainThreadDispatcher.CreateDeferred(), "execute_code");
+            var replacement = new McpJobRegistry();
+            var newId = replacement.Track(McpMainThreadDispatcher.CreateDeferred(), "execute_code");
+
+            Assert.That(newId, Is.Not.EqualTo(oldId));
+            Assert.That(replacement.TryGet(oldId, out _), Is.False);
+            Assert.That(replacement.TryGet(newId, out _), Is.True);
+        }
+
+        [Test]
         public void EmptyLabelStillProducesAnId()
         {
             var id = this.registry.Track(this.dispatcher.Submit(() => new JObject()), "///");

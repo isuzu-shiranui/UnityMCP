@@ -10,12 +10,14 @@
 param(
     [string] $Project = '',
     [string] $Cli = '',
-    [int] $Iterations = 30,
-    [int] $Warmup = 3,
+    [ValidateRange(1, 100000)] [int] $Iterations = 30,
+    [ValidateRange(0, 100000)] [int] $Warmup = 3,
     [string] $OutJson = (Join-Path $env:TEMP 'bench-cli-vs-mcp.json'),
-    [switch] $DryRun
+    [switch] $DryRun,
+    [switch] $SelfTest
 )
 
+$ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 # The CLI writes UTF-8; PowerShell decodes child output with the console code page, which
 # turns every non-ASCII character in a tool description into a different one.
@@ -176,7 +178,11 @@ function Invoke-RestCatalog {
 function Invoke-McpInitialize {
     param($Client, [string]$McpUrl)
     $body = '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bench-cli-vs-mcp","version":"1.0.0"}}}'
-    Send-BenchRequest $Client 'POST' $McpUrl $body | Out-Null
+    $response = Send-BenchRequest $Client 'POST' $McpUrl $body
+    $reply = $response.Body | ConvertFrom-Json
+    if ($response.Status -ne 200 -or $reply.error -or $reply.result.protocolVersion -ne '2025-06-18') {
+        throw 'MCP initialization failed.'
+    }
 }
 
 function Invoke-McpCall {
@@ -235,15 +241,39 @@ function ConvertTo-CanonicalJson {
     return "$Node"
 }
 
-# The MCP structuredContent carries pagination fields (truncated/next) verbatim; the REST/CLI
-# envelope hoists those two keys out of `result` onto the envelope itself. Stripped here so the
-# comparison is about the data, not where each transport happens to put two bookkeeping keys.
-function Remove-PaginationKeys {
+# REST hoists pagination metadata onto its envelope. Reconstruct the MCP payload so
+# pagination remains part of the comparison; only an absent/null next is equivalent.
+function Get-EnvelopePayload {
+    param($Envelope)
+    $payload = $Envelope.result
+    foreach ($key in @('truncated', 'next')) {
+        $property = $Envelope.PSObject.Properties[$key]
+        if ($null -ne $property -and $null -ne $property.Value) {
+            $payload | Add-Member -NotePropertyName $key -NotePropertyValue $property.Value -Force
+        }
+    }
+    return $payload
+}
+
+function Get-McpPayload {
+    param($Envelope)
+    if ($Envelope.error -or $Envelope.result.isError) { throw 'MCP returned a protocol or tool error.' }
+    $content = @($Envelope.result.content)
+    if ($content.Count -ne 1 -or $content[0].type -ne 'text') {
+        throw 'Expected exactly one JSON text content block for the benchmark tool.'
+    }
+    return ($content[0].text | ConvertFrom-Json)
+}
+
+# Each hierarchy request allocates a new snapshot identifier; all other fields,
+# including pagination, must agree. Normalize only the top-level snapshotId.
+function Normalize-Payload {
     param($Node)
     if ($Node -isnot [System.Management.Automation.PSCustomObject]) { return $Node }
     $clean = [ordered]@{}
     foreach ($p in $Node.PSObject.Properties) {
-        if ($p.Name -eq 'truncated' -or $p.Name -eq 'next') { continue }
+        if ($p.Name -eq 'snapshotId') { $clean[$p.Name] = '<snapshot>'; continue }
+        if ($p.Name -eq 'next' -and $null -eq $p.Value) { continue }
         $clean[$p.Name] = $p.Value
     }
     return [PSCustomObject]$clean
@@ -251,15 +281,35 @@ function Remove-PaginationKeys {
 
 function Test-Equivalent {
     param($A, $B, [string]$Label)
-    $canonA = ConvertTo-CanonicalJson (Remove-PaginationKeys $A)
-    $canonB = ConvertTo-CanonicalJson (Remove-PaginationKeys $B)
-    if ($canonA -ne $canonB) {
+    $canonA = ConvertTo-CanonicalJson (Normalize-Payload $A)
+    $canonB = ConvertTo-CanonicalJson (Normalize-Payload $B)
+    if ($canonA -cne $canonB) {
         Write-Host "EQUIVALENCE FAILED: $Label" -ForegroundColor Red
         Write-Host "  A: $canonA"
         Write-Host "  B: $canonB"
         return $false
     }
     return $true
+}
+
+# Offline regression fixtures: no Editor, executable, or descriptor is needed.
+function Test-BenchFixtures {
+    $rest = '{"status":"success","result":{"snapshotId":"one","items":[{"name":"Player"}]},"truncated":false}' | ConvertFrom-Json
+    $mcp = '{"result":{"content":[{"type":"text","text":"{\"snapshotId\":\"two\",\"items\":[{\"name\":\"Player\"}],\"truncated\":false,\"next\":null}"}]}}' | ConvertFrom-Json
+    $expected = ConvertTo-CanonicalJson (Normalize-Payload (Get-EnvelopePayload $rest))
+    $actual = ConvertTo-CanonicalJson (Normalize-Payload (Get-McpPayload $mcp))
+    if ($expected -cne $actual) { throw 'Fixture: equivalent MCP text and REST pagination differ.' }
+    $changed = Get-McpPayload $mcp
+    $changed.truncated = $true
+    if ($expected -ceq (ConvertTo-CanonicalJson (Normalize-Payload $changed))) { throw 'Fixture: pagination mismatch was ignored.' }
+    $changed = Get-McpPayload $mcp
+    $changed.items[0].name = 'player'
+    if ($expected -ceq (ConvertTo-CanonicalJson (Normalize-Payload $changed))) { throw 'Fixture: case-sensitive payload mismatch was ignored.' }
+    $rejected = $false
+    try { Get-McpPayload ('{"result":{"isError":true,"content":[{"type":"text","text":"{}"}]}}' | ConvertFrom-Json) | Out-Null }
+    catch { $rejected = $true }
+    if (-not $rejected) { throw 'Fixture: MCP tool error was accepted.' }
+    Write-Host 'Benchmark fixtures passed.'
 }
 
 # -- Stats ----------------------------------------------------------------
@@ -282,6 +332,7 @@ function Get-Stats {
 
 $exitCode = 0
 try {
+    if ($SelfTest) { Test-BenchFixtures; exit 0 }
     $cliPath = $null
     $cliError = $null
     try { $cliPath = Resolve-CliPath $Cli }
@@ -324,6 +375,8 @@ try {
     try { $reachable = ((Send-BenchRequest $client 'GET' "$endpoint/health" $null).Status -eq 200) } catch { $reachable = $false }
     if (-not $reachable) { throw "Editor at $endpoint is unreachable." }
 
+    Invoke-McpInitialize $client $mcpUrl
+
     # -- Equivalence pass (once per step, before any timing) --
     $equivalenceOk = $true
     foreach ($step in $Steps) {
@@ -335,12 +388,12 @@ try {
         $mcpObj = $mcpRes.Body | ConvertFrom-Json
         $cliObj = $cliRes.Stdout | ConvertFrom-Json
 
-        if ($restObj.status -ne 'success') { throw "REST call to $($step.Tool) failed: $($restObj.error.message)" }
-        if ($mcpObj.error) { throw "MCP call to $($step.Tool) failed: $($mcpObj.error.message)" }
-        if ($cliObj.status -ne 'success') { throw "CLI call to $($step.Tool) failed: exit $($cliRes.ExitCode)" }
+        if ($restRes.Status -ne 200 -or $restObj.status -ne 'success') { throw "REST call to $($step.Tool) failed: $($restObj.error.message)" }
+        if ($mcpRes.Status -ne 200 -or $mcpObj.error -or $mcpObj.result.isError) { throw "MCP call to $($step.Tool) failed: $($mcpObj.error.message)" }
+        if ($cliRes.ExitCode -ne 0 -or $cliObj.status -ne 'success') { throw "CLI call to $($step.Tool) failed: exit $($cliRes.ExitCode)" }
 
-        if (-not (Test-Equivalent $restObj.result $mcpObj.result.structuredContent "$($step.Name): REST result vs MCP structuredContent")) { $equivalenceOk = $false }
-        if (-not (Test-Equivalent $restObj.result $cliObj.result "$($step.Name): REST result vs CLI stdout")) { $equivalenceOk = $false }
+        if (-not (Test-Equivalent (Get-EnvelopePayload $restObj) (Get-McpPayload $mcpObj) "$($step.Name): REST result vs MCP text JSON")) { $equivalenceOk = $false }
+        if (-not (Test-Equivalent (Get-EnvelopePayload $restObj) (Get-EnvelopePayload $cliObj) "$($step.Name): REST result vs CLI stdout")) { $equivalenceOk = $false }
     }
 
     $restCatalog = Invoke-RestCatalog $client $endpoint
@@ -350,10 +403,13 @@ try {
     $cliCatalogObj = ($cliCatalog.Stdout | ConvertFrom-Json).result
     $mcpCatalogObj = ($mcpCatalog.Body | ConvertFrom-Json).result
 
-    if (-not (Test-Equivalent $restCatalogObj $cliCatalogObj 'tools: REST catalog vs CLI catalog')) { $equivalenceOk = $false }
+    if ($restCatalog.Status -ne 200 -or $cliCatalog.ExitCode -ne 0 -or $mcpCatalog.Status -ne 200 -or $null -eq $restCatalogObj.tools -or $null -eq $mcpCatalogObj.tools) {
+        throw 'A catalog request failed.'
+    }
+    if (-not (Test-Equivalent $restCatalogObj $cliCatalogObj 'tools: complete REST catalog vs CLI catalog')) { $equivalenceOk = $false }
     $restNames = ($restCatalogObj.tools | ForEach-Object { $_.name } | Sort-Object) -join ','
     $mcpNames = ($mcpCatalogObj.tools | ForEach-Object { $_.name } | Sort-Object) -join ','
-    if ($restNames -ne $mcpNames) {
+    if ($restNames -cne $mcpNames) {
         Write-Host 'EQUIVALENCE FAILED: tools: REST catalog names vs MCP tools/list names' -ForegroundColor Red
         $equivalenceOk = $false
     }
@@ -376,15 +432,13 @@ try {
     }
     $isSuccessFn = @{
         cli  = { param($r) $r.ExitCode -eq 0 }
-        mcp  = { param($r) $r.Status -eq 200 }
-        rest = { param($r) $r.Status -eq 200 }
+        mcp  = { param($r) $o = $r.Body | ConvertFrom-Json; $r.Status -eq 200 -and $null -eq $o.error -and $null -ne $o.result -and -not $o.result.isError }
+        rest = { param($r) $o = $r.Body | ConvertFrom-Json; $r.Status -eq 200 -and $o.status -eq 'success' }
     }
 
     $results = @{}
     $gc = @{}
     foreach ($path in $Paths) { $results[$path] = @{}; foreach ($s in $StepNames) { $results[$path][$s] = New-Object System.Collections.Generic.List[double] } }
-
-    Invoke-McpInitialize $client $mcpUrl
 
     foreach ($path in $Paths) {
         for ($i = 0; $i -lt $Warmup; $i++) {
@@ -396,10 +450,12 @@ try {
         for ($i = 0; $i -lt $Iterations; $i++) {
             foreach ($step in $Steps) {
                 $r = & $callFn[$path] $step.Tool $step.ArgsJson
-                if (& $isSuccessFn[$path] $r) { $results[$path][$step.Name].Add($r.Ms) }
+                if (-not (& $isSuccessFn[$path] $r)) { throw "Timed $path/$($step.Name) request failed." }
+                $results[$path][$step.Name].Add($r.Ms)
             }
             $r = & $catalogFn[$path]
-            if (& $isSuccessFn[$path] $r) { $results[$path]['tools'].Add($r.Ms) }
+            if (-not (& $isSuccessFn[$path] $r)) { throw "Timed $path/tools request failed." }
+            $results[$path]['tools'].Add($r.Ms)
         }
         $after = Get-GcSnapshot $client $endpoint
 

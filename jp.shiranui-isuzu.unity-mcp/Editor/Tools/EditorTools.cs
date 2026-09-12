@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Core.Attributes;
@@ -26,8 +26,14 @@ namespace UnityMCP.Editor.Tools
             "window first, which raises a docked tab over whatever the person at the Editor was " +
             "looking at. An MCP client receives the picture as an image; the CLI writes it to " +
             "a file and prints the path, because the same picture costs about ninety times as " +
-            "much read out of a terminal as base64 than it does as an image.",
-            Idempotency = McpIdempotency.Safe)]
+            "much read out of a terminal as base64 than it does as an image. A picture is still " +
+            "the most expensive thing here: one at the default size is around 40,000 tokens, so " +
+            "four of them outweigh every other call of a session put together. Lower 'max_size' " +
+            "when the question is about layout rather than detail, and read the numbers with " +
+            "inspect_read or reflect_read when a number would answer it. Name the object the " +
+            "picture is about in 'focus' so a camera pointed somewhere else is refused rather " +
+            "than paid for.",
+            Idempotency = McpIdempotency.Unsafe)]
         public static JObject CaptureScreenshot(
             [McpArg("view", "What to capture. 'game' and 'scene' render through the camera. " +
                             "'game_view_window' and 'scene_view_window' grab those windows off the " +
@@ -45,14 +51,26 @@ namespace UnityMCP.Editor.Tools
                                  "Use this when the picture is going to render_compare rather than " +
                                  "to a human. Any missing directories are created, and an existing " +
                                  "file at this path is overwritten.")]
-            string savePath = null)
+            string savePath = null,
+            [McpArg("camera", "Scene path of the camera to render 'game' through. Omit to use " +
+                              "Camera.main, which is not necessarily the one you just made.")]
+            string camera = null,
+            [McpArg("focus", "Scene path of the object the picture is supposed to show. The call " +
+                             "is refused when that object is outside what the camera sees, instead " +
+                             "of returning a valid picture of somewhere else; otherwise the reply " +
+                             "says where in the frame it landed, as fractions from 0 to 1. Takes " +
+                             "the 'game' and 'scene' views only: a panel view is captured from the " +
+                             "window rather than rendered through a camera.")]
+            string focus = null)
         {
             return ScreenshotCapture.Capture(ToolArgs.Of(
                 ("view", view),
                 ("maxSize", maxSize),
                 ("width", width),
                 ("height", height),
-                ("savePath", savePath)));
+                ("savePath", savePath),
+                ("camera", camera),
+                ("focus", focus)));
         }
 
         [McpTool(
@@ -89,7 +107,13 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "menu_execute",
             "Invoke an Editor menu item by its full path, e.g. 'Assets/Refresh'. " +
-            "Menu items can do anything the menu can, including irreversible operations.",
+            "Menu items can do anything the menu can, including irreversible operations. " +
+            "Success means the item was found and invoked, not that what it started has " +
+            "finished: an item that opens a dialog or leaves a rename field waiting reports " +
+            "success while the work is still pending, so check for the result rather than " +
+            "trusting the reply. Prefer a named tool where one exists — material_create, " +
+            "animator_create and animation_clip_create all cover Assets/Create items that need " +
+            "the rename field dismissed before the asset exists.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject MenuExecute(
             [McpArg("menu_item", "Full menu path, e.g. 'Window/General/Console'.")]

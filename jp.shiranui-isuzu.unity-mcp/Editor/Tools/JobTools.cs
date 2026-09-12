@@ -34,8 +34,11 @@ namespace UnityMCP.Editor.Tools
             {
                 throw new McpToolException(
                     "job_not_found",
-                    $"No job '{jobId}'. Jobs are kept for ten minutes after they finish, and none survive a " +
-                    "domain reload; if the Editor recompiled or entered Play Mode since, the work was interrupted.",
+                    $"No job '{jobId}'. A record is kept for ten minutes after a job finishes and none " +
+                    "survives a domain reload, so a job that ran to completion and one that a reload cut " +
+                    "short both end up here and cannot be told apart from this side. Read back whatever " +
+                    "the work would have changed. A job whose own work reloads the domain - a settings " +
+                    "write that saves assets, a recompile, entering Play Mode - reaches this every time.",
                     404);
             }
 

@@ -15,6 +15,7 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 const string Package = "jp.shiranui-isuzu.unity-mcp";
 
@@ -44,8 +45,37 @@ foreach (var (relative, full) in sources)
     // The path goes in too: moving a file changes what compiles even when no line does.
     hash.AppendData(Encoding.UTF8.GetBytes(relative));
     hash.AppendData(separator);
-    hash.AppendData(WithoutCarriageReturns(File.ReadAllBytes(full)));
+    var content = File.ReadAllBytes(full);
+    hash.AppendData(full.EndsWith(".dll", StringComparison.Ordinal) ? content : WithoutCarriageReturns(content));
     hash.AppendData(separator);
+}
+
+// Manifest fields that change compilation/dependency resolution. A release version or a
+// documentation URL alone does not invalidate a run against the same executable inputs.
+using (var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(packageRoot, "package.json"))))
+{
+    foreach (var key in new[] { "unity", "unityRelease", "dependencies" })
+    {
+        hash.AppendData(Encoding.UTF8.GetBytes(key));
+        hash.AppendData(separator);
+        if (manifest.RootElement.TryGetProperty(key, out var value))
+        {
+            using var normalized = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(normalized))
+            {
+                if (key == "dependencies")
+                {
+                    writer.WriteStartObject();
+                    foreach (var property in value.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                        property.WriteTo(writer);
+                    writer.WriteEndObject();
+                }
+                else value.WriteTo(writer);
+            }
+            hash.AppendData(normalized.ToArray());
+        }
+        hash.AppendData(separator);
+    }
 }
 
 Console.WriteLine(Convert.ToHexStringLower(hash.GetHashAndReset()));
@@ -63,7 +93,11 @@ void Collect(DirectoryInfo directory)
             Collect(child);
         }
         else if (entry.Name.EndsWith(".cs", StringComparison.Ordinal) ||
-                 entry.Name.EndsWith(".asmdef", StringComparison.Ordinal))
+                 entry.Name.EndsWith(".asmdef", StringComparison.Ordinal) ||
+                 entry.Name.EndsWith(".dll", StringComparison.Ordinal) ||
+                 entry.Name.EndsWith(".cs.meta", StringComparison.Ordinal) ||
+                 entry.Name.EndsWith(".asmdef.meta", StringComparison.Ordinal) ||
+                 entry.Name.EndsWith(".dll.meta", StringComparison.Ordinal))
         {
             sources.Add((Path.GetRelativePath(root, entry.FullName).Replace('\\', '/'), entry.FullName));
         }

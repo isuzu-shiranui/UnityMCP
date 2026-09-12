@@ -57,19 +57,27 @@ namespace UnityMCP.Editor.Tools
             [McpArg("normalized", "Treat from/to as fractions 0..1 of the window's full size, tab " +
                                   "bar included, then use the result as a content-area point.")]
             bool normalized = false,
-            [McpArg("steps", "How many MouseDrag events a drag is split into.")]
+            [McpArg("steps", "How many MouseDrag events a drag is split into. Maximum 1000.")]
             int steps = 30,
-            [McpArg("frames_per_step", "Editor frames between drag steps. 0 sends the whole drag in one frame.")]
+            [McpArg("frames_per_step", "Editor frames between drag steps. 0 sends the whole drag in one frame. Maximum 1000.")]
             int framesPerStep = 1,
             [McpArg("modifiers", "Modifier keys held: any of alt, ctrl, shift, cmd.")]
             string[] modifiers = null,
             [McpArg("scroll_delta", "[x, y] wheel delta for scroll. Positive y scrolls down / zooms out in the Scene View.")]
             double[] scrollDelta = null,
-            [McpArg("click_count", "Click count for click: 2 for a double-click.")]
+            [McpArg("click_count", "Click count for click: 2 for a double-click. Maximum 100.")]
             int clickCount = 1,
             [McpArg("restore_focus", "Give focus back to the window that had it before the input was sent.")]
             bool restoreFocus = true)
         {
+            // Named one at a time, and frames_per_step among them: the work a drag schedules is
+            // steps multiplied by frames_per_step, so capping one of the two caps nothing.
+            if (clickCount > 100)
+                throw new McpToolException("invalid_params", "click_count must not exceed 100.");
+            if (steps > 1000)
+                throw new McpToolException("invalid_params", "steps must not exceed 1000.");
+            if (framesPerStep > 1000)
+                throw new McpToolException("invalid_params", "frames_per_step must not exceed 1000.");
             var clock = Stopwatch.StartNew();
             var target = ResolveTarget(view);
             var mods = InputEventRecord.ParseModifiers(modifiers);

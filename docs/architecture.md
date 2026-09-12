@@ -40,6 +40,21 @@ MCP エンドポイントも CLI の `/tools/<name>` も、同じ `ToolCatalog` 
 
 フォーカスの無い Editor は、メインループを約 100 ms 間隔でしか回しません。サーバーは要求が待っている間だけ Editor を起こすので、通常は数 ms で処理されます。`/health` の `loopWaker` が `on-demand` / `always` / `unavailable` のどれかを示します。
 
+### `[McpTool]` の属性
+
+| プロパティ | 既定値 | 意味 |
+|---|---|---|
+| `Idempotency` | `Unsafe` | 接続失敗時に自動リトライしてよいか。読み取り専用なら `Safe` |
+| `MainThread` | `true` | Editor メインスレッドが必要か。`false` なら Editor が固まっていても応答できる（Unity API を触らないツール限定） |
+| `Destructive` | `false` | `true` なら `confirm: true` が無いと実行せず、`dry_run` に対応 |
+| `UndoGroup` | `null` | 設定すると呼び出し 1 回が Undo 1 操作にまとまる |
+| `Examples` | なし | ツールと一緒に公開する呼び出し例。モデルが引数を決める前に読みます |
+| `AlwaysLoad` | `false` | ツール検索を経ずに常に文脈へ載せます。ほぼ毎回のセッションが最初に使うツールにだけ付けてください |
+| `MaxResultSizeChars` | `0`（上限なし） | MCP で返す応答の上限（文字数）。超えた応答は切り詰めずにエラーとして返します |
+| `Group` | 名前の接頭辞から | `tools/list` が絞り込みに使うグループ。接頭辞とグループが一致しないときに指定します |
+
+ツール名は `^[a-z][a-z0-9_]{0,63}$` です。説明文は、モデルがそのツールを選ぶ唯一の手がかりになります。何をするかだけでなく、どういうときに使うかを書いてください。
+
 ## 設定（Preferences > Unity MCP）
 
 この設定は Unity の Preferences フォルダーに保存され、その PC の Unity すべてで共有します。プロジェクトごとの設定ではありません。`httpPort` に正の値を入れると、他のプロジェクトも同じポートを試すことになります。既定値は、その PC でまだ一度も保存していない場合の値です。
@@ -77,4 +92,4 @@ isuzu-unity-cli call test_results --include_passed true --limit 200
 
 Unity 側のテストを走らせるには、プロジェクトの `Packages/manifest.json` に `"testables": ["jp.shiranui-isuzu.unity-mcp"]` が必要です。
 
-EditMode スイートは Unity 2022.3.22f1 / 6000.0.35f1 / 6000.5.10f1 で検証しています。
+EditMode スイートは Unity 6000.0.x で実行し、その記録を `scripts/attested/<ソースのハッシュ>.json` に残します。覆ったソースの名前を記録のファイル名にしてあるので、2 つのブランチがそれぞれ実行を記録しても衝突しません。CI はハッシュを計算して該当するファイルを探すだけで、突き合わせもマージも発生しません。

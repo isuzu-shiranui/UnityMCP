@@ -32,6 +32,11 @@
       "name": "com.unity.timeline",
       "expression": "1.0.0",
       "define": "UNITY_TIMELINE"
+    },
+    {
+      "name": "com.unity.recorder",
+      "expression": "4.0.0",
+      "define": "UNITY_RECORDER_ENCODER_SETTINGS"
     }
   ],
   "noEngineReferences": false

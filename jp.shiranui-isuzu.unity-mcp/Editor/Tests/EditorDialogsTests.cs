@@ -105,6 +105,63 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void UnitysOwnBusyWindowIsNotReportedAsSomethingToAnswer()
+        {
+            var busy = new EditorDialogs.DialogInfo
+            {
+                Handle = "1234",
+                Title = "Hold on (busy for 19:30)...",
+                Message = "Waiting for Unity's code to finish executing. Application.Message",
+                Buttons = new[] { "Cancel", "Skip Transcoding" },
+            };
+
+            var notice = MainThreadWatch.RunningNotice(busy, 0);
+
+            Assert.That(notice, Does.Contain("not a question waiting for an answer"));
+            Assert.That(notice, Does.Contain("has to be restarted"));
+            Assert.That(notice, Does.Not.Contain("editor_dialog_press"));
+        }
+
+        [Test]
+        public void TheWindowIsRecognisedByItsMessageWhateverTheTitleSays()
+        {
+            var busy = new EditorDialogs.DialogInfo
+            {
+                Handle = "1234",
+                Title = "Running managed callbacks",
+                Message = "Waiting for Unity's code to finish executing. Application.Message",
+                Buttons = new[] { "Cancel" },
+            };
+
+            Assert.That(MainThreadWatch.RunningNotice(busy, 0), Does.Contain("not a question waiting for an answer"));
+        }
+
+        [Test]
+        public void UnitysProgressWindowIsNotReportedAsSomethingToAnswerEither()
+        {
+            var progress = new EditorDialogs.DialogInfo
+            {
+                Handle = "1234",
+                Title = "Running managed callbacks",
+                Message = string.Empty,
+                Buttons = new[] { "Cancel", "Skip Transcoding" },
+            };
+
+            var notice = MainThreadWatch.RunningNotice(progress, 0);
+
+            Assert.That(notice, Does.Contain("progress window rather than a question"));
+            Assert.That(notice, Does.Not.Contain("editor_dialog_press"));
+        }
+
+        [Test]
+        public void ADialogThatIsAQuestionStillSaysToAnswerIt()
+        {
+            Assert.That(
+                MainThreadWatch.RunningNotice(SaveDialog(), 0),
+                Does.Contain("use editor_dialog_press or answer it in the Editor"));
+        }
+
+        [Test]
         public void DialogWinsOverAStall()
         {
             var notice = MainThreadWatch.RunningNotice(SaveDialog(), 30_000);
