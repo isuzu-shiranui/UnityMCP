@@ -41,7 +41,7 @@ irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 |
 curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh
 ```
 
-GitHub Releases から実行ファイルを直接ダウンロードして、`SHA256SUMS` で検証することもできます。.NET SDK があれば `dotnet tool install -g IsuzuUnityCli` でも入ります。
+GitHub Releases から実行ファイルを直接ダウンロードして、`SHA256SUMS` で検証することもできます。.NET 10 SDK があれば `dotnet tool install -g IsuzuUnityCli` でも入ります。
 
 続けて、エージェント用のスキルと MCP クライアントを登録します。
 

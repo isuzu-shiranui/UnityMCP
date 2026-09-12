@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
 
 namespace IsuzuUnityCli.Bridge;
@@ -45,7 +46,9 @@ public sealed class McpStdioBridge : IDisposable
         _input = input;
         _output = output;
         _resolve = resolve;
-        _projectOption = projectOption;
+        _projectOption = string.IsNullOrWhiteSpace(projectOption) || InstanceResolver.IsUnexpanded(projectOption)
+            ? null
+            : projectOption.Trim();
         _groups = string.IsNullOrWhiteSpace(groups) ? null : groups;
         _ownsHttp = handler is null;
 
@@ -207,6 +210,18 @@ public sealed class McpStdioBridge : IDisposable
             if (!answered)
             {
                 EmitError(message, "The Unity Editor answered with something that is not JSON: " + OneLine(e.Message));
+            }
+        }
+        catch (CliException e)
+        {
+            // Finding the Editor failed for a reason the resolver names: the bound project is not
+            // open, or its descriptors cannot be told apart. That reason is the answer, and
+            // "not running" would send the reader looking for the wrong thing.
+            Invalidate();
+
+            if (!answered)
+            {
+                EmitError(message, e.Message);
             }
         }
         catch (Exception)
@@ -377,7 +392,7 @@ public sealed class McpStdioBridge : IDisposable
     {
         lock (_gate)
         {
-            return _projectOption ?? _lastKnownProject ?? "this project";
+            return _lastKnownProject ?? _projectOption ?? "this project";
         }
     }
 

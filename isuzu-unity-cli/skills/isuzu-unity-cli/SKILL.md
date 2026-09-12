@@ -116,7 +116,10 @@ The CLI and the Unity package ship as one version. When a command prints a line 
 newer release is out, or a reply mentions version skew, `isuzu-unity-cli update` moves both: it
 replaces the CLI and retargets each project's package. It refuses the installs it cannot move - a
 `file:` working copy, a folder under `Packages/`, anything VCC or ALCOM manages - and names the
-step that does move them. `--dry-run` says what would change without changing it.
+step that does move them. A CLI installed with winget or as a dotnet tool is updated by that tool:
+`update` prints the command, and until the CLI has been updated it moves the packages only as far as
+the version the CLI runs, so run it again afterwards. `--dry-run` says what would change without
+changing it.
 
 ## The rest of it
 
@@ -225,6 +228,9 @@ stop on it. `--timeout <seconds>` (300 by default) gives up waiting without stop
 |---|---|
 | `No running Unity Editor found` | No Editor has a project open with the package installed |
 | `Several Editors are running` | Pass `--project <name>` |
+| `No running Editor has <folder> open` | The project the command selected is not open. Open it, or run the command again with `--project` |
+| `The working directory is inside the Unity project` | That project is not open. Open it, or pass `--project` to choose another |
+| `kept rejecting the token` | The descriptor is stale; restart the Editor |
 | `error [invalid_params]` | Argument missing or the value was rejected; the text says which |
 | `error [tool_not_found]` | Run `isuzu-unity-cli tools` |
 | `error [unauthorized]` | The descriptor is stale; restart the Editor |

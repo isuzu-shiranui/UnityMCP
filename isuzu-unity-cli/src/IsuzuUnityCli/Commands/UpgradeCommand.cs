@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text;
 using IsuzuUnityCli.Cli;
+using IsuzuUnityCli.Discovery;
 
 namespace IsuzuUnityCli.Commands;
 
@@ -9,17 +10,25 @@ public static class UpgradeCommand
     public const string WindowsScriptUrl = "https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1";
     public const string UnixScriptUrl = "https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh";
 
-    public const string DotnetToolMessage = "Installed as a dotnet tool; run: dotnet tool update -g IsuzuUnityCli";
-
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
-        var toolDirectory = DotnetToolDirectory(context.ExecutablePath);
-        if (toolDirectory is not null)
+        var install = CliInstall.Read(context.ExecutablePath);
+
+        if (!install.ReplacesItself)
         {
-            // The installer writes to its own directory and would leave two copies behind.
-            context.Out.WriteLine(IsGlobalToolDirectory(toolDirectory)
-                ? DotnetToolMessage
-                : "Installed as a dotnet tool; run: dotnet tool update IsuzuUnityCli --tool-path " + QuotePath(toolDirectory));
+            if (parsed.Option("release") is not null)
+            {
+                context.Err.WriteLine(ReleaseRefusal(install));
+                return 1;
+            }
+
+            context.Out.WriteLine($"Installed {install.Description}; run: {install.UpdateCommand}");
+
+            if (install.Channel is CliChannel.Winget)
+            {
+                context.Out.WriteLine(CliInstall.WingetDelay);
+            }
+
             return 0;
         }
 
@@ -70,34 +79,10 @@ public static class UpgradeCommand
         }
     }
 
-    /// <summary>True when this executable lives in a dotnet tools directory, which owns its own updates.</summary>
-    public static bool IsDotnetTool(string executablePath) => DotnetToolDirectory(executablePath) is not null;
-
-    private static bool IsGlobalToolDirectory(string directory) =>
-        string.Equals(Path.GetFileName(directory), "tools", StringComparison.OrdinalIgnoreCase)
-        && string.Equals(Path.GetFileName(Path.GetDirectoryName(directory)), ".dotnet", StringComparison.OrdinalIgnoreCase);
-
-    private static string QuotePath(string path) => OperatingSystem.IsWindows()
-        ? "'" + path.Replace("'", "''", StringComparison.Ordinal) + "'"
-        : "'" + path.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-
-    private static string? DotnetToolDirectory(string executablePath)
-    {
-        var directory = Path.GetDirectoryName(Path.GetFullPath(executablePath));
-
-        while (!string.IsNullOrEmpty(directory))
-        {
-            if (IsGlobalToolDirectory(directory)
-                || Directory.Exists(Path.Combine(directory, ".store", "isuzuunitycli")))
-            {
-                return directory;
-            }
-
-            directory = Path.GetDirectoryName(directory);
-        }
-
-        return null;
-    }
+    /// <summary>Why --release does nothing for a copy another tool installed.</summary>
+    public static string ReleaseRefusal(CliInstall.Install install) =>
+        $"This CLI was installed {install.Description}, and --release works only for a copy the install script manages. "
+        + "Install that version with the tool that installed this one.";
 
     private static async Task<int> RunScript(string script, string? version, bool windows, CommandContext context)
     {

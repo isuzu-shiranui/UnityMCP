@@ -115,42 +115,37 @@ public static class ReleaseCheck
 
     /// <summary>Whether <paramref name="tag"/> is a release newer than what is running.</summary>
     /// <remarks>
-    /// Compared field by field as numbers. A string comparison puts 4.10.0 before 4.9.0, which is
-    /// how a newer release ends up reported as an older one.
+    /// Ordered as Semantic Versioning orders them. The core is compared field by field as numbers,
+    /// since a string comparison puts 4.10.0 before 4.9.0. A prerelease comes before the release of
+    /// the same core, and build metadata takes no part.
     /// </remarks>
     public static bool IsNewer(string tag, string current)
     {
-        var released = Parts(tag);
-        var running = Parts(current);
-
-        if (released.Length == 0 || running.Length == 0)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < Math.Max(released.Length, running.Length); i++)
-        {
-            var a = i < released.Length ? released[i] : 0;
-            var b = i < running.Length ? running[i] : 0;
-
-            if (a != b)
-            {
-                return a > b;
-            }
-        }
-
-        return false;
+        return ParseVersion(tag) is { } released
+            && ParseVersion(current) is { } running
+            && Compare(released, running) > 0;
     }
 
-    private static int[] Parts(string version)
+    private readonly record struct SemanticVersion(int[] Core, string[] Prerelease);
+
+    private static SemanticVersion? ParseVersion(string version)
     {
-        var text = version.TrimStart('v', 'V');
-        var pieces = text.Split('.', '-', '+');
+        var text = version.Trim().TrimStart('v', 'V');
+        var plus = text.IndexOf('+');
+
+        if (plus >= 0)
+        {
+            text = text[..plus];
+        }
+
+        var dash = text.IndexOf('-');
+        var core = dash >= 0 ? text[..dash] : text;
+        var prerelease = dash >= 0 ? text[(dash + 1)..].Split('.') : [];
         var numbers = new List<int>();
 
-        foreach (var piece in pieces)
+        foreach (var piece in core.Split('.'))
         {
-            if (!int.TryParse(piece, out var value))
+            if (!int.TryParse(piece, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value))
             {
                 break;
             }
@@ -158,7 +153,55 @@ public static class ReleaseCheck
             numbers.Add(value);
         }
 
-        return numbers.ToArray();
+        return numbers.Count == 0 ? null : new SemanticVersion(numbers.ToArray(), prerelease);
+    }
+
+    private static int Compare(SemanticVersion a, SemanticVersion b)
+    {
+        for (var i = 0; i < Math.Max(a.Core.Length, b.Core.Length); i++)
+        {
+            var x = i < a.Core.Length ? a.Core[i] : 0;
+            var y = i < b.Core.Length ? b.Core[i] : 0;
+
+            if (x != y)
+            {
+                return x.CompareTo(y);
+            }
+        }
+
+        if (a.Prerelease.Length == 0 || b.Prerelease.Length == 0)
+        {
+            return b.Prerelease.Length.CompareTo(a.Prerelease.Length);
+        }
+
+        for (var i = 0; i < Math.Min(a.Prerelease.Length, b.Prerelease.Length); i++)
+        {
+            var order = CompareIdentifier(a.Prerelease[i], b.Prerelease[i]);
+
+            if (order != 0)
+            {
+                return order;
+            }
+        }
+
+        return a.Prerelease.Length.CompareTo(b.Prerelease.Length);
+    }
+
+    /// <summary>Numeric identifiers compare as numbers and come before alphanumeric ones.</summary>
+    private static int CompareIdentifier(string a, string b)
+    {
+        var style = System.Globalization.NumberStyles.None;
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var aNumeric = long.TryParse(a, style, culture, out var x);
+        var bNumeric = long.TryParse(b, style, culture, out var y);
+
+        return (aNumeric, bNumeric) switch
+        {
+            (true, true) => x.CompareTo(y),
+            (true, false) => -1,
+            (false, true) => 1,
+            _ => string.CompareOrdinal(a, b),
+        };
     }
 
     /// <summary>

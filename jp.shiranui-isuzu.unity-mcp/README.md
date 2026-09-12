@@ -32,7 +32,7 @@ irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 |
 curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh
 ```
 
-or, with the .NET SDK installed:
+or, with the .NET 10 SDK installed:
 
 ```bash
 dotnet tool install -g IsuzuUnityCli

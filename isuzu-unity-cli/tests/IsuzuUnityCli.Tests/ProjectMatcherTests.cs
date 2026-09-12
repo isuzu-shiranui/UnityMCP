@@ -239,11 +239,51 @@ public sealed class ProjectMatcherTests
     }
 
     [Fact]
-    public void CaseInsensitiveOnlyOnWindows()
+    public void AnExactSelectionTakesNoSubstring()
+    {
+        var e = Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, "Test B", exactOnly: true));
+
+        Assert.Equal(3, e.ExitCode);
+        Assert.StartsWith("No running Editor is named \"Test B\" exactly.", e.Message);
+        Assert.Throws<CliException>(() => ProjectMatcher.ByName(Renamed, "MCP VRChat", exactOnly: true));
+    }
+
+    /// <summary>
+    /// A path that names no open project is not tried as a name, where <c>.</c> would be part of
+    /// every name that contains a dot.
+    /// </summary>
+    [Fact]
+    public void ARelativePathIsResolvedAgainstTheWorkingDirectoryAndNeverMatchesByName()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "relative");
+        var game = Path.Combine(parent, "Game");
+        var open = new List<Project>
+        {
+            new("Game", Path.Combine(game, "Assets")),
+            new("Tools.2", Path.Combine(parent, "Tools", "Assets")),
+        };
+
+        Assert.Equal("Game", ProjectMatcher.ByName(open, ".", workingDirectory: game).ProjectName);
+        Assert.Equal("Game", ProjectMatcher.ByName(open, "../Game", workingDirectory: Path.Combine(parent, "Tools")).ProjectName);
+
+        var e = Assert.Throws<CliException>(() => ProjectMatcher.ByName(open, ".", workingDirectory: parent));
+
+        Assert.Equal(3, e.ExitCode);
+        Assert.StartsWith("No running Editor has", e.Message);
+    }
+
+    /// <summary>
+    /// The working directory is compared the way .NET compares paths on the host: without case on
+    /// Windows and macOS, whose file systems ignore it by default, and with case on Linux.
+    /// </summary>
+    [Fact]
+    public void TheWorkingDirectoryIgnoresCaseOnlyWhereTheHostDoes()
     {
         var root = Path.Combine(Path.GetTempPath(), "Game");
         var upper = Path.Combine(Path.GetTempPath(), "GAME", "Assets");
 
-        Assert.Equal(OperatingSystem.IsWindows(), ProjectMatcher.IsInside(upper, Path.Combine(root, "Assets")));
+        Assert.Equal(
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS(),
+            ProjectMatcher.IsInside(upper, Path.Combine(root, "Assets")));
     }
 }

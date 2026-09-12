@@ -93,6 +93,8 @@ Claude Desktop のウィンドウにドラッグしても同じです。Settings
 
 Player Settings の Product Name でも通ります。名前は `isuzu-unity-cli projects` でも確認できます。使うときは、パッケージを導入した Unity Editor を開いておいてください。
 
+名前は完全に一致するものだけを探します。拡張機能は最初に接続したプロジェクトに固定されます。別のプロジェクトに切り替えるときは、拡張機能をオフにしてからオンにしてください。
+
 バンドルには Windows・macOS(Apple Silicon と Intel)・Linux の実行ファイルが入っています。追加のランタイムは不要です。マニフェストが宣言している対応プラットフォームも `win32` / `darwin` / `linux` の 3 つです。次の点に注意してください。
 
 - バンドルは自己署名です。Claude Desktop は導入時に、未署名の拡張機能である旨の警告をログに書きます。動作には影響しません。

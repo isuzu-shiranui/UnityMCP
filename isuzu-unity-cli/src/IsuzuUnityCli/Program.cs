@@ -107,9 +107,9 @@ public static class Program
             }
 
             // After the command, so it is the last line the reader sees rather than something
-            // that pushes the answer up the terminal. doctor and update say it themselves in
-            // more detail, and saying it twice reads as two different releases.
-            if (parsed.Command is not ("doctor" or "update"))
+            // that pushes the answer up the terminal. doctor, update and upgrade say it themselves
+            // in more detail, and saying it twice reads as two different releases.
+            if (parsed.Command is not ("doctor" or "update" or "upgrade"))
             {
                 context.ReportNewRelease();
             }

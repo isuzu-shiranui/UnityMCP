@@ -45,8 +45,8 @@ public static class ProjectMatcher
             return false;
         }
 
-        // GetRelativePath compares case-insensitively on Windows and returns an absolute path
-        // when the two are on different drives.
+        // GetRelativePath compares case-insensitively on Windows and macOS, and returns an
+        // absolute path when the two are on different drives.
         var relative = Path.GetRelativePath(root, Path.GetFullPath(directory));
 
         return relative == "."
@@ -85,11 +85,25 @@ public static class ProjectMatcher
     /// error rather than a silent pick. Matching is by Editor, so one Editor answering to the
     /// query under both of its names is still a single match.
     /// </summary>
-    public static T ByName<T>(IReadOnlyList<T> candidates, string query) where T : IProjectLike
+    /// <param name="exactOnly">
+    /// Leaves out the substring match, for a selection that binds a session: a name that is only
+    /// part of another open project's would otherwise hold that project for as long as it runs.
+    /// </param>
+    /// <param name="workingDirectory">What a relative path is resolved against.</param>
+    public static T ByName<T>(
+        IReadOnlyList<T> candidates,
+        string query,
+        bool exactOnly = false,
+        string? workingDirectory = null) where T : IProjectLike
     {
         var trimmed = query.Trim();
 
-        foreach (var attempt in Attempts<T>(trimmed))
+        if (LooksLikePath(trimmed))
+        {
+            return ByPath(candidates, trimmed, workingDirectory ?? Directory.GetCurrentDirectory());
+        }
+
+        foreach (var attempt in Attempts<T>(trimmed, exactOnly))
         {
             var matches = candidates.Where(attempt).ToList();
 
@@ -105,44 +119,71 @@ public static class ProjectMatcher
             }
         }
 
-        throw new CliException($"No running Editor matches \"{query}\". Running: {Names(candidates)}", 3);
+        throw new CliException(
+            exactOnly
+                ? $"No running Editor is named \"{query}\" exactly. Use the product name, the folder name or the project path. Running: {Names(candidates)}"
+                : $"No running Editor matches \"{query}\". Running: {Names(candidates)}",
+            3);
     }
 
-    /// <summary>Whether two paths name the same folder, whichever slash and trailing form.</summary>
-    private static bool SamePath(string a, string b)
+    /// <summary>
+    /// A path selects only the project at that path, compared the way a reconnect compares, so a
+    /// path cannot select a project a reconnect would refuse.
+    /// </summary>
+    /// <remarks>
+    /// A path that matches nothing is not tried as a name: <c>.</c> is a substring of every project
+    /// name that contains a dot.
+    /// </remarks>
+    private static T ByPath<T>(IReadOnlyList<T> candidates, string query, string workingDirectory) where T : IProjectLike
     {
-        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        var resolved = Resolved(query, workingDirectory);
+        var key = ProjectKey.Of(resolved);
+        var matches = key is null ? [] : candidates.Where(c => ProjectKey.Of(c.ProjectPath) == key).ToList();
+
+        if (matches.Count == 1)
         {
-            return false;
+            return matches[0];
         }
 
-        return string.Equals(Normalise(a), Normalise(b), StringComparison.OrdinalIgnoreCase);
-
-        // Both sides through GetFullPath, because that is what fills in the drive and settles the
-        // separator. Normalising only the query left a rooted path compared against a bare one,
-        // which never matched.
-        static string Normalise(string path)
+        if (matches.Count > 1)
         {
-            try
-            {
-                return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
-            }
-            catch (Exception)
-            {
-                // Not a path at all, which is the usual case: the query is normally a name.
-                return path.Trim();
-            }
+            throw new CliException(
+                $"More than one running Editor has {ProjectKey.Display(resolved)} open: {Names(matches)}.", 3);
+        }
+
+        throw new CliException(
+            $"No running Editor has {ProjectKey.Display(resolved)} open. Running: {Names(candidates)}", 3);
+    }
+
+    private static bool LooksLikePath(string query) =>
+        query is "." or ".." || query.Contains('/') || query.Contains('\\');
+
+    private static string Resolved(string query, string workingDirectory)
+    {
+        if (ProjectKey.IsWindowsShaped(query) || Path.IsPathFullyQualified(query))
+        {
+            return query;
+        }
+
+        try
+        {
+            return Path.GetFullPath(query, workingDirectory);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return query;
         }
     }
 
-    private static IEnumerable<Func<T, bool>> Attempts<T>(string query) where T : IProjectLike
+    private static IEnumerable<Func<T, bool>> Attempts<T>(string query, bool exactOnly) where T : IProjectLike
     {
         yield return c => string.Equals(c.ProjectName, query, StringComparison.OrdinalIgnoreCase);
         yield return c => string.Equals(FolderNameOf(c.ProjectPath), query, StringComparison.OrdinalIgnoreCase);
-        // The project root, because that is what a caller already holding a path will pass and
-        // what the error above prints back at them. Placed after the two exact names so a folder
-        // called the same thing as another project's product name still decides first.
-        yield return c => SamePath(ProjectRootOf(c.ProjectPath), query);
+
+        if (exactOnly)
+        {
+            yield break;
+        }
 
         yield return c => c.ProjectName.Contains(query, StringComparison.OrdinalIgnoreCase)
             || FolderNameOf(c.ProjectPath).Contains(query, StringComparison.OrdinalIgnoreCase);

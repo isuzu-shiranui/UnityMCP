@@ -242,6 +242,32 @@ public sealed class HousekeepingCommandTests
         Assert.Equal("Bearer " + rotated.Token, entry!["headers"]!["Authorization"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// A port is not a project. Once another project's Editor holds the port an entry names, its
+    /// token written into that entry would hand the entry to the other project.
+    /// </summary>
+    [Fact]
+    public async Task DoctorLeavesAnEntryItCanTieToAnEditorOnlyByUrl()
+    {
+        using var home = new TempHome();
+        var codex = home.MakeDirectory(".codex");
+        var game = home.MakeDirectory("Game");
+        var other = home.MakeDirectory("Other");
+
+        var (setup, _, _) = Context(home, Descriptor(game));
+        Assert.Equal(0, await Program.Run(["setup", "--agent", "codex", "--mcp"], setup));
+
+        var (fix, report, _) = Context(home, Descriptor(other, token: new string('1', 64)));
+        Assert.Equal(0, await Program.Run(["doctor", "--fix"], fix));
+
+        var entry = TomlConfigEditor.Read(File.ReadAllText(Path.Combine(codex, "config.toml"), Encoding.UTF8), "mcp_servers.isuzu-unity")!;
+
+        Assert.Contains("setup --mcp --agent codex", report.ToString());
+        Assert.DoesNotContain("rewritten from the running Editor", report.ToString());
+        Assert.Contains(Token, entry.Authorization);
+    }
+
+
     [Fact]
     public async Task DoctorReinstallsAStaleSkillOnlyWhenAskedTo()
     {
@@ -259,6 +285,30 @@ public sealed class HousekeepingCommandTests
         Assert.Equal(0, await Program.Run(["doctor", "--fix"], fix));
         Assert.Contains("[fixed]", fixReport.ToString());
         Assert.False(SkillInstaller.IsStale(skills));
+    }
+
+    [Fact]
+    public async Task DoctorNamesTheToolThatUpdatesACopyWingetInstalled()
+    {
+        using var home = new TempHome();
+        var report = new StringWriter();
+
+        // Cancelled so the release check gives up instead of asking GitHub.
+        var context = new CommandContext
+        {
+            Out = report,
+            Err = new StringWriter(),
+            WorkingDirectory = home.Root,
+            ReadDescriptors = () => [],
+            ReadAllDescriptors = () => [],
+            ExecutablePath = home.At("AppData", "Local", "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"),
+            Cancellation = new CancellationToken(canceled: true),
+        };
+
+        Assert.Equal(0, await Program.Run(["doctor"], context));
+        Assert.Contains(
+            "[channel]  installed with winget; update with: winget upgrade --id IsuzuShiranui.IsuzuUnityCli -e",
+            report.ToString());
     }
 
     [Fact]

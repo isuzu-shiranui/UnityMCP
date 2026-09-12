@@ -59,10 +59,12 @@ public sealed class DescriptorStoreTests : IDisposable
 
     private void Write(string name, string json) => File.WriteAllText(Path.Combine(_dir, name), json);
 
-    private static string Descriptor(string name, int port = 27180, string token = "tok", int pid = 0, string extra = "")
+    private static string Descriptor(string name, int port = 27180, string token = "tok", int pid = 0, string extra = "", string? path = null)
     {
+        var projectPath = path ?? $"C:/p/{name}/Assets";
+
         return $$"""
-            {"projectPath":"C:/p/{{name}}/Assets","projectName":"{{name}}","unityVersion":"6000.0.1f1",
+            {"projectPath":"{{projectPath}}","projectName":"{{name}}","unityVersion":"6000.0.1f1",
              "port":{{port}},"token":"{{token}}","pid":{{pid}},"protocolVersion":"3.3.1","endpoint":"http://127.0.0.1:{{port}}"{{extra}}}
             """;
     }
@@ -125,9 +127,9 @@ public sealed class DescriptorStoreTests : IDisposable
             process.WaitForExit();
         }
 
-        Write("dead.json", Descriptor("Dead", pid: deadPid));
-        Write("self.json", Descriptor("Self", port: 27181, pid: Environment.ProcessId));
-        Write("nopid.json", Descriptor("NoPid", port: 27182));
+        Write("dead.json", Descriptor("Dead", pid: deadPid, path: HostPath("Dead")));
+        Write("self.json", Descriptor("Self", port: 27181, pid: Environment.ProcessId, path: HostPath("Self")));
+        Write("nopid.json", Descriptor("NoPid", port: 27182, path: HostPath("NoPid")));
 
         var names = DescriptorStore.ReadAll([_dir]).Select(d => d.ProjectName).OrderBy(n => n).ToList();
 
@@ -135,4 +137,37 @@ public sealed class DescriptorStoreTests : IDisposable
         Assert.False(ProcessLiveness.IsAlive(deadPid));
         Assert.True(ProcessLiveness.IsAlive(0));
     }
+
+    [Fact]
+    public void ADirectoryListedUnderSeveralSpellingsIsReadOnce()
+    {
+        Write("a.json", Descriptor("Alpha"));
+
+        Assert.Single(DescriptorStore.ReadAll([_dir, _dir + Path.DirectorySeparatorChar, Path.Combine(_dir, ".")], _ => true));
+    }
+
+    [Fact]
+    public void AWindowsEditorReadFromAnotherHostIsAskedInsteadOfItsPid()
+    {
+        Write("windows.json", Descriptor("Windows", pid: 4242));
+
+        var pidGoneButAnswers = DescriptorStore.ReadAll([_dir], _ => false, _ => true);
+        var pidAliveButSilent = DescriptorStore.ReadAll([_dir], _ => true, _ => false);
+
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Empty(pidGoneButAnswers);
+            Assert.Single(pidAliveButSilent);
+        }
+        else
+        {
+            Assert.Single(pidGoneButAnswers);
+            Assert.Empty(pidAliveButSilent);
+        }
+    }
+    /// <summary>
+    /// A path in this host's own form. A Windows path read on another host skips the pid check, so
+    /// a test of that check needs a path the host checks.
+    /// </summary>
+    private static string HostPath(string name) => OperatingSystem.IsWindows() ? $"C:/p/{name}/Assets" : $"/p/{name}/Assets";
 }

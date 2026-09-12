@@ -49,6 +49,8 @@ namespace UnityMCP.Editor.Core
         /// <summary>Directory holding one descriptor per running Editor.</summary>
         public static string DirectoryPath => Path.Combine(StateRoot, "instances");
 
+        private static bool IsWindows => Path.DirectorySeparatorChar == '\\';
+
         /// <summary>
         /// Path of this project's descriptor. Keyed by project path so reopening the same
         /// project reuses the file rather than accumulating one per session.
@@ -71,7 +73,7 @@ namespace UnityMCP.Editor.Core
         {
             try
             {
-                Directory.CreateDirectory(DirectoryPath);
+                CreateStateDirectory(DirectoryPath);
 
                 var payload = new JObject
                 {
@@ -89,9 +91,7 @@ namespace UnityMCP.Editor.Core
                     ["mcpProtocolVersions"] = new JArray(mcpProtocolVersions ?? Array.Empty<string>()),
                 };
 
-                var path = PathFor(projectPath);
-                File.WriteAllText(path, payload.ToString(Formatting.Indented), new UTF8Encoding(false));
-                RestrictToOwner(path);
+                WriteSecret(PathFor(projectPath), payload.ToString(Formatting.Indented));
             }
             catch (Exception e)
             {
@@ -162,12 +162,50 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
-        /// Makes a credential file readable by its owner only. On Windows the user profile is
-        /// already private to the account, so only Unix permissions are touched.
+        /// Creates a directory under <see cref="StateRoot"/> for credential files, and restricts
+        /// it and the root to their owner.
         /// </summary>
-        public static void RestrictToOwner(string path)
+        /// <remarks>
+        /// Both are restricted on every call rather than only when this call creates them: an
+        /// install from an earlier version already has them, with the default mode. On Windows
+        /// the user profile is already private to the account, so nothing is changed there.
+        /// </remarks>
+        public static void CreateStateDirectory(string directory)
         {
-            if (Path.DirectorySeparatorChar == '\\')
+            Directory.CreateDirectory(directory);
+            RestrictToOwner(StateRoot, "700");
+            RestrictToOwner(directory, "700");
+        }
+
+        /// <summary>
+        /// Writes a credential file that only its owner can read.
+        /// </summary>
+        /// <remarks>
+        /// chmod needs the file to exist, so on Unix it is created empty and restricted before the
+        /// contents go in. Restricted after writing instead, the contents are readable under the
+        /// umask's default mode until chmod runs. Writing into an existing file keeps its mode.
+        /// </remarks>
+        public static void WriteSecret(string path, string contents)
+        {
+            if (!IsWindows)
+            {
+                File.WriteAllBytes(path, Array.Empty<byte>());
+                RestrictToOwner(path, "600");
+            }
+
+            File.WriteAllText(path, contents, new UTF8Encoding(false));
+        }
+
+        /// <summary>
+        /// Applies a Unix mode through chmod, and logs an error when chmod does not confirm it.
+        /// </summary>
+        /// <remarks>
+        /// The file is still written, since the CLI and every registered client read it. Other users
+        /// on the machine may then be able to read it, which is what the error says.
+        /// </remarks>
+        private static void RestrictToOwner(string path, string mode)
+        {
+            if (IsWindows)
             {
                 return;
             }
@@ -177,16 +215,31 @@ namespace UnityMCP.Editor.Core
                 using var chmod = Process.Start(new ProcessStartInfo
                 {
                     FileName = "chmod",
-                    Arguments = $"600 \"{path}\"",
+                    Arguments = $"{mode} \"{path}\"",
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 });
-                chmod?.WaitForExit(2000);
+
+                if (chmod == null || !chmod.WaitForExit(2000))
+                {
+                    ReportNotRestricted(path,$"chmod {mode} did not finish");
+                }
+                else if (chmod.ExitCode != 0)
+                {
+                    ReportNotRestricted(path,$"chmod {mode} exited with code {chmod.ExitCode}");
+                }
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                // A missing chmod leaves the file with the umask's default; nothing else to do.
+                ReportNotRestricted(path,$"chmod {mode} could not run: {e.Message}");
             }
+        }
+
+        private static void ReportNotRestricted(string path, string reason)
+        {
+            Debug.LogError(
+                $"[McpInstanceDescriptor] Could not restrict {path} to its owner ({reason}). " +
+                "Other users on this machine may be able to read it until it is restricted by hand.");
         }
 
         private static bool IsProcessAlive(int pid)

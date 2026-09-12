@@ -33,7 +33,7 @@ namespace UnityMCP.Editor.Core
         /// answer for an assembly that is not loaded from a package, and CI checks that it too
         /// stays in step.
         /// </remarks>
-        private const string FallbackVersion = "4.3.0";
+        private const string FallbackVersion = "4.3.1";
 
         internal static string ProtocolVersion
         {
@@ -469,7 +469,7 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Replaces this project's token. Every client registered with the old one has to be
-        /// registered again (<c>isuzu-unity-cli doctor --fix</c>).
+        /// registered again (<c>isuzu-unity-cli setup --mcp</c>).
         /// </summary>
         public void RegenerateToken()
         {

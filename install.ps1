@@ -96,6 +96,44 @@ public static extern IntPtr SendMessageTimeout(
             [IntPtr]0xffff, 0x001A, [UIntPtr]::Zero, "Environment", 0x0002, 1000, [ref]$ignored)
     }
 
+    # Get-FileHash in Windows PowerShell 5.1 is a script-module function. A file it cannot read
+    # produces an error that this scope's $ErrorActionPreference does not reach, the call returns
+    # nothing, and the checksum comparison then fails with "You cannot call a method on a
+    # null-valued expression", which names neither the file nor the reason. Security software
+    # holds a freshly downloaded executable open while it scans it, so a sharing violation is
+    # waited out before it is reported. The managed SHA-256 that SHA256.Create() returns on .NET
+    # Framework is refused under the FIPS policy; the CSP implementation is not.
+    function Get-Sha256 {
+        param([string]$Path)
+
+        $reason = $null
+        for ($attempt = 1; $attempt -le 20; $attempt++) {
+            try {
+                $stream = [System.IO.File]::OpenRead($Path)
+            } catch {
+                $reason = if ($_.Exception.InnerException) { $_.Exception.InnerException } else { $_.Exception }
+                if ($reason -is [System.IO.FileNotFoundException] -or $reason -is [System.UnauthorizedAccessException]) {
+                    break
+                }
+                Start-Sleep -Milliseconds 500
+                continue
+            }
+
+            try {
+                $sha = New-Object System.Security.Cryptography.SHA256CryptoServiceProvider
+                try {
+                    return ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
+                } finally {
+                    $sha.Dispose()
+                }
+            } finally {
+                $stream.Dispose()
+            }
+        }
+
+        throw "Could not read $Path to verify its checksum: $($reason.Message)"
+    }
+
     if (-not $Version) { $Version = $env:ISUZU_UNITY_CLI_VERSION }
     if (-not $Version) { $Version = "latest" }
     if ($Version -ne "latest" -and $Version -notmatch "^v") {
@@ -151,7 +189,7 @@ public static extern IntPtr SendMessageTimeout(
             throw "SHA256SUMS has no entry for $assetName. The release may be malformed."
         }
         $expectedHash = ($sumsLine -split '\s+')[0].ToUpperInvariant()
-        $actualHash = (Get-FileHash -Path $tempAsset -Algorithm SHA256).Hash.ToUpperInvariant()
+        $actualHash = Get-Sha256 -Path $tempAsset
         if ($actualHash -ne $expectedHash) {
             throw "Checksum mismatch for $assetName. Expected $expectedHash, got $actualHash. Aborting install."
         }

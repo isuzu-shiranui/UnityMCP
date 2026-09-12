@@ -1,5 +1,56 @@
 # Changelog
 
+## [4.3.2] - Unreleased
+
+### Changed
+- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. The first fix came from @wiiiii123 in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
+- A command run inside a Unity project folder that no running Editor has open stops with exit code 3, instead of going to whichever Editor happens to be open.
+- `mcp-stdio`, `setup --mcp` and `update --project` select a project by exact name or by path only.
+- `--project` given a path (`.`, `../Game`, or any value with a slash) resolves it against the working directory and selects only the project at that path.
+- `doctor --fix` leaves an entry whose URL matches a running Editor but whose token differs, because another project's Editor can hold that port, and suggests `setup --mcp` instead. The Regenerate dialog and the docs name it too.
+- On macOS and Linux, the Editor logs an error rather than a warning when it cannot restrict the token and descriptor files to their owner.
+- The EditMode test script refuses a `-ProjectPath` it did not create, and records the operating system it ran on.
+
+### Fixed
+- After losing its Editor, `verify`, `jobs --wait` or `mcp-stdio` could carry on in another project that matched the original name.
+- `--project .` could select another project whose name contains a dot.
+- `doctor --fix` could write a token into a Claude Code entry for a folder that differs only in case.
+- `verify --raw` reported `ok: true` when a step stopped part-way, and printed no summary when the token kept being rejected.
+- Under WSL, a descriptor that a crashed Windows Editor left behind was listed as running.
+- A state directory given with a trailing separator, or one descriptor reached twice, listed its Editor twice.
+- A prerelease such as `4.3.1-1` was read as newer than `4.3.1`, so `update` refused to move a project to the release.
+- `scene_create` replaced the open scenes before it found that the folder was missing, and wrote over a scene already at the path. A path that is not a `.unity` file under `Assets/` or `Packages/` is now refused before anything changes, too.
+- The MCP registry entry started the package without `mcp-stdio`, so a client that followed it got the help text.
+- On macOS and Linux, the token and descriptor files were readable under the default permissions until chmod ran after they were written.
+- The Settings window trimmed spaces and quotes from PATH entries on macOS and Linux, where they are part of the directory name.
+- `setup --mcp` said only that a running Editor was needed when `--project` matched nothing.
+- The winget submission check took a pull request's title as proof that a version had been submitted.
+- `install.ps1` could leave the downloaded file open when the hash provider failed to start.
+- A job wait inside `verify` that recovered from a rejected token counted that rejection against the next one.
+
+## [4.3.1] - 2026-09-12
+
+### Changed
+- A CLI installed with winget is left to winget, and one installed as a dotnet tool to
+  `dotnet tool update`. `upgrade` and `update` print that command instead of replacing the
+  executable, which would make winget refuse to upgrade or uninstall it, and refuse `--release`
+  rather than ignore it. Until the CLI has been updated that way, `update` moves each project's
+  package only as far as the version the CLI runs, so the two keep matching.
+- `doctor` says how the running CLI was installed and which command updates it, and the notice
+  after each command names the same command.
+- The Settings window also looks for the CLI where winget puts it: winget's folder of links, and
+  the package folder winget adds to PATH when it cannot create a link. An Editor started before
+  winget changed PATH does not find either on its own PATH.
+
+### Fixed
+- `update --dry-run` said it would install the new release over a CLI installed as a dotnet tool.
+- The Settings window finds the CLI in a PATH entry written in double quotes.
+- `install.ps1` says why it could not read the downloaded executable, and waits for security
+  software that still has it open, instead of failing on Windows PowerShell 5.1 with "You cannot
+  call a method on a null-valued expression". ([#38](https://github.com/isuzu-shiranui/UnityMCP/issues/38))
+- The READMEs and the setup guide say that `dotnet tool install -g IsuzuUnityCli` needs the .NET 10
+  SDK. An older SDK cannot read the package and reports that it has no DotnetToolSettings.xml.
+
 ## [4.3.0] - 2026-09-12
 
 ### Breaking
