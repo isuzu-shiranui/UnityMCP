@@ -65,7 +65,7 @@ public static class JobsCommand
                     // The listener going down for a domain reload, or coming back up after one on a
                     // different port with a different token. The job is still the same job, so the
                     // descriptor is re-read and polling continues.
-                    instance = context.ResolveInstance(parsed);
+                    instance = context.RefreshInstance(instance);
                     await Task.Delay(pollIntervalMs, deadline.Token);
                     continue;
                 }

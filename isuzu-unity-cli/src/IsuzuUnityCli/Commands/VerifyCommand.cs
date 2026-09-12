@@ -609,11 +609,12 @@ public static class VerifyCommand
         {
             try
             {
-                _instance = _context.ResolveInstance(_parsed);
+                _instance = _context.RefreshInstance(_instance);
             }
             catch (CliException)
             {
                 // The descriptor is rewritten rather than updated, so it is briefly absent.
+                // Keep the last endpoint for this project instead of choosing another Editor.
             }
         }
 
