@@ -24,9 +24,9 @@
 
 descriptor ファイルとトークンファイルは、資格情報として扱ってください。これらを読めれば、Editor 内でコードを実行できます。
 
-トークンは `%LOCALAPPDATA%\UnityMCP\tokens\` に保存されます。macOS と Linux では `~/.local/share/UnityMCP/tokens/` で、所有者だけが読めるパーミッションが付きます。
+トークンは `%LOCALAPPDATA%\UnityMCP\tokens\` に保存されます。macOS と Linux では `~/.local/share/UnityMCP/tokens/` で、トークンを書き込む前に所有者だけが読めるパーミッションを付けます。付けられなかったときは、Console にエラーを出します。
 
-Preferences の「Regenerate」でトークンを再発行できます。再発行後は `isuzu-unity-cli doctor --fix` で登録済みクライアントを更新してください。
+Preferences の「Regenerate」でトークンを再発行できます。再発行後は、そのプロジェクトで `isuzu-unity-cli setup --mcp` を実行して、登録済みのクライアントを登録し直してください。
 
 `setup --mcp --scope project` は `.mcp.json` に `${UNITY_MCP_TOKEN}` を書き込み、生のトークンは書きません。リポジトリに含まれる設定ファイルにトークンが入ることはありません。
 

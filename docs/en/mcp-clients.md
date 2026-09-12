@@ -93,6 +93,8 @@ The installer asks for a project name. You can leave it empty when only one Unit
 
 The Product Name from Player Settings works as well, and `isuzu-unity-cli projects` prints these names. The Unity Editor must be open with the package installed while you use it.
 
+The name must match exactly. The extension stays bound to the first project it connects to; to switch, turn the extension off and on.
+
 The bundle carries the Windows, macOS (Apple Silicon and Intel) and Linux executables. It needs no other runtime. The manifest declares `win32`, `darwin` and `linux` as supported platforms. Three points are worth knowing.
 
 - The bundle is self-signed. Claude Desktop logs a warning about an unsigned extension when it installs. The extension works regardless.

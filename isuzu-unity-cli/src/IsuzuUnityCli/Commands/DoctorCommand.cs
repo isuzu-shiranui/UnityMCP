@@ -433,7 +433,7 @@ public static class DoctorCommand
         var projectRoots = running
             .Select(descriptor => ProjectMatcher.ProjectRootOf(descriptor.ProjectPath))
             .Where(root => root.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(root => ProjectKey.Of(root) ?? root, StringComparer.Ordinal)
             .ToList();
 
         foreach (var agent in agents)
@@ -630,7 +630,7 @@ public static class DoctorCommand
         var projectRoots = known
             .Select(descriptor => ProjectMatcher.ProjectRootOf(descriptor.ProjectPath))
             .Where(root => root.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(root => ProjectKey.Of(root) ?? root, StringComparer.Ordinal)
             .ToList();
 
         foreach (var agent in agents)
@@ -707,14 +707,26 @@ public static class DoctorCommand
                 continue;
             }
 
-            // The key is the project root, so the Editor it belongs to is known exactly.
-            // Compared through the same normalisation setup writes with, or a Windows key never
-            // matches the Editor it belongs to and every entry reads as an orphan.
-            var descriptor = running.FirstOrDefault(d =>
-                string.Equals(
-                    McpServerEntry.ClaudeCodeProjectKey(ProjectMatcher.ProjectRootOf(d.ProjectPath)),
-                    McpServerEntry.ClaudeCodeProjectKey(pair.Key),
-                    StringComparison.OrdinalIgnoreCase));
+            // The key is the project root, so the Editor it belongs to is known exactly. Compared
+            // as a reconnect compares, with the case kept: a folder that differs only in case can
+            // be another project, and its token written here would hand the entry over.
+            var key = ProjectKey.Of(pair.Key);
+            var owners = key is null ? [] : running.Where(d => ProjectKey.Of(d.ProjectPath) == key).ToList();
+
+            if (owners.Count > 1)
+            {
+                reports.Add(new EntryReport
+                {
+                    Agent = agent,
+                    ConfigPath = agent.ConfigPath!,
+                    Scope = pair.Key,
+                    Status = $"cannot be verified: {owners.Count} running Editors publish this project",
+                });
+
+                continue;
+            }
+
+            var descriptor = owners.Count == 1 ? owners[0] : null;
 
             var current = McpServerEntry.ClaudeCodeProjectKey(pair.Key);
 
@@ -740,7 +752,7 @@ public static class DoctorCommand
                 continue;
             }
 
-            reports.Add(Judge(agent, agent.ConfigPath!, ["projects", pair.Key, "mcpServers", AgentCatalog.ServerName], pair.Key, value, descriptor, running, placeholder: false));
+            reports.Add(Judge(agent, agent.ConfigPath!, ["projects", pair.Key, "mcpServers", AgentCatalog.ServerName], pair.Key, value, descriptor, identified: true, running, placeholder: false));
         }
     }
 
@@ -765,12 +777,12 @@ public static class DoctorCommand
             return;
         }
 
-        var descriptor = Locate(running, entry.Url, entry.Authorization);
+        var descriptor = Locate(running, entry.Url, entry.Authorization, out var byToken);
         reports.Add(new EntryReport
         {
             Agent = agent,
             ConfigPath = agent.ConfigPath!,
-            Status = Verdict(entry.Url, entry.Authorization, descriptor, running, placeholder: false, out var repair),
+            Status = Verdict(agent, entry.Url, entry.Authorization, descriptor, byToken, running, placeholder: false, out var repair),
             Repair = repair ? descriptor : null,
         });
     }
@@ -806,11 +818,12 @@ public static class DoctorCommand
             return;
         }
 
+        var byToken = false;
         var descriptor = agent.Transport == McpTransport.Stdio
             ? StdioTargetOf(entry, running)
-            : Locate(running, McpServerEntry.Describe(entry).Url, McpServerEntry.Describe(entry).Authorization);
+            : Locate(running, McpServerEntry.Describe(entry).Url, McpServerEntry.Describe(entry).Authorization, out byToken);
 
-        reports.Add(Judge(agent, configPath, jsonPath, scope, entry, descriptor, running, placeholder));
+        reports.Add(Judge(agent, configPath, jsonPath, scope, entry, descriptor, byToken, running, placeholder));
     }
 
     private static EntryReport Judge(
@@ -820,6 +833,7 @@ public static class DoctorCommand
         string scope,
         JsonNode entry,
         InstanceDescriptor? descriptor,
+        bool identified,
         IReadOnlyList<InstanceDescriptor> running,
         bool placeholder)
     {
@@ -846,7 +860,7 @@ public static class DoctorCommand
             ConfigPath = configPath,
             JsonPath = jsonPath,
             Scope = scope,
-            Status = Verdict(url, authorization, descriptor, running, placeholder, out var repair),
+            Status = Verdict(agent, url, authorization, descriptor, identified, running, placeholder, out var repair),
             Repair = repair ? descriptor : null,
             UsesPlaceholderToken = placeholder,
         };
@@ -857,13 +871,16 @@ public static class DoctorCommand
     /// even after the port has moved. A config that carries a placeholder instead is matched on
     /// the URL alone.
     /// </summary>
-    private static InstanceDescriptor? Locate(IReadOnlyList<InstanceDescriptor> running, string? url, string? authorization)
+    /// <param name="byToken">Whether the token matched, which is what shows the entry is for that Editor's project.</param>
+    private static InstanceDescriptor? Locate(
+        IReadOnlyList<InstanceDescriptor> running, string? url, string? authorization, out bool byToken)
     {
-        var byToken = authorization is null
+        var tokenMatch = authorization is null
             ? null
             : running.FirstOrDefault(d => McpServerEntry.BearerFor(d) == authorization);
 
-        return byToken ?? (url is null ? null : running.FirstOrDefault(d => d.McpUrlOrDefault == url));
+        byToken = tokenMatch is not null;
+        return tokenMatch ?? (url is null ? null : running.FirstOrDefault(d => d.McpUrlOrDefault == url));
     }
 
     private static InstanceDescriptor? StdioTargetOf(JsonNode entry, IReadOnlyList<InstanceDescriptor> running)
@@ -885,10 +902,16 @@ public static class DoctorCommand
             : running.FirstOrDefault(d => d.ProjectName == named[index + 1]);
     }
 
+    /// <param name="identified">
+    /// Whether the entry is known to be for <paramref name="descriptor"/>'s project, by its token or by
+    /// the project key it is filed under, rather than only by naming the same URL.
+    /// </param>
     private static string Verdict(
+        AgentTarget agent,
         string? url,
         string? authorization,
         InstanceDescriptor? descriptor,
+        bool identified,
         IReadOnlyList<InstanceDescriptor> running,
         bool placeholder,
         out bool repair)
@@ -910,6 +933,15 @@ public static class DoctorCommand
 
         if (!placeholder && authorization != McpServerEntry.BearerFor(descriptor))
         {
+            // A port is not a project. Once another project's Editor holds the port this entry
+            // names, writing that Editor's token here would hand the entry to the other project.
+            if (!identified)
+            {
+                return "stale: the token differs from the one the Editor at this URL published, and nothing shows "
+                    + $"the entry is for that Editor's project. Run 'isuzu-unity-cli setup --mcp --agent {agent.Name}' "
+                    + "in the project the entry is for";
+            }
+
             repair = true;
             return "stale: the token differs from the one the Editor published";
         }

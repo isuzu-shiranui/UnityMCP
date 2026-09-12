@@ -274,7 +274,8 @@ namespace UnityMCP.Editor.Tools
             "given.",
             Idempotency = McpIdempotency.Unsafe)]
         public static JObject Create(
-            [McpArg("path", "Where to save it, e.g. Assets/Scenes/New.unity. Omit to leave it unsaved.")]
+            [McpArg("path", "Where to save it, e.g. Assets/Scenes/New.unity. Omit to leave it unsaved. " +
+                            "A path where a file already exists is refused rather than written over.")]
             string path = null,
             [McpArg("empty", "Create it without the default camera and light.")]
             bool empty = false,
@@ -295,11 +296,51 @@ namespace UnityMCP.Editor.Tools
                 }
             }
 
+            var target = string.IsNullOrWhiteSpace(path) ? null : path.Replace('\\', '/');
+
+            // Checked before NewScene, which replaces or adds to the open scenes whatever this call
+            // answers afterwards.
+            if (target != null)
+            {
+                var name = Path.GetFileName(target);
+
+                if (!target.EndsWith(".unity", System.StringComparison.Ordinal)
+                    || !(target.StartsWith("Assets/", System.StringComparison.Ordinal)
+                         || target.StartsWith("Packages/", System.StringComparison.Ordinal))
+                    || Path.GetFileNameWithoutExtension(name).Length == 0
+                    || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"'{target}' is not a scene path. Pass a .unity file under Assets/ or Packages/, " +
+                        "e.g. Assets/Scenes/New.unity.");
+                }
+
+                var parent = Path.GetDirectoryName(target)?.Replace('\\', '/');
+
+                if (!string.IsNullOrEmpty(parent) && !AssetDatabase.IsValidFolder(parent))
+                {
+                    throw new McpToolException(
+                        "not_found",
+                        $"'{parent}' does not exist. Create it with asset_create_folder first.");
+                }
+
+                // SaveScene writes over an existing file without asking. The file check also covers
+                // a scene on disk that has not been imported yet.
+                if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target) != null || File.Exists(target))
+                {
+                    throw new McpToolException(
+                        "conflict",
+                        $"'{target}' already exists. Open it with scene_open, or pass another path.",
+                        409);
+                }
+            }
+
             var scene = EditorSceneManager.NewScene(
                 empty ? NewSceneSetup.EmptyScene : NewSceneSetup.DefaultGameObjects,
                 additive ? NewSceneMode.Additive : NewSceneMode.Single);
 
-            if (string.IsNullOrWhiteSpace(path))
+            if (target == null)
             {
                 return new JObject
                 {
@@ -308,16 +349,6 @@ namespace UnityMCP.Editor.Tools
                     ["path"] = null,
                     ["note"] = "Not saved to disk. Call scene_save with a path to keep it.",
                 };
-            }
-
-            var target = path.Replace('\\', '/');
-            var parent = Path.GetDirectoryName(target)?.Replace('\\', '/');
-
-            if (!string.IsNullOrEmpty(parent) && !AssetDatabase.IsValidFolder(parent))
-            {
-                throw new McpToolException(
-                    "not_found",
-                    $"'{parent}' does not exist. Create it with asset_create_folder first.");
             }
 
             if (!EditorSceneManager.SaveScene(scene, target))

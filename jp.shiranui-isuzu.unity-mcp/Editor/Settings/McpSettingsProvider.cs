@@ -403,7 +403,7 @@ namespace UnityMCP.Editor.Settings
             {
                 if (EditorUtility.DisplayDialog(
                         McpEditorText.Tr("Regenerate token"),
-                        McpEditorText.Tr("Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"),
+                        McpEditorText.Tr("Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli setup --mcp. Continue?"),
                         McpEditorText.Tr("Regenerate"),
                         McpEditorText.Tr("Cancel")))
                 {

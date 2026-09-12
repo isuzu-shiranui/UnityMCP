@@ -24,9 +24,9 @@ The project directory `<root>/UnityMCP/tools/<projectHash>/` has the same proper
 
 Treat the descriptor file and the token file as credentials. Anything that can read them can run code in the Editor.
 
-The token lives under `%LOCALAPPDATA%\UnityMCP\tokens\`. On macOS and Linux it is `~/.local/share/UnityMCP/tokens/`, written with owner-only permissions.
+The token lives under `%LOCALAPPDATA%\UnityMCP\tokens\`. On macOS and Linux it is `~/.local/share/UnityMCP/tokens/`, restricted to its owner before the token is written. When that fails, the Editor logs an error to the Console.
 
-Preferences has a "Regenerate" action for the token. Re-register clients afterward with `isuzu-unity-cli doctor --fix`.
+Preferences has a "Regenerate" action for the token. Afterward, run `isuzu-unity-cli setup --mcp` in that project to register clients again.
 
 `setup --mcp --scope project` writes `.mcp.json` with `${UNITY_MCP_TOKEN}`, never a raw token, so a configuration file committed to a repository never contains the token.
 

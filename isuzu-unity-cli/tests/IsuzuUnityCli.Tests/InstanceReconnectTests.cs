@@ -8,11 +8,12 @@ public sealed class InstanceReconnectTests
 {
     private static readonly string Root = Path.Combine(Path.GetTempPath(), "reconnect", "Original");
 
-    private static InstanceDescriptor Editor(string path) => new()
+    private static InstanceDescriptor Editor(string path, int port = 27180, int pid = 0) => new()
     {
         ProjectName = "Same product name",
         ProjectPath = path,
-        Port = 27180,
+        Port = port,
+        Pid = pid,
         Token = "old",
     };
 
@@ -47,7 +48,8 @@ public sealed class InstanceReconnectTests
         var error = Assert.Throws<CliException>(() => InstanceResolver.Refresh([Editor(path)], original));
 
         Assert.Equal(3, error.ExitCode);
-        Assert.Contains(original.ProjectPath, error.Message);
+        Assert.Contains($"No running Editor has {Root} open.", error.Message);
+        Assert.EndsWith(InstanceResolver.SwitchByCommand, error.Message);
     }
 
     [Theory]
@@ -59,7 +61,9 @@ public sealed class InstanceReconnectTests
     {
         var original = Editor(path);
 
-        Assert.Throws<CliException>(() => InstanceResolver.Refresh([Editor(path)], original));
+        var error = Assert.Throws<CliException>(() => InstanceResolver.Refresh([Editor(path)], original));
+
+        Assert.Contains("no absolute project path", error.Message);
     }
 
     [Fact]
@@ -72,28 +76,79 @@ public sealed class InstanceReconnectTests
     }
 
     [Fact]
-    public void MissingAndAmbiguousDescriptorsCannotChooseAnEndpoint()
+    public void WhenNoEditorHasTheProjectOpenTheMessageSaysHowToSwitch()
     {
         var original = Editor(Path.Combine(Root, "Assets"));
 
-        Assert.Throws<CliException>(() => InstanceResolver.Refresh([], original));
-        Assert.Throws<CliException>(() => InstanceResolver.Refresh([Editor(Root), Editor(original.ProjectPath)], original));
+        var none = Assert.Throws<CliException>(
+            () => InstanceResolver.Refresh([], original, InstanceResolver.SwitchByRestart));
+        var another = Assert.Throws<CliException>(
+            () => InstanceResolver.Refresh([Editor(Path.Combine(Root + "-copy", "Assets"))], original, InstanceResolver.SwitchByRestart));
+
+        Assert.Equal($"No running Editor has {Root} open. No Editor is running. {InstanceResolver.SwitchByRestart}", none.Message);
+        Assert.Contains("Running: Same product name (folder: Original-copy).", another.Message);
+        Assert.EndsWith(InstanceResolver.SwitchByRestart, another.Message);
     }
 
     [Fact]
-    public void CaseDifferencesAreAcceptedOnlyOnWindows()
+    public void SeveralDescriptorsForTheProjectAreRefusedWhenNoneCanBeAsked()
     {
         var original = Editor(Path.Combine(Root, "Assets"));
-        var differentCase = Editor(original.ProjectPath.ToUpperInvariant());
 
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Same(differentCase, InstanceResolver.Refresh([differentCase], original));
-        }
-        else
-        {
-            Assert.Throws<CliException>(() => InstanceResolver.Refresh([differentCase], original));
-        }
+        var error = Assert.Throws<CliException>(() => InstanceResolver.Refresh(
+            [Editor(Root, port: 27181, pid: 11), Editor(original.ProjectPath, port: 27182, pid: 12)], original));
+
+        Assert.Equal(3, error.ExitCode);
+        Assert.Contains("pid 11, port 27181; pid 12, port 27182", error.Message);
+    }
+
+    [Fact]
+    public void OfSeveralDescriptorsTheOneThatAnswersIsChosen()
+    {
+        var original = Editor(Path.Combine(Root, "Assets"));
+        var stale = Editor(Root, port: 27181);
+        var live = Editor(original.ProjectPath, port: 27182);
+
+        Assert.Same(live, InstanceResolver.Refresh([stale, live], original, answers: d => ReferenceEquals(d, live)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SeveralDescriptorsThatAllOrNoneAnswerAreRefused(bool answer)
+    {
+        var original = Editor(Path.Combine(Root, "Assets"));
+
+        Assert.Throws<CliException>(() => InstanceResolver.Refresh(
+            [Editor(Root, port: 27181), Editor(original.ProjectPath, port: 27182)], original, answers: _ => answer));
+    }
+
+    [Fact]
+    public void ASingleDescriptorIsUsedWithoutAskingIt()
+    {
+        var original = Editor(Path.Combine(Root, "Assets"));
+        var restarted = Editor(original.ProjectPath, port: 27181);
+
+        Assert.Same(restarted, InstanceResolver.Refresh(
+            [restarted], original, answers: _ => throw new InvalidOperationException("asked")));
+    }
+
+    [Fact]
+    public void AFolderNameInAnotherCaseIsAnotherProject()
+    {
+        var original = Editor(Path.Combine(Root, "Assets"));
+        var differentCase = Editor(Path.Combine(Root.ToUpperInvariant(), "Assets"));
+
+        Assert.Throws<CliException>(() => InstanceResolver.Refresh([differentCase], original));
+    }
+
+    [Fact]
+    public void TheDriveLetterMayBeWrittenInEitherCase()
+    {
+        var original = Editor("c:/Work/Original/Assets");
+        var restarted = Editor(@"C:\Work\Original");
+
+        Assert.Same(restarted, InstanceResolver.Refresh([restarted], original));
     }
 
     [Theory]

@@ -238,6 +238,58 @@ public sealed class ProjectMatcherTests
         }
     }
 
+    /// <summary>
+    /// A path selects a project only when it is spelled the way a reconnect compares it, so a
+    /// session is never bound to a project it could not find again.
+    /// </summary>
+    [Fact]
+    public void APathInAnotherCaseSelectsNothing()
+    {
+        Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, "/P/A"));
+    }
+
+    [Fact]
+    public void AnExactSelectionTakesNoSubstring()
+    {
+        var e = Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, "Test B", exactOnly: true));
+
+        Assert.Equal(3, e.ExitCode);
+        Assert.StartsWith("No running Editor is named \"Test B\" exactly.", e.Message);
+        Assert.Throws<CliException>(() => ProjectMatcher.ByName(Renamed, "MCP VRChat", exactOnly: true));
+    }
+
+    [Fact]
+    public void AnExactSelectionStillTakesEitherNameInAnyCaseOrThePath()
+    {
+        Assert.Equal("UnityMCP v3 Test B", ProjectMatcher.ByName(Open, "unitymcp v3 test b", exactOnly: true).ProjectName);
+        Assert.Equal("VRChat", ProjectMatcher.ByName(Renamed, "UnityMCP VRChat Test", exactOnly: true).ProjectName);
+        Assert.Equal("Other", ProjectMatcher.ByName(Open, "/p/c", exactOnly: true).ProjectName);
+    }
+
+    /// <summary>
+    /// A path that names no open project is not tried as a name, where <c>.</c> would be part of
+    /// every name that contains a dot.
+    /// </summary>
+    [Fact]
+    public void ARelativePathIsResolvedAgainstTheWorkingDirectoryAndNeverMatchesByName()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "relative");
+        var game = Path.Combine(parent, "Game");
+        var open = new List<Project>
+        {
+            new("Game", Path.Combine(game, "Assets")),
+            new("Tools.2", Path.Combine(parent, "Tools", "Assets")),
+        };
+
+        Assert.Equal("Game", ProjectMatcher.ByName(open, ".", workingDirectory: game).ProjectName);
+        Assert.Equal("Game", ProjectMatcher.ByName(open, "../Game", workingDirectory: Path.Combine(parent, "Tools")).ProjectName);
+
+        var e = Assert.Throws<CliException>(() => ProjectMatcher.ByName(open, ".", workingDirectory: parent));
+
+        Assert.Equal(3, e.ExitCode);
+        Assert.StartsWith("No running Editor has", e.Message);
+    }
+
     [Fact]
     public void CaseInsensitiveOnlyOnWindows()
     {

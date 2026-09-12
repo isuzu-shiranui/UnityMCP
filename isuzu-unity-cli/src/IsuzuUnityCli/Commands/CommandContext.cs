@@ -50,14 +50,28 @@ public sealed class CommandContext
     /// </summary>
     public string? ReleaseCachePath { get; init; }
 
-    public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
+    /// <summary>
+    /// Whether an Editor answers /health with its own token, which only the Editor that published
+    /// the token can do. Substitutable so a test decides without a server.
+    /// </summary>
+    public Func<InstanceDescriptor, CancellationToken, bool> AnswersHealth { get; init; } =
+        (descriptor, cancellation) => HealthProbe.Answers(descriptor, TimeSpan.FromSeconds(2), cancellation);
+
+    /// <param name="exactOnly">Leaves out the substring match, for a selection a whole session is bound to.</param>
+    public InstanceDescriptor ResolveInstance(ParsedArgs parsed, bool exactOnly = false)
     {
-        return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
+        return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory, exactOnly);
     }
 
-    public InstanceDescriptor RefreshInstance(InstanceDescriptor selected)
+    public InstanceDescriptor RefreshInstance(
+        InstanceDescriptor selected,
+        string howToSwitch = InstanceResolver.SwitchByCommand,
+        CancellationToken cancellation = default)
     {
-        return InstanceResolver.Refresh(ReadDescriptors(), selected);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(Cancellation, cancellation);
+        var token = linked.Token;
+
+        return InstanceResolver.Refresh(ReadDescriptors(), selected, howToSwitch, descriptor => AnswersHealth(descriptor, token));
     }
 
     /// <summary>

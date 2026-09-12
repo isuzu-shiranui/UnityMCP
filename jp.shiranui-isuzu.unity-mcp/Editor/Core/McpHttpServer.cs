@@ -469,7 +469,7 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Replaces this project's token. Every client registered with the old one has to be
-        /// registered again (<c>isuzu-unity-cli doctor --fix</c>).
+        /// registered again (<c>isuzu-unity-cli setup --mcp</c>).
         /// </summary>
         public void RegenerateToken()
         {

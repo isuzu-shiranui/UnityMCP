@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Bridge;
+using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Tests.Fakes;
 using Xunit;
@@ -132,6 +133,57 @@ public sealed class McpStdioBridgeTests
 
         Assert.Equal(1, error["id"]!.GetValue<int>());
         Assert.Equal(-32000, error["error"]!["code"]!.GetValue<int>());
+        Assert.Equal("Unity Editor for Game is not running", error["error"]!["message"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AReasonTheResolverGivesIsTheErrorTheClientReads()
+    {
+        var lines = await Drive(
+            () => throw new CliException("No running Editor has /work/Game open.", 3),
+            input => input.Send(ToolsList));
+
+        var error = JsonNode.Parse(Assert.Single(lines))!;
+
+        Assert.Equal("No running Editor has /work/Game open.", error["error"]!["message"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(null, "this project")]
+    [InlineData("  ", "this project")]
+    [InlineData("${user_config.project}", "this project")]
+    [InlineData(" Game ", "Game")]
+    public async Task TheLabelNamesOnlyAProjectSomeoneTyped(string? projectOption, string label)
+    {
+        var input = new GatedReader();
+        var output = new RecordingWriter();
+        using var bridge = new McpStdioBridge(input, output, () => throw new IOException("unreadable"), projectOption);
+        var run = bridge.RunAsync();
+
+        input.Send(ToolsList);
+        input.CloseInput();
+        await run.WaitAsync(TimeSpan.FromSeconds(15));
+
+        var error = JsonNode.Parse(Assert.Single(output.Lines))!;
+
+        Assert.Equal($"Unity Editor for {label} is not running", error["error"]!["message"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task TheLabelPrefersTheNameTheEditorPublished()
+    {
+        var dead = FakeUnityServer.DescriptorFor(FakeUnityServer.FreePort(), "Game");
+        var input = new GatedReader();
+        var output = new RecordingWriter();
+        using var bridge = new McpStdioBridge(input, output, () => dead, "game");
+        var run = bridge.RunAsync();
+
+        input.Send(ToolsList);
+        input.CloseInput();
+        await run.WaitAsync(TimeSpan.FromSeconds(15));
+
+        var error = JsonNode.Parse(Assert.Single(output.Lines))!;
+
         Assert.Equal("Unity Editor for Game is not running", error["error"]!["message"]!.GetValue<string>());
     }
 

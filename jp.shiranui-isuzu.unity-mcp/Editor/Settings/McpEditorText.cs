@@ -77,8 +77,8 @@ namespace UnityMCP.Editor.Settings
             ["The descriptor and token files under {0} are credentials. Anything that can read them can run code in this Editor."] =
                 "{0} の descriptor ファイルとトークンファイルは資格情報です。これらを読めるものは、この Editor 内でコードを実行できます。",
             ["Regenerate token"] = "トークンを再発行",
-            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"] =
-                "今のトークンで登録済みの MCP クライアントは、isuzu-unity-cli doctor --fix で登録し直すまで動かなくなります。続けますか？",
+            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli setup --mcp. Continue?"] =
+                "今のトークンで登録済みの MCP クライアントは、isuzu-unity-cli setup --mcp で登録し直すまで動かなくなります。続けますか？",
             ["Cancel"] = "キャンセル",
 
             // Settings
@@ -154,8 +154,8 @@ namespace UnityMCP.Editor.Settings
             ["The descriptor and token files under {0} are credentials. Anything that can read them can run code in this Editor."] =
                 "Các tệp mô tả kết nối và tệp token trong {0} chứa thông tin xác thực. Bất kỳ ai hoặc chương trình nào đọc được chúng đều có thể chạy mã trong Editor này.",
             ["Regenerate token"] = "Tạo lại token",
-            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"] =
-                "Mọi ứng dụng khách MCP đã đăng ký bằng token hiện tại sẽ ngừng hoạt động cho đến khi được đăng ký lại bằng isuzu-unity-cli doctor --fix. Tiếp tục?",
+            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli setup --mcp. Continue?"] =
+                "Mọi ứng dụng khách MCP đã đăng ký bằng token hiện tại sẽ ngừng hoạt động cho đến khi được đăng ký lại bằng isuzu-unity-cli setup --mcp. Tiếp tục?",
             ["Cancel"] = "Hủy",
 
             // Settings

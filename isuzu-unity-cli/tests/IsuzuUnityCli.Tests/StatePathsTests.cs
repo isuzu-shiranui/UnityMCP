@@ -75,6 +75,31 @@ public sealed class StatePathsTests
     }
 
     [Fact]
+    public void ARootWrittenWithATrailingSeparatorIsTheSameRoot()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "state");
+        var root = Path.Combine(parent, "UnityMCP");
+
+        WithEnvironment(new()
+        {
+            ["UNITY_MCP_STATE_DIR"] = string.Join(Path.PathSeparator, root + Path.DirectorySeparatorChar, root),
+            ["LOCALAPPDATA"] = parent,
+        }, () => Assert.Equal([root + Path.DirectorySeparatorChar], StatePaths.Roots()));
+    }
+
+    [Fact]
+    public void RootsThatDifferOnlyInCaseAreBothRead()
+    {
+        var lower = Path.Combine(Path.GetTempPath(), "state", "unitymcp");
+        var upper = Path.Combine(Path.GetTempPath(), "state", "UnityMCP");
+
+        WithEnvironment(new()
+        {
+            ["UNITY_MCP_STATE_DIR"] = string.Join(Path.PathSeparator, lower, upper),
+        }, () => Assert.Equal([lower, upper], StatePaths.Roots()));
+    }
+
+    [Fact]
     public void EmptyVariablesAreSkippedAndDuplicatesCollapse()
     {
         WithEnvironment(new()

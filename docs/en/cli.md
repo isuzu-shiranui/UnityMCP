@@ -56,11 +56,25 @@ isuzu-unity-cli call play_mode_status
 
 Run from outside every project, the CLI selects the only running Editor. If several Editors are running, it lists the candidates and stops with exit code 3.
 
-`--project` matches an exact project name first. When nothing matches exactly, it falls back to a unique substring match.
+Run from inside a Unity project folder that no running Editor has open, it stops with exit code 3 as well, rather than defaulting to whichever Editor happens to be open. Open that project, or pass `--project` to choose another.
 
-After selection, `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the same project path. A new port, token or product name is accepted; another project with the same name is not. If that path is missing or ambiguous, the command cannot switch to another Editor. Start a new command to select a different project.
+`--project` is matched in this order:
+
+1. The product name (Player Settings > Product Name), exactly, ignoring case.
+2. The folder name shown in the Editor's title bar, exactly, ignoring case.
+3. A unique substring of either name. `mcp-stdio`, `setup --mcp` and `update --project` skip this step, because they bind a session to the project or modify its files.
+
+Any value that contains a slash (`/` or `\`), or is exactly `.` or `..`, is treated as a path. A relative path is resolved against the working directory, and only the project at that exact path is selected; no name is tried. Paths are compared case-sensitively, except for a Windows drive letter.
+
+After selection, `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the same project path. They accept a new port, token or product name, but never switch to another project. When several descriptors name that path, each one is asked for `/health` with its own token, and the one that answers is used. When not exactly one answers, or no Editor has that path open, the command stops with the reason and how to switch. To use another project, run a new command, or restart the MCP server for `mcp-stdio`.
 
 `mcp-stdio` can start before an Editor is open. It becomes bound when it first selects a project. Descriptors without an absolute project path can be used initially, but cannot be rediscovered safely after a connection failure.
+
+A reconnect is refused even for the same project when its path is written differently:
+
+- The project was reopened through a directory junction, a `subst` drive or an 8.3 short name.
+- The project was reopened through a path with different casing, other than the drive letter.
+- The project was moved or copied.
 
 ## Exit codes
 
@@ -69,8 +83,8 @@ After selection, `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the s
 | 0 | success |
 | 1 | error (for `verify`: compile errors or test failures) |
 | 2 | bad arguments. An option the command does not have, an option missing its value, and `call` without a tool name all return it. So does a `verify` `--timeout` that is not a positive number, or a `verify` `--logs` that is not a count |
-| 3 | no Editor found, or the choice is ambiguous |
-| 4 | `verify` exceeded `--timeout` |
+| 3 | no Editor found, the choice is ambiguous, the selected project cannot be reconnected to, or the Editor kept rejecting the token |
+| 4 | `verify` or `jobs --wait` exceeded `--timeout` |
 | 130 | interrupted with Ctrl+C |
 
 Errors go to stderr. That makes the CLI usable in scripts.
@@ -88,6 +102,8 @@ isuzu-unity-cli verify --raw                 # the summary as JSON
 ```
 
 The Editor's server goes down during the compile. `verify` expects the connection errors in that window and waits. It re-reads the descriptor before continuing. `--timeout` defaults to 300 seconds.
+
+When the token is rejected, the descriptor is read again as well. If the token there has not changed, it keeps reading for 15 seconds, then stops with exit code 3. With `--raw`, a summary of the steps that ran is still printed, with `ok: false`.
 
 Console errors are counted. They do not decide the result, because old entries can linger.
 
@@ -120,6 +136,8 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project  # also register
 
 `--mcp` needs a running Editor. The URL and the token come from that Editor's descriptor. The flags are described in [Connecting MCP clients](mcp-clients.md). A leftover v3 skill folder is removed.
 
+`--project` is matched only by exact name or by path. When nothing matches, the reason is printed.
+
 ## update
 
 The CLI and the Unity package are released under one version, and the release refuses to publish them apart. On a machine they drift anyway: `upgrade` replaces the CLI and the package is updated somewhere else entirely.
@@ -142,17 +160,21 @@ Four of the six ways the package can be installed cannot be updated from here, a
 
 After a rewrite, Unity resolves the manifest when the Editor next has focus. `package_resolve` does it without waiting.
 
+If the CLI was installed with winget or as a dotnet tool, `update` and `upgrade` do not replace it. They print that tool's update command instead, and refuse `--release`. Until the CLI has been updated that way, each project's package is moved only as far as the version the CLI runs, and a project already on a newer version is left unchanged.
+
 Every other command says once, on stderr, when a newer release exists. That line is read from what `doctor` or `update` last found out and never from the network: a whole `call` finishes in about 20 ms, and asking GitHub carries a five-second timeout.
 
 ## doctor / upgrade / uninstall
 
 ```bash
 isuzu-unity-cli doctor          # what is installed, where, and what is stale
-isuzu-unity-cli doctor --fix    # repairs what it finds, e.g. re-registering clients after a token regeneration
+isuzu-unity-cli doctor --fix    # repairs what it finds, e.g. a stale skill or an entry whose port moved
 isuzu-unity-cli upgrade         # updates the CLI alone; --release pins one
 isuzu-unity-cli uninstall       # lists what would go
 isuzu-unity-cli uninstall --yes # removes it
 ```
+
+`doctor --fix` rewrites an entry whose token ties it to a running Editor, and a Claude Code entry filed under that Editor's project path. An entry that points at the same URL with a different token is left alone, since there is no reliable way to tell which project it belongs to, and `setup --mcp` is suggested instead.
 
 `uninstall` removes only the `isuzu-unity` entry from your MCP client configs. It touches no other server and no other setting.
 

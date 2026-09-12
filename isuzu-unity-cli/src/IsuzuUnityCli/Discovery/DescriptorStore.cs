@@ -1,4 +1,5 @@
 using System.Text.Json;
+using IsuzuUnityCli.Http;
 
 namespace IsuzuUnityCli.Discovery;
 
@@ -9,11 +10,20 @@ public static class DescriptorStore
     /// than reported: the Editor rewrites its descriptor on every start, and one left behind by a
     /// crash would otherwise register a phantom instance forever.
     /// </summary>
-    public static List<InstanceDescriptor> ReadAll(IEnumerable<string>? directories = null, Func<int, bool>? isAlive = null)
+    /// <param name="answers">
+    /// Asked instead of the pid for a descriptor a Windows Editor published, read by a CLI that is
+    /// not on Windows, as under WSL: that pid names a process this host cannot see.
+    /// </param>
+    public static List<InstanceDescriptor> ReadAll(
+        IEnumerable<string>? directories = null,
+        Func<int, bool>? isAlive = null,
+        Func<InstanceDescriptor, bool>? answers = null)
     {
         directories ??= StatePaths.DescriptorDirectories();
         isAlive ??= ProcessLiveness.IsAlive;
+        answers ??= descriptor => HealthProbe.Answers(descriptor, TimeSpan.FromSeconds(1));
         var found = new List<InstanceDescriptor>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var directory in directories)
         {
@@ -34,15 +44,11 @@ public static class DescriptorStore
 
             foreach (var file in files)
             {
-                InstanceDescriptor? parsed;
+                byte[] bytes;
 
                 try
                 {
-                    parsed = Parse(File.ReadAllBytes(file));
-                }
-                catch (JsonException)
-                {
-                    continue;
+                    bytes = File.ReadAllBytes(file);
                 }
                 catch (IOException)
                 {
@@ -53,7 +59,26 @@ public static class DescriptorStore
                     continue;
                 }
 
-                if (parsed is not null && IsUsable(parsed) && isAlive(parsed.Pid))
+                // Identical contents describe one Editor, whichever spelling of a directory reached
+                // the file. Whether two spellings name one folder depends on the file system, so the
+                // contents decide.
+                if (!seen.Add(Convert.ToBase64String(bytes)))
+                {
+                    continue;
+                }
+
+                InstanceDescriptor? parsed;
+
+                try
+                {
+                    parsed = Parse(bytes);
+                }
+                catch (JsonException)
+                {
+                    continue;
+                }
+
+                if (parsed is not null && IsUsable(parsed) && IsRunning(parsed, isAlive, answers))
                 {
                     found.Add(parsed);
                 }
@@ -62,6 +87,11 @@ public static class DescriptorStore
 
         return found;
     }
+
+    private static bool IsRunning(InstanceDescriptor descriptor, Func<int, bool> isAlive, Func<InstanceDescriptor, bool> answers) =>
+        descriptor.Pid > 0 && !OperatingSystem.IsWindows() && ProjectKey.IsWindowsShaped(descriptor.ProjectPath)
+            ? answers(descriptor)
+            : isAlive(descriptor.Pid);
 
     /// <summary>
     /// A hand-rolled read of the few fields the descriptor has. Going through the serializer costs

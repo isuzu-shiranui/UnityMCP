@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
 
@@ -9,7 +10,11 @@ namespace IsuzuUnityCli.Commands;
 
 public static class JobsCommand
 {
-    public static async Task<int> Run(ParsedArgs parsed, CommandContext context, int pollIntervalMs = 500)
+    public static async Task<int> Run(
+        ParsedArgs parsed,
+        CommandContext context,
+        int pollIntervalMs = 500,
+        int unauthorizedGraceMs = 15000)
     {
         var id = parsed.Positional.Count > 0 ? parsed.Positional[0] : "";
         var path = id.Length > 0 ? "/jobs/" + Uri.EscapeDataString(id) : "/jobs";
@@ -30,7 +35,7 @@ public static class JobsCommand
                 2);
         }
 
-        return await Wait(parsed, context, instance, path, id, pollIntervalMs);
+        return await Wait(parsed, context, instance, path, id, pollIntervalMs, unauthorizedGraceMs);
     }
 
     private static async Task<int> Wait(
@@ -39,7 +44,8 @@ public static class JobsCommand
         InstanceDescriptor instance,
         string path,
         string id,
-        int pollIntervalMs)
+        int pollIntervalMs,
+        int unauthorizedGraceMs)
     {
         var timeout = Seconds(parsed.Option("timeout"), 300);
         var raw = parsed.HasFlag("raw");
@@ -49,6 +55,9 @@ public static class JobsCommand
 
         Envelope? last = null;
         string? lastNotice = null;
+        string? unreachable = null;
+        Stopwatch? rejectedSince = null;
+        var reauthenticated = false;
 
         try
         {
@@ -64,12 +73,52 @@ public static class JobsCommand
                 {
                     // The listener going down for a domain reload, or coming back up after one on a
                     // different port with a different token. The job is still the same job, so the
-                    // descriptor is re-read and polling continues.
-                    instance = context.RefreshInstance(instance);
+                    // descriptor is re-read and polling continues against the same project.
+                    var changed = false;
+
+                    try
+                    {
+                        var refreshed = context.RefreshInstance(instance, cancellation: deadline.Token);
+                        changed = refreshed.Endpoint != instance.Endpoint || refreshed.Token != instance.Token;
+                        instance = refreshed;
+                        unreachable = e.HttpStatus == 401
+                            ? $"The Editor at {instance.Endpoint} rejects the token published for "
+                              + $"{ProjectKey.Display(instance.ProjectPath)}. {InstanceResolver.SwitchByCommand}"
+                            : e.Message;
+                    }
+                    catch (CliException refused)
+                    {
+                        // Briefly absent while the Editor rewrites its descriptor, or gone for good.
+                        // Either way no other project is polled, and the reason is kept for the report.
+                        unreachable = refused.Message;
+                    }
+
+                    if (e.HttpStatus == 401)
+                    {
+                        if (changed && !reauthenticated)
+                        {
+                            reauthenticated = true;
+                        }
+                        else
+                        {
+                            // A restarted Editor's descriptor can lag its restart, so a rejection is
+                            // final only once the token has stayed the same for a while.
+                            rejectedSince ??= Stopwatch.StartNew();
+
+                            if (rejectedSince.ElapsedMilliseconds >= unauthorizedGraceMs)
+                            {
+                                throw new CliException(unreachable ?? e.Message, 3);
+                            }
+                        }
+                    }
+
                     await Task.Delay(pollIntervalMs, deadline.Token);
                     continue;
                 }
 
+                unreachable = null;
+                rejectedSince = null;
+                reauthenticated = false;
                 last = envelope;
 
                 if (envelope.IsError || Status(envelope) != "running")
@@ -88,9 +137,10 @@ public static class JobsCommand
                 context.Report(last, raw);
             }
 
-            context.Err.WriteLine(
-                $"job {id} was still running after {Format(timeout)}s. It keeps running in the "
-                + "Editor; poll it again, or read why it is stuck in the notice above.");
+            context.Err.WriteLine(unreachable is not null
+                ? $"job {id} could not be reached when the {Format(timeout)}s timeout ran out. {unreachable}"
+                : $"job {id} was still running after {Format(timeout)}s. It keeps running in the "
+                  + "Editor; poll it again, or read why it is stuck in the notice above.");
 
             return 4;
         }

@@ -228,6 +228,9 @@ stop on it. `--timeout <seconds>` (300 by default) gives up waiting without stop
 |---|---|
 | `No running Unity Editor found` | No Editor has a project open with the package installed |
 | `Several Editors are running` | Pass `--project <name>` |
+| `No running Editor has <folder> open` | The project the command selected is not open. Open it, or run the command again with `--project` |
+| `The working directory is inside the Unity project` | That project is not open. Open it, or pass `--project` to choose another |
+| `kept rejecting the token` | The descriptor is stale; restart the Editor |
 | `error [invalid_params]` | Argument missing or the value was rejected; the text says which |
 | `error [tool_not_found]` | Run `isuzu-unity-cli tools` |
 | `error [unauthorized]` | The descriptor is stale; restart the Editor |

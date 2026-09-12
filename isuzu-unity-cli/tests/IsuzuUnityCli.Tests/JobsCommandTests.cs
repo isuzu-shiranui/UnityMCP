@@ -90,6 +90,46 @@ public sealed class JobsCommandTests
     }
 
     [Fact]
+    public async Task ATokenThatStaysRejectedStopsWithTheReason()
+    {
+        using var server = new FakeUnityServer()
+            .Default(401, """{"status":"error","error":{"code":"unauthorized","message":"bad token"}}""");
+        var (context, _, _) = Context(server);
+
+        var error = await Assert.ThrowsAsync<CliException>(() => JobsCommand.Run(
+            ArgParser.Parse(["jobs", "j1", "--wait"]), context, pollIntervalMs: 5, unauthorizedGraceMs: 50));
+
+        Assert.Equal(3, error.ExitCode);
+        Assert.Contains("rejects the token", error.Message);
+    }
+
+    [Fact]
+    public async Task AProjectThatDoesNotComeBackTimesOutWithTheReason()
+    {
+        var gone = FakeUnityServer.DescriptorFor(FakeUnityServer.FreePort(), "Gone");
+        var reads = 0;
+        var error = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = new StringWriter(),
+            Err = error,
+            ReadDescriptors = () => ++reads == 1 ? [gone] : [],
+            WorkingDirectory = Path.GetTempPath(),
+            Client = new UnityHttpClient(new RetryOptions
+            {
+                InitialBackoffMs = 5,
+                MaxBackoffMs = 10,
+                BudgetMs = 50,
+                PerAttemptTimeoutMs = 500,
+            }),
+        };
+
+        Assert.Equal(4, await Jobs(context, "j1", "--wait", "--timeout", "1"));
+        Assert.Contains("could not be reached when the 1s timeout ran out.", error.ToString());
+        Assert.Contains("No running Editor has", error.ToString());
+    }
+
+    [Fact]
     public async Task AJobThatWasCancelledReachesTheShellAsAFailure()
     {
         using var server = new FakeUnityServer().Enqueue(200, Cancelled);

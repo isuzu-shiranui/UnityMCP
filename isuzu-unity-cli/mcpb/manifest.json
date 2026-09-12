@@ -41,7 +41,7 @@
     "project": {
       "type": "string",
       "title": "Unity project name",
-      "description": "Leave this empty when only one Unity project is open, which is the usual case. With several open, name the one to connect to: either the name in the Editor's title bar, which is the project folder, or the Product Name from Player Settings. The Editor must be open with the jp.shiranui-isuzu.unity-mcp package installed.",
+      "description": "Leave this empty when only one Unity project is open, which is the usual case. With several open, name the one to connect to: either the name in the Editor's title bar, which is the project folder, or the Product Name from Player Settings. The name must match exactly. The extension stays bound to the first project it connects to; turn it off and on to switch. The Editor must be open with the jp.shiranui-isuzu.unity-mcp package installed.",
       "required": false
     }
   },

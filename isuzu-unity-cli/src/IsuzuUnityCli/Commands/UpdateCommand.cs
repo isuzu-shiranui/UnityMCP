@@ -236,7 +236,9 @@ public static class UpdateCommand
     {
         if (parsed.Option("project") is not null)
         {
-            return new List<InstanceDescriptor> { context.ResolveInstance(parsed) };
+            // The manifest of the project this names is rewritten, so a name that is only part of
+            // another open project's must not pick that one.
+            return new List<InstanceDescriptor> { context.ResolveInstance(parsed, exactOnly: true) };
         }
 
         return context.ReadDescriptors().ToList();

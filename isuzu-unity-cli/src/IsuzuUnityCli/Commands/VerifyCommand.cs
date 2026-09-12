@@ -9,14 +9,16 @@ using IsuzuUnityCli.Http;
 namespace IsuzuUnityCli.Commands;
 
 /// <summary>
-/// How often the polling loops ask the Editor, and how long a requested compilation may
-/// take to start before the standing result is taken as the answer.
+/// How often the polling loops ask the Editor, how long a requested compilation may take to start
+/// before the standing result is taken as the answer, and how long a rejected token is read again
+/// before the rejection is taken as final.
 /// </summary>
 public sealed record VerifyPolling(
     int CompileIntervalMs = 500,
     int TestIntervalMs = 1000,
     int CompileStartGraceMs = 5000,
-    int JobIntervalMs = 500);
+    int JobIntervalMs = 500,
+    int UnauthorizedGraceMs = 15000);
 
 /// <summary>
 /// Recompiles, optionally runs a test suite, reads the console, and answers with one exit code.
@@ -35,8 +37,7 @@ public static class VerifyCommand
         var logLimit = Count(parsed.Option("logs"), 20);
         var startedAt = DateTimeOffset.UtcNow;
         var elapsed = Stopwatch.StartNew();
-        var run = new Verifier(context, parsed, context.ResolveInstance(parsed), intervals.JobIntervalMs);
-        UnityError? failed = null;
+        var run = new Verifier(context, parsed, context.ResolveInstance(parsed), intervals.JobIntervalMs, intervals.UnauthorizedGraceMs);
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.Cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(timeout));
@@ -63,7 +64,12 @@ public static class VerifyCommand
         {
             // Held rather than thrown, so the steps that already succeeded are still reported.
             // A run that stopped at the tests still knows whether the code compiled.
-            failed = e;
+            run.StoppedBy = e;
+        }
+        catch (CliException e)
+        {
+            // A reconnect refused for good. Held the same way, so the summary still says what ran.
+            run.RefusedBy = e;
         }
 
         if (parsed.HasFlag("raw"))
@@ -78,10 +84,22 @@ public static class VerifyCommand
         if (run.TimedOut)
         {
             context.Err.WriteLine($"verify timed out after {Format(timeout)}s");
+
+            if (run.LastRefusal is { } refusal)
+            {
+                context.Err.WriteLine(refusal);
+            }
+
             return 4;
         }
 
-        if (failed is not null)
+        if (run.RefusedBy is { } refused)
+        {
+            context.Err.WriteLine(refused.Message);
+            return refused.ExitCode;
+        }
+
+        if (run.StoppedBy is { } failed)
         {
             context.ReportError(failed.Code, failed.Message);
             return 1;
@@ -150,22 +168,40 @@ public static class VerifyCommand
     private sealed class Verifier
     {
         private const int TransportRetryMs = 200;
+        private const int UnauthorizedRetryMs = 500;
 
         private readonly CommandContext _context;
         private readonly ParsedArgs _parsed;
         private readonly int _jobIntervalMs;
+        private readonly int _unauthorizedGraceMs;
         private InstanceDescriptor _instance;
         private string? _lastNotice;
+        private CliException? _refusal;
 
-        public Verifier(CommandContext context, ParsedArgs parsed, InstanceDescriptor instance, int jobIntervalMs = 500)
+        public Verifier(
+            CommandContext context,
+            ParsedArgs parsed,
+            InstanceDescriptor instance,
+            int jobIntervalMs = 500,
+            int unauthorizedGraceMs = 15000)
         {
             _context = context;
             _parsed = parsed;
             _instance = instance;
             _jobIntervalMs = jobIntervalMs;
+            _unauthorizedGraceMs = unauthorizedGraceMs;
         }
 
         public bool TimedOut { get; set; }
+
+        /// <summary>The failure a step stopped at. The steps after it never ran, so the run is not ok.</summary>
+        public UnityError? StoppedBy { get; set; }
+
+        /// <summary>The refusal a step stopped at, which also leaves the run not ok.</summary>
+        public CliException? RefusedBy { get; set; }
+
+        /// <summary>Why the last reconnect was refused, while no later one has succeeded.</summary>
+        public string? LastRefusal => _refusal?.Message;
 
         private bool CompileRan { get; set; }
 
@@ -197,6 +233,8 @@ public static class VerifyCommand
 
         public bool Ok =>
             !TimedOut
+            && StoppedBy is null
+            && RefusedBy is null
             && (!CompileRan || CompileSucceeded == true)
             && (!TestsRan || (Failures.Count == 0 && TestStatus == "completed"));
 
@@ -414,6 +452,7 @@ public static class VerifyCommand
         {
             var json = body.ToJsonString();
             var reauthenticated = false;
+            Stopwatch? rejectedSince = null;
             var replayable = tool != "test_run";
 
             while (true)
@@ -426,11 +465,26 @@ public static class VerifyCommand
                         _instance, HttpMethod.Post, "/tools/" + tool, json,
                         replayable ? Idempotency.Safe : Idempotency.Unsafe, cancellation);
                 }
-                catch (UnityError e) when (e.HttpStatus == 401 && !reauthenticated)
+                catch (UnityError e) when (e.HttpStatus == 401)
                 {
-                    // A restarted server publishes a new token; a second rejection is the real thing.
-                    reauthenticated = true;
-                    Rediscover();
+                    // A restarted server publishes a new token, and its descriptor can lag the
+                    // restart, so an unchanged descriptor is read again for a while before the
+                    // rejection is taken as final. A rejected request never reached the tool, so
+                    // even test_run can be sent again.
+                    if (Rediscover(cancellation) && !reauthenticated)
+                    {
+                        reauthenticated = true;
+                        continue;
+                    }
+
+                    rejectedSince ??= Stopwatch.StartNew();
+
+                    if (rejectedSince.ElapsedMilliseconds >= _unauthorizedGraceMs)
+                    {
+                        throw Rejected(e);
+                    }
+
+                    await Task.Delay(UnauthorizedRetryMs, cancellation);
                     continue;
                 }
                 // Only a reply that never arrived leaves test_run unconfirmed. A gateway status means
@@ -443,7 +497,7 @@ public static class VerifyCommand
                     // door, the other never got through it. Neither can have started a test run.
                     if (e.Code is "ECONNREFUSED" or "ECONNTIMEOUT")
                     {
-                        Rediscover();
+                        Rediscover(cancellation);
                         await Task.Delay(TransportRetryMs, cancellation);
                         continue;
                     }
@@ -455,7 +509,7 @@ public static class VerifyCommand
                     // just restarted after it, answers an empty 200 before it can serve; by the
                     // time a probe could look, the server is already healthy, so the reply is
                     // treated as the same window as a refused connection.
-                    Rediscover();
+                    Rediscover(cancellation);
                     await Task.Delay(TransportRetryMs, cancellation);
                     continue;
                 }
@@ -465,7 +519,7 @@ public static class VerifyCommand
                     // only while the Editor is still compiling; from an Editor that is up and
                     // settled it is the tool's own failure, and repeating it until the deadline
                     // would only hide it.
-                    Rediscover();
+                    Rediscover(cancellation);
 
                     if (!replayable || !await IsReloading(cancellation))
                     {
@@ -517,6 +571,8 @@ public static class VerifyCommand
         private async Task<JsonObject?> AwaitJob(string jobId, CancellationToken cancellation)
         {
             var path = "/jobs/" + Uri.EscapeDataString(jobId);
+            var reauthenticated = false;
+            Stopwatch? rejectedSince = null;
 
             while (true)
             {
@@ -532,14 +588,34 @@ public static class VerifyCommand
                 {
                     return null;
                 }
-                catch (UnityError e) when (e.HttpStatus is null || e.Code == "non_json" || e.HttpStatus == 401)
+                catch (UnityError e) when (e.HttpStatus == 401)
+                {
+                    if (Rediscover(cancellation) && !reauthenticated)
+                    {
+                        reauthenticated = true;
+                        continue;
+                    }
+
+                    rejectedSince ??= Stopwatch.StartNew();
+
+                    if (rejectedSince.ElapsedMilliseconds >= _unauthorizedGraceMs)
+                    {
+                        throw Rejected(e);
+                    }
+
+                    continue;
+                }
+                catch (UnityError e) when (e.HttpStatus is null || e.Code == "non_json")
                 {
                     // The listener going down for a domain reload, or coming back up after one.
                     // The job is still the same job, so polling continues; if the reload took it
                     // with it the next poll says job_not_found and the caller starts over.
-                    Rediscover();
+                    Rediscover(cancellation);
                     continue;
                 }
+
+                reauthenticated = false;
+                rejectedSince = null;
 
                 switch (Text(job["status"]))
                 {
@@ -605,18 +681,33 @@ public static class VerifyCommand
         }
 
         /// <summary>Re-reads the descriptor, whose port and token both change when the server restarts.</summary>
-        private void Rediscover()
+        /// <returns>Whether the endpoint or the token changed.</returns>
+        private bool Rediscover(CancellationToken cancellation)
         {
             try
             {
-                _instance = _context.RefreshInstance(_instance);
+                var refreshed = _context.RefreshInstance(_instance, cancellation: cancellation);
+                var changed = refreshed.Endpoint != _instance.Endpoint || refreshed.Token != _instance.Token;
+
+                _instance = refreshed;
+                _refusal = null;
+                return changed;
             }
-            catch (CliException)
+            catch (CliException e)
             {
-                // The descriptor is rewritten rather than updated, so it is briefly absent.
-                // Keep the last endpoint for this project instead of choosing another Editor.
+                // The descriptor is rewritten rather than updated, so it is briefly absent. The
+                // last endpoint for this project is kept, and the reason is held for the report.
+                _refusal = e;
+                return false;
             }
         }
+
+        /// <summary>A rejection taken as final, with the refused reconnect behind it when there was one.</summary>
+        private CliException Rejected(UnityError e) => new(
+            _refusal?.Message
+            ?? $"The Editor at {_instance.Endpoint} kept rejecting the token published for "
+               + $"{ProjectKey.Display(_instance.ProjectPath)} ({e.Message}). {InstanceResolver.SwitchByCommand}",
+            3);
 
         private void AddOption(JsonObject body, string name)
         {
