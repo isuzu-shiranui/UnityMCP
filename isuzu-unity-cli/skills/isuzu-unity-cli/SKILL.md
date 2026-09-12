@@ -110,6 +110,14 @@ uses `await` returns no value. The Editor does not block its main thread on an i
 Identical snippets are compiled once and reused. Each distinct snippet loads an assembly that
 cannot be unloaded, so a long session of one-off snippets grows the domain until the next reload.
 
+## Keeping the two halves in step
+
+The CLI and the Unity package ship as one version. When a command prints a line on stderr saying a
+newer release is out, or a reply mentions version skew, `isuzu-unity-cli update` moves both: it
+replaces the CLI and retargets each project's package. It refuses the installs it cannot move - a
+`file:` working copy, a folder under `Packages/`, anything VCC or ALCOM manages - and names the
+step that does move them. `--dry-run` says what would change without changing it.
+
 ## The rest of it
 
 Two files sit beside this one. Read the one the task calls for rather than both:
@@ -170,9 +178,10 @@ isuzu-unity-cli call reflect_read --json '{"paths":[
 the scene objects using that material. It works on assets only, so a material created at run time
 and never saved has no path to search by; `sharedMaterial` through `paths` reaches those too.
 
-A picture is the other end of the scale: one screenshot at the default size is around 40,000
-tokens, so four of them outweigh every other call of a session. Read the numbers with
-`inspect_read` or `reflect_read` when a number would answer the question.
+A picture is the other end of the scale. `capture_screenshot` writes the file and prints about 90
+tokens, but looking at the picture costs the image: about 800 tokens at the default 1024x576,
+more than all but a handful of replies here. Read the numbers with `inspect_read` or
+`reflect_read` when a number would answer the question.
 
 ## Finding what a reply cannot show
 

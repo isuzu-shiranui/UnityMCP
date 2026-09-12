@@ -1,6 +1,3 @@
-# Orchestra pipeline state (per-session, not shared)
-.orchestra/
-
 # Crash dumps / debug artifacts
 *.stackdump
 

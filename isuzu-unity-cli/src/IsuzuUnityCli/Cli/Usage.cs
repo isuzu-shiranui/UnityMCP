@@ -22,6 +22,8 @@ public static class Usage
           setup                          Register with an MCP client and install the skill
           doctor                         Show what is installed, where, and what is stale
           uninstall                      Remove everything this tool put on the machine
+          update                         Bring the CLI and every project's package to the newest
+                                         release. The two ship as one version
           upgrade                        Replace this executable with the latest release
 
         CALL ARGUMENTS
@@ -47,8 +49,8 @@ public static class Usage
           --group <g>[,<g>]              Only these groups: diagnostics, authoring, rendering,
                                          timeline, build, code, input. On mcp-stdio it narrows
                                          what the client is offered, which it otherwise pays for
-                                         on every request: every tool together is about 40,000 tokens
-                                         and diagnostics alone is about 9,500
+                                         on every request: every tool together is about 43,000 tokens
+                                         and diagnostics alone is about 11,000
 
         VERIFY OPTIONS
           --no-compile                   Skip the compile step
@@ -110,6 +112,16 @@ public static class Usage
         DOCTOR OPTIONS
           --fix                          Reinstall stale skills and rewrite stale MCP entries
 
+        UPDATE OPTIONS
+          --project <name>               Only this project's package; otherwise every Editor that
+                                         is running
+          --release <tag>                Go to this release instead of the newest
+          --dry-run                      Say what would change and change nothing
+
+          Four of the six ways the package can be installed cannot be updated from here - a
+          working copy, a folder under Packages/, and anything VCC or ALCOM manages. Those are
+          named with the step that does move them.
+
         UPGRADE OPTIONS
           --release <tag>                Install this release instead of the newest, e.g. v4.1.1.
                                          The way back when a new one turns out to be broken.
@@ -132,6 +144,8 @@ public static class Usage
           isuzu-unity-cli call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
           isuzu-unity-cli call execute_code --file snippet.cs
           isuzu-unity-cli jobs execute_code-3f2a-1 --wait
+          isuzu-unity-cli update --dry-run
+          isuzu-unity-cli update
           isuzu-unity-cli doctor --fix
           isuzu-unity-cli uninstall --yes
         """;

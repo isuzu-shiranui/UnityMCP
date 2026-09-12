@@ -19,6 +19,7 @@ isuzu-unity-cli jobs [id]                # list jobs, or report one by id
 isuzu-unity-cli jobs <id> --wait         # poll until it ends, then print its last answer
 isuzu-unity-cli setup [--mcp] [...]      # install the skill and register the MCP endpoint
 isuzu-unity-cli doctor [--fix]           # what is installed, where, and what is stale
+isuzu-unity-cli update [--dry-run]       # bring the CLI and every project's package up together
 isuzu-unity-cli upgrade [--release vX]   # update the CLI
 isuzu-unity-cli uninstall [--yes]        # list what would be removed, then remove it
 isuzu-unity-cli mcp-stdio --project <n>  # stdio bridge for Claude Desktop
@@ -115,12 +116,36 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project  # also register
 
 `--mcp` needs a running Editor. The URL and the token come from that Editor's descriptor. The flags are described in [Connecting MCP clients](mcp-clients.md). A leftover v3 skill folder is removed.
 
+## update
+
+The CLI and the Unity package are released under one version, and the release refuses to publish them apart. On a machine they drift anyway: `upgrade` replaces the CLI and the package is updated somewhere else entirely.
+
+```bash
+isuzu-unity-cli update --dry-run   # what would change
+isuzu-unity-cli update             # the CLI, then every running Editor's package
+isuzu-unity-cli update --project X # only that project's package
+```
+
+Four of the six ways the package can be installed cannot be updated from here, and each is named with the step that does move it:
+
+| How it is installed | What `update` does |
+|---|---|
+| A git URL in `Packages/manifest.json` | Rewrites the tag in the dependency |
+| A version from a registry | Rewrites the version |
+| `file:` — a working copy | Refuses. Pulling it forward is git's job |
+| A folder under `Packages/` | Refuses. Unity loads that and ignores the manifest, so editing the manifest would change a line nothing reads |
+| VCC or ALCOM | Refuses. Those keep their own record in `vpm-manifest.json`; update it there |
+
+After a rewrite, Unity resolves the manifest when the Editor next has focus. `package_resolve` does it without waiting.
+
+Every other command says once, on stderr, when a newer release exists. That line is read from what `doctor` or `update` last found out and never from the network: a whole `call` finishes in about 20 ms, and asking GitHub carries a five-second timeout.
+
 ## doctor / upgrade / uninstall
 
 ```bash
 isuzu-unity-cli doctor          # what is installed, where, and what is stale
 isuzu-unity-cli doctor --fix    # repairs what it finds, e.g. re-registering clients after a token regeneration
-isuzu-unity-cli upgrade         # updates the CLI; --release pins one
+isuzu-unity-cli upgrade         # updates the CLI alone; --release pins one
 isuzu-unity-cli uninstall       # lists what would go
 isuzu-unity-cli uninstall --yes # removes it
 ```

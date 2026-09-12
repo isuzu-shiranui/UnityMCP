@@ -61,6 +61,8 @@ namespace UnityMCP.Editor.Settings
                 "コマンドラインのエージェントには CLI が要ります。MCP クライアントは下のエンドポイントに直接つながります。",
             ["Port {0} was busy, so this Editor is on {1}. Clients configured for the usual URL cannot reach it. Close whatever holds the port, or pin an HTTP Port in Settings and register the clients again."] =
                 "ポート {0} が使用中だったので、この Editor は {1} で待ち受けています。通常の URL で登録したクライアントからは届きません。ポートを使っているものを閉じるか、設定で HTTP Port を固定して登録し直してください。",
+            ["{0} is out and this package is {1}. Run 'isuzu-unity-cli update' to install it and bring this project's package up with it."] =
+                "{0} が公開されています。このパッケージは {1} です。'isuzu-unity-cli update' を実行すると、CLI とこのプロジェクトのパッケージを揃えて更新します。",
 
             // Connection
             ["Connection"] = "接続",

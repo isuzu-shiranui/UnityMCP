@@ -14,12 +14,13 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 2,872 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します |
+| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 1,692 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（Editor が固まっていても動く） |
 | `editor_dialog_list` | safe | Editor が表示中のモーダルダイアログの題名・本文・ボタンと、メインスレッドの停止時間（Editor が固まっていても動く。Windows 限定） |
 | `editor_dialog_press` | unsafe | 表示中のダイアログのボタンを押してメインスレッドを再開する。`confirm: true` が必要。「Don't Save」系は未保存の作業を捨てるので、先に `editor_dialog_list` で本文を読む |
+| `package_resolve` | unsafe | Package Manager に `Packages/manifest.json` を読み直させ、変わった分をインストールさせる。Unity は Editor にフォーカスが戻れば自分でこれを行うので、これは「manifest を書き換えた直後に、待たずに反映したい」場合のためのもの。`isuzu-unity-cli update` がプロジェクトを新しいリリースへ動かすときに使う。解決はドメインリロードを起こすため、**先に応答を返してからリロードが走る**。そのとき処理中だった呼び出しは失われる。`confirm: true` が必要。manifest が要求していないものは何もインストールしない |
 | `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |
 | `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |

@@ -73,6 +73,7 @@ public static class ArgParser
         {
             ["verify"] = new HashSet<string>(StringComparer.Ordinal) { "test", "no-compile" },
             ["jobs"] = new HashSet<string>(StringComparer.Ordinal) { "wait" },
+            ["update"] = new HashSet<string>(StringComparer.Ordinal) { "dry-run" },
             ["setup"] = new HashSet<string>(StringComparer.Ordinal) { "mcp", "no-skill" },
             ["uninstall"] = new HashSet<string>(StringComparer.Ordinal) { "yes", "no-skill" },
             ["doctor"] = new HashSet<string>(StringComparer.Ordinal) { "fix" },

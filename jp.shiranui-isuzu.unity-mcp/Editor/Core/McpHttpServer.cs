@@ -35,7 +35,7 @@ namespace UnityMCP.Editor.Core
         /// </remarks>
         private const string FallbackVersion = "4.3.0";
 
-        private static string ProtocolVersion
+        internal static string ProtocolVersion
         {
             get
             {

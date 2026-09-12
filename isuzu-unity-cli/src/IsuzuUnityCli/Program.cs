@@ -59,36 +59,62 @@ public static class Program
                 RefuseUnknownOptions(parsed);
             }
 
+            int code;
+
             switch (parsed.Command)
             {
                 case "projects":
-                    return ProjectsCommand.Run(parsed, context);
+                    code = ProjectsCommand.Run(parsed, context);
+                    break;
                 case "tools":
-                    return await ToolsCommand.Run(parsed, context);
+                    code = await ToolsCommand.Run(parsed, context);
+                    break;
                 case "call":
-                    return await CallCommand.Run(parsed, context);
+                    code = await CallCommand.Run(parsed, context);
+                    break;
                 case "verify":
-                    return await VerifyCommand.Run(parsed, context);
+                    code = await VerifyCommand.Run(parsed, context);
+                    break;
                 case "health":
-                    return await HealthCommand.Run(parsed, context);
+                    code = await HealthCommand.Run(parsed, context);
+                    break;
                 case "jobs":
-                    return await JobsCommand.Run(parsed, context);
+                    code = await JobsCommand.Run(parsed, context);
+                    break;
                 case "mcp-stdio":
-                    return await McpStdioCommand.Run(parsed, context);
+                    code = await McpStdioCommand.Run(parsed, context);
+                    break;
                 case "setup":
-                    return SetupCommand.Run(parsed, context);
+                    code = SetupCommand.Run(parsed, context);
+                    break;
                 case "doctor":
-                    return DoctorCommand.Run(parsed, context);
+                    code = DoctorCommand.Run(parsed, context);
+                    break;
                 case "uninstall":
-                    return UninstallCommand.Run(parsed, context);
+                    code = UninstallCommand.Run(parsed, context);
+                    break;
+                case "update":
+                    code = await UpdateCommand.Run(parsed, context);
+                    break;
                 case "upgrade":
-                    return await UpgradeCommand.Run(parsed, context);
+                    code = await UpgradeCommand.Run(parsed, context);
+                    break;
+                default:
+                    context.Err.WriteLine($"Unknown command '{parsed.Command}'.");
+                    context.Err.WriteLine();
+                    context.Err.WriteLine(Usage.Text);
+                    return 1;
             }
 
-            context.Err.WriteLine($"Unknown command '{parsed.Command}'.");
-            context.Err.WriteLine();
-            context.Err.WriteLine(Usage.Text);
-            return 1;
+            // After the command, so it is the last line the reader sees rather than something
+            // that pushes the answer up the terminal. doctor and update say it themselves in
+            // more detail, and saying it twice reads as two different releases.
+            if (parsed.Command is not ("doctor" or "update"))
+            {
+                context.ReportNewRelease();
+            }
+
+            return code;
         }
         catch (CliException e)
         {
@@ -130,6 +156,7 @@ public static class Program
             ["setup"] = new[] { "agent", "client", "mcp", "scope", "no-skill", "project" },
             ["doctor"] = new[] { "fix" },
             ["uninstall"] = new[] { "yes", "no-skill" },
+            ["update"] = new[] { "project", "release", "dry-run" },
             ["upgrade"] = new[] { "release" },
         };
 
@@ -148,6 +175,7 @@ public static class Program
                 "jobs" => new[] { "project", "timeout" },
                 "mcp-stdio" => new[] { "project", "group" },
                 "setup" => new[] { "agent", "client", "scope", "project" },
+                "update" => new[] { "project", "release" },
                 "upgrade" => new[] { "release" },
                 _ => Array.Empty<string>(),
             };

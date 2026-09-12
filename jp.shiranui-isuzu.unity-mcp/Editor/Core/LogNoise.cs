@@ -42,12 +42,21 @@ namespace UnityMCP.Editor.Core
         /// It names only the request the caller has just sent, and every frame of it names source,
         /// so it fills the four kept frames and pushes out whatever the entry was about: a
         /// one-line log came back as four frames of this and a count of the rest.
+        /// <para>
+        /// Some Editors print a frame inside a nested or compiler-generated type without the type
+        /// that contains it — <c>UnityMCP.Editor.Core.&lt;&gt;c__DisplayClass4_0:&lt;Run&gt;b__0()</c>
+        /// rather than <c>ToolCallRunner/&lt;&gt;c__DisplayClass4_0</c> — so the file a frame points
+        /// at is matched as well as the type it names.
+        /// </para>
         /// </remarks>
         private static readonly Regex Delivery = new Regex(
             @"^UnityMCP\.Editor\.(Core\.(ToolInvoker|ToolCallRunner|McpHttpServer"
             + @"|McpStreamableHttpEndpoint|McpMainThreadDispatcher|FrameSequencer)"
             + @"|Handlers\.CodeExecutor)[\w<>/`+$.]*:"
-            + @"|^UnityMCP\.Editor\.Tools\.EditorTools:ExecuteCode\b",
+            + @"|^UnityMCP\.Editor\.Tools\.EditorTools:ExecuteCode\b"
+            + @"|^UnityMCP\.Editor\.(Core|Handlers)\.[^:]*:.*\(at (.*[/\\])?Editor[/\\]"
+            + @"(Core[/\\](ToolInvoker|ToolCallRunner|McpHttpServer|McpStreamableHttpEndpoint"
+            + @"|McpMainThreadDispatcher|FrameSequencer)|Handlers[/\\]CodeExecutor)\.cs:\d+\)\s*$",
             RegexOptions.Compiled);
 
         /// <summary>What makes two otherwise identical lines differ: ids, times, counts.</summary>

@@ -125,53 +125,67 @@ public sealed class FakeUnityServer : IDisposable
 
             using (client)
             {
-                var stream = client.GetStream();
-                var head = new StringBuilder();
-                var one = new byte[1];
-                while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+                try
                 {
-                    await stream.ReadExactlyAsync(one, _stop.Token);
-                    head.Append((char)one[0]);
+                    await AnswerAsync(client);
                 }
-                var lines = head.ToString().Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
-                var request = lines[0].Split(' ', 3);
-                var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var line in lines.Skip(1))
+                catch (IOException)
                 {
-                    var colon = line.IndexOf(':');
-                    headers[line[..colon]] = line[(colon + 1)..].Trim();
+                    // A caller that gives up closes its connection partway through a request,
+                    // which is what --timeout does, and that can land while the test is already
+                    // disposing the server. It ends this connection, not the server.
                 }
-                var bodyBytes = new byte[headers.TryGetValue("Content-Length", out var size) ? int.Parse(size) : 0];
-                await stream.ReadExactlyAsync(bodyBytes, _stop.Token);
-                ScriptedResponse response;
-
-                lock (_gate)
-                {
-                    Requests.Add(new RecordedRequest(request[0], request[1], headers.GetValueOrDefault("Authorization"),
-                        Encoding.UTF8.GetString(bodyBytes), headers.GetValueOrDefault("Mcp-Session-Id")));
-
-                    response = _scripted.Count > 0 ? _scripted.Dequeue() : _fallback;
-                }
-
-                if (response.Drop)
-                {
-                    client.Client.LingerState = new LingerOption(true, 0);
-                    continue;
-                }
-
-                var bytes = Encoding.UTF8.GetBytes(response.Body);
-                var reply = new StringBuilder($"HTTP/1.1 {response.Status} Reply\r\nConnection: close\r\nContent-Length: {bytes.Length}\r\n");
-
-                foreach (var header in response.Headers)
-                    reply.Append(header.Key).Append(": ").Append(header.Value).Append("\r\n");
-
-                if (bytes.Length > 0)
-                    reply.Append("Content-Type: ").Append(response.ContentType).Append("\r\n");
-                reply.Append("\r\n");
-                await stream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToString()), _stop.Token);
-                await stream.WriteAsync(bytes, _stop.Token);
             }
         }
+    }
+
+    private async Task AnswerAsync(TcpClient client)
+    {
+        var stream = client.GetStream();
+        var head = new StringBuilder();
+        var one = new byte[1];
+        while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+        {
+            await stream.ReadExactlyAsync(one, _stop.Token);
+            head.Append((char)one[0]);
+        }
+        var lines = head.ToString().Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+        var request = lines[0].Split(' ', 3);
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in lines.Skip(1))
+        {
+            var colon = line.IndexOf(':');
+            headers[line[..colon]] = line[(colon + 1)..].Trim();
+        }
+        var bodyBytes = new byte[headers.TryGetValue("Content-Length", out var size) ? int.Parse(size) : 0];
+        await stream.ReadExactlyAsync(bodyBytes, _stop.Token);
+        ScriptedResponse response;
+
+        lock (_gate)
+        {
+            Requests.Add(new RecordedRequest(request[0], request[1], headers.GetValueOrDefault("Authorization"),
+                Encoding.UTF8.GetString(bodyBytes), headers.GetValueOrDefault("Mcp-Session-Id")));
+
+            response = _scripted.Count > 0 ? _scripted.Dequeue() : _fallback;
+        }
+
+        if (response.Drop)
+        {
+            client.Client.LingerState = new LingerOption(true, 0);
+            return;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(response.Body);
+        var reply = new StringBuilder($"HTTP/1.1 {response.Status} Reply\r\nConnection: close\r\nContent-Length: {bytes.Length}\r\n");
+
+        foreach (var header in response.Headers)
+            reply.Append(header.Key).Append(": ").Append(header.Value).Append("\r\n");
+
+        if (bytes.Length > 0)
+            reply.Append("Content-Type: ").Append(response.ContentType).Append("\r\n");
+        reply.Append("\r\n");
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToString()), _stop.Token);
+        await stream.WriteAsync(bytes, _stop.Token);
     }
 
     public void Dispose()

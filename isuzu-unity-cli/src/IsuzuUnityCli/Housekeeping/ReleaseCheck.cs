@@ -72,6 +72,37 @@ public static class ReleaseCheck
         return tag.Length > 0 ? tag : null;
     }
 
+    /// <summary>Asks GitHub. The one place that does.</summary>
+    /// <remarks>
+    /// GitHub refuses a request with no User-Agent, and the refusal arrives as a 403 that reads
+    /// like a permission problem.
+    /// </remarks>
+    public static async Task<string> FromGitHub(CancellationToken cancellation)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("isuzu-unity-cli/" + Program.Version());
+
+        return await http.GetStringAsync(LatestUrl, cancellation);
+    }
+
+    /// <summary>The newest tag this machine already learned about, without asking again.</summary>
+    /// <remarks>
+    /// Separate from <see cref="LatestTag"/> because the two do not cost the same: this is one
+    /// file read, and that one can sit on the network for as long as its fetch allows. Every
+    /// command can afford this; only the two whose job is to look can afford the other.
+    /// <para>
+    /// A stale entry is still used. It cannot name a release that does not exist, and going
+    /// quiet about one that does helps nobody.
+    /// </para>
+    /// </remarks>
+    public static string? KnownTag(string? cachePath = null)
+    {
+        var cached = ReadCache(cachePath ?? CachePath);
+
+        return cached is not null && cached.Tag.Length > 0 ? cached.Tag : null;
+    }
+
     /// <summary>The tag out of GitHub's release JSON.</summary>
     public static string TagFrom(string json)
     {

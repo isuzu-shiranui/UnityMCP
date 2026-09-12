@@ -64,6 +64,7 @@ namespace UnityMCP.Editor.Core
             ("gpu_", Rendering),
             ("ui_", Diagnostics),
             ("memory_", Diagnostics),
+            ("package_", Diagnostics),
             ("timeline_", Timeline),
             ("recorder_", Timeline),
             ("build_", Build),

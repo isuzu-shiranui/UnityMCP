@@ -67,8 +67,8 @@ namespace UnityMCP.Editor.Settings
         /// <remarks>
         /// A client loads whatever the endpoint lists and pays for it on every request of the
         /// conversation, so this is the one setting here that changes what a session costs
-        /// before it does anything: the full catalog is about 40,000 tokens and diagnostics
-        /// alone is about 9,500.
+        /// before it does anything: the full catalog is about 43,000 tokens and diagnostics
+        /// alone is about 11,000.
         /// </remarks>
         [SerializeField]
         public string toolGroups = string.Empty;

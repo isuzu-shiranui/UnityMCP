@@ -18,6 +18,7 @@ isuzu-unity-cli jobs [id]                # ジョブの一覧、または指定 
 isuzu-unity-cli jobs <id> --wait         # 終わるまで待って、最後の結果だけを表示
 isuzu-unity-cli setup [--mcp] [...]      # スキルの導入と MCP エンドポイントの登録
 isuzu-unity-cli doctor [--fix]           # 何がどこに入っているかの診断と修復
+isuzu-unity-cli update [--dry-run]       # CLI とパッケージを揃えて更新
 isuzu-unity-cli upgrade [--release vX]   # CLI の更新
 isuzu-unity-cli uninstall [--yes]        # 消す対象の一覧表示と削除
 isuzu-unity-cli mcp-stdio --project <n>  # Claude Desktop 向け stdio ブリッジ
@@ -115,12 +116,36 @@ isuzu-unity-cli setup --mcp --agent claude-code --scope project  # MCP エンド
 
 `--mcp` は Editor が起動している必要があります。URL とトークンは Editor の descriptor から読みます。フラグの詳細は [MCP クライアントの接続](mcp-clients.md) を参照してください。v3 のスキルフォルダーが残っていれば削除します。
 
+## update
+
+CLI と Unity パッケージは 1 つのバージョンとして公開され、リリースは両者が一致しないと止まります。それでも手元では簡単にずれます。`upgrade` が入れ替えるのは CLI だけで、パッケージの更新は別の場所で行うためです。
+
+```bash
+isuzu-unity-cli update --dry-run   # 何が変わるかだけ表示
+isuzu-unity-cli update             # CLI と、起動中の Editor のパッケージを揃える
+isuzu-unity-cli update --project X # そのプロジェクトのパッケージだけ
+```
+
+パッケージの導入経路 6 通りのうち 4 通りはここからは更新できません。その場合は、動かす手順を名指しで示します。
+
+| 導入経路 | `update` の動作 |
+|---|---|
+| `Packages/manifest.json` の git URL | 依存のタグを書き換える |
+| レジストリのバージョン指定 | バージョンを書き換える |
+| `file:` の作業コピー | 断ります。前に進めるのは git の仕事です |
+| `Packages/` 直下の実体 | 断ります。Unity はそちらを読んで manifest を無視するので、manifest を書き換えても何も読まれない行が変わるだけです |
+| VCC / ALCOM | 断ります。`vpm-manifest.json` で管理されているので、そちらで更新してください |
+
+書き換えたあと、Unity は Editor にフォーカスが戻った時点で解決します。待たずに反映するには `package_resolve` を呼びます。
+
+新しいリリースがあるときは、他のすべてのコマンドが標準エラーに 1 行だけ出します。この行は `doctor` か `update` が最後に調べた結果を読んでいるだけで、ネットワークには触れません。`call` 1 回が約 20 ms で終わるのに対し、GitHub への問い合わせは 5 秒のタイムアウトを持つためです。
+
 ## doctor / upgrade / uninstall
 
 ```bash
 isuzu-unity-cli doctor          # 何がどこに入っているか、古いものが残っていないか
 isuzu-unity-cli doctor --fix    # 直せるものは直す（トークン再生成後の再登録など）
-isuzu-unity-cli upgrade         # 最新版に更新（--release でバージョン指定）
+isuzu-unity-cli upgrade         # CLI だけを最新版に更新（--release でバージョン指定）
 isuzu-unity-cli uninstall       # 消す対象を一覧表示するだけ
 isuzu-unity-cli uninstall --yes # 実行
 ```
