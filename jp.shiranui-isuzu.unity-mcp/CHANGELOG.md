@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `install.ps1` says why it could not read the downloaded executable, and waits for security
+  software that still has it open, instead of failing on Windows PowerShell 5.1 with "You cannot
+  call a method on a null-valued expression". ([#38](https://github.com/isuzu-shiranui/UnityMCP/issues/38))
+- The READMEs and the setup guide say that `dotnet tool install -g IsuzuUnityCli` needs the .NET 10
+  SDK. An older SDK cannot read the package and reports that it has no DotnetToolSettings.xml.
+
 ## [4.3.0] - 2026-09-12
 
 ### Breaking
