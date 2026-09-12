@@ -63,7 +63,7 @@ Run from outside every project, the CLI does not guess. It lists the candidates 
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | error (for `verify`: compile errors or test failures) |
+| 1 | error (for `verify`: compile errors, failed tests, or inconclusive tests) |
 | 2 | bad arguments. An option the command does not have, an option missing its value, and `call` without a tool name all return it. So does a `verify` `--timeout` that is not a positive number, or a `verify` `--logs` that is not a count |
 | 3 | no Editor found, or the choice is ambiguous |
 | 4 | `verify` exceeded `--timeout` |
@@ -84,6 +84,8 @@ isuzu-unity-cli verify --raw                 # the summary as JSON
 ```
 
 The Editor's server goes down during the compile. `verify` expects the connection errors in that window and waits. It re-reads the descriptor before continuing. `--timeout` defaults to 300 seconds.
+
+With `--test`, a completed run containing failed or inconclusive tests exits 1. Skipped tests alone do not fail verification. The counts cover the whole run, even when the Editor limits the returned details. In `--raw` output, `tests.inconclusive` reports the inconclusive count and `tests.truncated` indicates that the details are incomplete; `tests.failures` contains only the non-success details returned by the Editor, excluding skipped tests.
 
 Console errors are counted. They do not decide the result, because old entries can linger.
 

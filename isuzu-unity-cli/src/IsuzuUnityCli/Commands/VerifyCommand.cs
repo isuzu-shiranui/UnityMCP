@@ -143,7 +143,7 @@ public static class VerifyCommand
 
     private sealed record CompileError(string File, int Line, int Column, string Message);
 
-    private sealed record TestFailure(string Name, string Message);
+    private sealed record TestFailure(string Name, string Message, string? Status);
 
     private sealed record ConsoleEntry(string Message, string File, int Line);
 
@@ -189,6 +189,10 @@ public static class VerifyCommand
 
         private int Skipped { get; set; }
 
+        private int Inconclusive { get; set; }
+
+        private bool TestDetailsTruncated { get; set; }
+
         private List<TestFailure> Failures { get; } = new();
 
         private bool ConsoleRead { get; set; }
@@ -198,7 +202,7 @@ public static class VerifyCommand
         public bool Ok =>
             !TimedOut
             && (!CompileRan || CompileSucceeded == true)
-            && (!TestsRan || (Failures.Count == 0 && TestStatus == "completed"));
+            && (!TestsRan || (Failed == 0 && Inconclusive == 0 && Failures.Count == 0 && TestStatus == "completed"));
 
         public async Task Compile(int intervalMs, int startGraceMs, CancellationToken cancellation)
         {
@@ -282,6 +286,7 @@ public static class VerifyCommand
                     Passed = Number(results["passed"]);
                     Failed = Number(results["failed"]);
                     Skipped = Number(results["skipped"]);
+                    Inconclusive = Number(results["inconclusive"]);
                     CollectFailures(results["results"] as JsonArray);
                     return;
                 }
@@ -337,6 +342,8 @@ public static class VerifyCommand
                         ["passed"] = Passed,
                         ["failed"] = Failed,
                         ["skipped"] = Skipped,
+                        ["inconclusive"] = Inconclusive,
+                        ["truncated"] = TestDetailsTruncated,
                         ["failures"] = new JsonArray(Failures
                             .Select(f => (JsonNode)new JsonObject { ["name"] = f.Name, ["message"] = f.Message })
                             .ToArray()),
@@ -382,15 +389,27 @@ public static class VerifyCommand
 
             if (TestsRan)
             {
-                // Failures holds every case that neither passed nor was skipped, which is more
-                // than NUnit's failure count: an inconclusive case verified nothing and is listed
-                // below, so reporting only the failure count would print entries under a zero.
-                text.Append($"tests: {Passed} passed, {Failures.Count} failed ({TestMode})");
+                // Counts cover the full run; the returned details may stop before a failure.
+                // Keep visible non-success cases counted even if a response omits totals.
+                var inconclusiveDetails = Failures.Count(f => f.Status == "inconclusive");
+                var failed = Math.Max(Failed, Failures.Count - inconclusiveDetails);
+                var inconclusive = Math.Max(Inconclusive, inconclusiveDetails);
+                text.Append($"tests: {Passed} passed, {failed} failed");
+                if (inconclusive > 0)
+                {
+                    text.Append($", {inconclusive} inconclusive");
+                }
+                text.Append($" ({TestMode})");
                 text.Append(TestStatus == "completed" ? "\n" : $", status {TestStatus}\n");
 
                 foreach (var failure in Failures)
                 {
                     text.Append("  ").Append(failure.Name).Append(": ").Append(OneLine(failure.Message)).Append('\n');
+                }
+
+                if (TestDetailsTruncated)
+                {
+                    text.Append("  test details truncated; counts cover the full run.\n");
                 }
             }
 
@@ -498,7 +517,13 @@ public static class VerifyCommand
                         continue;
                     }
 
-                    return outcome;
+                    result = outcome;
+                }
+
+                if (tool == "test_results")
+                {
+                    // REST hoists this marker into the envelope; jobs retain it in the result.
+                    TestDetailsTruncated = envelope.Truncated || Flag(result["truncated"]);
                 }
 
                 return result;
@@ -662,7 +687,7 @@ public static class VerifyCommand
 
                 if (status != "passed" && status != "skipped")
                 {
-                    Failures.Add(new TestFailure(Text(test["name"]) ?? "", Text(test["message"]) ?? ""));
+                    Failures.Add(new TestFailure(Text(test["name"]) ?? "", Text(test["message"]) ?? "", status));
                 }
             }
         }
