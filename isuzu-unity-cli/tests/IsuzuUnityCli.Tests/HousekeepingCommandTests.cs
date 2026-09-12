@@ -262,6 +262,30 @@ public sealed class HousekeepingCommandTests
     }
 
     [Fact]
+    public async Task DoctorNamesTheToolThatUpdatesACopyWingetInstalled()
+    {
+        using var home = new TempHome();
+        var report = new StringWriter();
+
+        // Cancelled so the release check gives up instead of asking GitHub.
+        var context = new CommandContext
+        {
+            Out = report,
+            Err = new StringWriter(),
+            WorkingDirectory = home.Root,
+            ReadDescriptors = () => [],
+            ReadAllDescriptors = () => [],
+            ExecutablePath = home.At("AppData", "Local", "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"),
+            Cancellation = new CancellationToken(canceled: true),
+        };
+
+        Assert.Equal(0, await Program.Run(["doctor"], context));
+        Assert.Contains(
+            "[channel]  installed with winget; update with: winget upgrade --id IsuzuShiranui.IsuzuUnityCli -e",
+            report.ToString());
+    }
+
+    [Fact]
     public async Task DoctorWarnsWhenAnEditorDidNotGetItsPreferredPort()
     {
         using var home = new TempHome();

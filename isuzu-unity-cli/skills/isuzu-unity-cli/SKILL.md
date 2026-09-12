@@ -116,7 +116,10 @@ The CLI and the Unity package ship as one version. When a command prints a line 
 newer release is out, or a reply mentions version skew, `isuzu-unity-cli update` moves both: it
 replaces the CLI and retargets each project's package. It refuses the installs it cannot move - a
 `file:` working copy, a folder under `Packages/`, anything VCC or ALCOM manages - and names the
-step that does move them. `--dry-run` says what would change without changing it.
+step that does move them. A CLI installed with winget or as a dotnet tool is updated by that tool:
+`update` prints the command, and until the CLI has been updated it moves the packages only as far as
+the version the CLI runs, so run it again afterwards. `--dry-run` says what would change without
+changing it.
 
 ## The rest of it
 

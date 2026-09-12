@@ -174,8 +174,23 @@ public sealed class CommandContext
             return;
         }
 
-        Err.WriteLine(
-            $"{tag} is out and this is {Program.Version()}. "
-            + "'isuzu-unity-cli update' installs it and lines the Unity package up with it.");
+        var install = CliInstall.Read(ExecutablePath);
+
+        if (install.ReplacesItself)
+        {
+            Err.WriteLine(
+                $"{tag} is out and this is {Program.Version()}. "
+                + "'isuzu-unity-cli update' installs it and lines the Unity package up with it.");
+            return;
+        }
+
+        Err.WriteLine($"{tag} is out and this is {Program.Version()}. Update this CLI with: {install.UpdateCommand}");
+
+        if (install.Channel is CliChannel.Winget)
+        {
+            Err.WriteLine(CliInstall.WingetDelay);
+        }
+
+        Err.WriteLine("Then 'isuzu-unity-cli update' lines the Unity package up with it.");
     }
 }

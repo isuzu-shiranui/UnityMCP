@@ -126,6 +126,45 @@ A policy on a private repository stays provisional for seven days and lapses if 
 published in that window; the window can be restarted from the same page. This repository is
 public, so the policy activates on the first successful publish.
 
+## Submitting to winget
+
+After the GitHub release is published, the `winget` job submits the Windows binary to
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) as `IsuzuShiranui.IsuzuUnityCli`
+with wingetcreate. `winget-due.sh` decides whether a version is due:
+
+```sh
+GH_TOKEN=$(gh auth token) bash scripts/winget-due.sh 4.3.2
+```
+
+It prints `false` until winget-pkgs holds the package, because wingetcreate builds each manifest
+from the previous one and the first is submitted by hand. It also prints `false` for a prerelease,
+for a version already merged, and for a version with a pull request in any state, so a closed
+submission is not opened again on every push to main; such a version has to be submitted by hand.
+It exits 1 when GitHub does not give a usable answer, because a rate limit read as "not there"
+would submit the same version twice. `plan` reads that as "not due" so the release goes ahead, and
+the `winget` job asks again right before it submits.
+
+The first manifest has to be for 4.3.1 or later. An older CLI does not know it was installed with
+winget, so its `upgrade` and `update` replace the file winget installed, and winget then refuses to
+upgrade or uninstall it.
+
+The submission needs a token. Create it when the first manifest is submitted, so that it is in
+place for the first release after the merge:
+
+1. A personal access token (classic) with only the `public_repo` scope, and an expiry. wingetcreate
+   does not support fine-grained tokens. `public_repo` grants write access to every public
+   repository the account can push to, organisation repositories included, so a separate account
+   for this is worth considering.
+2. An environment named `winget` under Settings > Environments, with deployment branches limited to
+   `main`. A required reviewer would hold each submission until someone approves it.
+3. A secret `WINGET_TOKEN` in that environment, holding the token.
+
+The `winget` job checks the token before it uses it, and fails when the token is missing, expired,
+or not a classic token with `public_repo`. The job runs after the release, so the GitHub release and
+NuGet are not held back: replace the token and re-run the workflow from `main` with
+workflow_dispatch. The first pull request from an account to winget-pkgs is held until that account
+agrees to the Microsoft CLA.
+
 ## Once 4.0.0 is on the registries
 
 One manual step, not automated because it happens exactly once. Nothing installs the npm package

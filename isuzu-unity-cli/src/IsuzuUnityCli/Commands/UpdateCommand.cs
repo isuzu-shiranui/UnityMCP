@@ -22,6 +22,14 @@ public static class UpdateCommand
 {
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
+        var install = CliInstall.Read(context.ExecutablePath);
+
+        if (parsed.Option("release") is not null && !install.ReplacesItself)
+        {
+            context.Err.WriteLine(UpgradeCommand.ReleaseRefusal(install));
+            return 1;
+        }
+
         var tag = await Latest(context);
 
         if (tag is null)
@@ -35,6 +43,11 @@ public static class UpdateCommand
         var current = Program.Version();
         var version = tag.TrimStart('v', 'V');
         var behind = ReleaseCheck.IsNewer(tag, current);
+
+        // A copy another tool installed reaches the release only when that tool offers it, which
+        // for winget is after review. A package moved ahead of it in the meantime would be talking
+        // to an older CLI, so until then the packages go only as far as the version this CLI runs.
+        var held = behind && !install.ReplacesItself;
 
         context.Out.WriteLine(behind
             ? $"{tag} is out and this is {current}."
@@ -53,10 +66,14 @@ public static class UpdateCommand
         {
             context.Out.WriteLine("  none found. Open a project, or pass --project.");
         }
+        else if (held)
+        {
+            context.Out.WriteLine($"  moved to {current}, the version this CLI runs, until the CLI is updated.");
+        }
 
         foreach (var descriptor in projects)
         {
-            failed |= !UpdateProject(context, descriptor, version, parsed.HasFlag("dry-run"));
+            failed |= !UpdateProject(context, descriptor, held ? current : version, parsed.HasFlag("dry-run"));
         }
 
         context.Out.WriteLine();
@@ -68,14 +85,26 @@ public static class UpdateCommand
             return failed ? 1 : 0;
         }
 
+        if (held)
+        {
+            context.Out.WriteLine(
+                $"  installed {install.Description}, so it is not updated here. Update it with: {install.UpdateCommand}");
+
+            if (install.Channel is CliChannel.Winget)
+            {
+                context.Out.WriteLine("  " + CliInstall.WingetDelay);
+            }
+
+            context.Out.WriteLine($"  Then run 'isuzu-unity-cli update' again to move the Unity projects to {tag}.");
+            return failed ? 1 : 0;
+        }
+
         if (parsed.HasFlag("dry-run"))
         {
             context.Out.WriteLine($"  would install {tag}.");
             return failed ? 1 : 0;
         }
 
-        // Reused rather than reimplemented: it knows to refuse a dotnet tool install, which
-        // would otherwise end with two copies on the machine and the older one first on PATH.
         var upgrade = await UpgradeCommand.Run(Reparse(parsed), context);
 
         return upgrade != 0 || failed ? 1 : 0;
@@ -119,6 +148,14 @@ public static class UpdateCommand
         if (!install.Updatable)
         {
             context.Out.WriteLine($"  {name}: {Refusal(install)}");
+            return true;
+        }
+
+        // Moving a project back is never what update means. With a CLI another tool updates, the
+        // target is the version the CLI runs, and a project can already be past it.
+        if (install.Version is not null && ReleaseCheck.IsNewer(install.Version, version))
+        {
+            context.Out.WriteLine($"  {name}: already at {install.Version}, which is past {version}. Left as it is.");
             return true;
         }
 

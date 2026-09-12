@@ -1,7 +1,7 @@
 name: Release
 
-# Tags, uploads the downloadable binaries and publishes the tool package when the version in the
-# Unity package's package.json changes on main.
+# Tags, uploads the downloadable binaries, publishes the tool package and submits the Windows
+# binary to winget when the version in the Unity package's package.json changes on main.
 #
 # The three halves are gated independently, on three separate questions: does the tag exist, does
 # the release carry its assets, is the version on NuGet. Gating all of them on the tag makes a
@@ -9,11 +9,16 @@ name: Release
 # nothing to do and exits green with the artifacts still missing. Each gate asks about the thing
 # it protects, so a partial release is resumable with workflow_dispatch.
 #
+# winget has a fourth gate, asked of microsoft/winget-pkgs by scripts/winget-due.sh once in `plan`
+# and again in the `winget` job right before it submits. It is kept out of the other three, so a
+# run with only the submission left builds nothing, and the submission runs after the release, so
+# a failure there never holds the release back and is resumed the same way.
+#
 # The binaries are NativeAOT, and native code can only be produced on its own operating system,
-# so the work is split across jobs: `plan` answers the three questions and runs the checks once,
-# `binaries` builds one RID per runner, and `release` collects them and publishes. The gates are
-# computed in `plan` and read by the other two through job outputs, so a re-run still asks the
-# same three questions.
+# so the work is split across jobs: `plan` answers the questions and runs the checks once,
+# `binaries` builds one RID per runner, `release` collects them and publishes, and `winget`
+# submits the published Windows binary. The gates are computed in `plan` and read by the later
+# jobs through job outputs, so a re-run still asks the same questions.
 on:
   push:
     branches:
@@ -33,6 +38,7 @@ jobs:
       tag_exists: ${{ steps.check-tag.outputs.exists }}
       need_assets: ${{ steps.work.outputs.need_assets }}
       need_nuget: ${{ steps.work.outputs.need_nuget }}
+      need_winget: ${{ steps.check-winget.outputs.needed }}
 
     steps:
       - name: Checkout repository
@@ -133,6 +139,23 @@ jobs:
           else
             echo "IsuzuUnityCli $VERSION is not on the registry."
             echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # winget offers a release once a pull request adding its manifest has been merged into
+      # microsoft/winget-pkgs. When GitHub gives no usable answer, the script fails rather than
+      # guess, and that reads as "not due" here so it cannot hold back the release; the submission
+      # is then left for a re-run with workflow_dispatch.
+      - name: Due for winget?
+        id: check-winget
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if DUE=$(bash scripts/winget-due.sh "$VERSION"); then
+            echo "needed=$DUE" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Could not tell whether $VERSION is due for winget, so this run does not submit it."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
           fi
 
       # The three answers folded into the two questions the later jobs ask. A missing tag counts
@@ -605,4 +628,188 @@ jobs:
             else
               echo "- NuGet: already published, skipped"
             fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Submits the published Windows binary. wingetcreate builds the manifest from the one winget-pkgs
+  # already holds and writes this release's URL, hash and version into it. Running after the
+  # release, a token that has expired fails this job alone, and a re-run with workflow_dispatch
+  # submits once the token has been replaced.
+  winget:
+    needs: [plan, release]
+    if: ${{ !cancelled() && needs.plan.outputs.need_winget == 'true' && needs.release.result == 'success' }}
+    runs-on: windows-latest
+    environment: winget
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    # Each run asks winget-pkgs again right before it submits, and two runs asking at the same time
+    # would both find nothing there and submit the same version twice.
+    concurrency:
+      group: winget-submission
+      cancel-in-progress: false
+
+    defaults:
+      run:
+        shell: bash
+
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      PACKAGE: IsuzuShiranui.IsuzuUnityCli
+      # The token passes through wingetcreate, so the executable is pinned by its hash as well as
+      # its version. GitHub lists the digest beside each release asset.
+      WINGETCREATE_VERSION: v1.12.13.0
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Asked again: plan answered before this run's release, and another run may have submitted
+      # since.
+      - name: Still due?
+        id: due
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DUE=$(bash scripts/winget-due.sh "$VERSION")
+          echo "needed=$DUE" >> "$GITHUB_OUTPUT"
+
+      # wingetcreate asks for an interactive GitHub sign-in when it has no token, which a runner can
+      # only wait on, so the token is checked before anything uses it.
+      - name: The token can submit to winget-pkgs
+        if: steps.due.outputs.needed == 'true'
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "WINGET_TOKEN is not set in the winget environment. scripts/README.md says how to create it."
+            exit 1
+          fi
+
+          HEADERS=$(mktemp)
+          STATUS=$(curl -s --connect-timeout 20 --max-time 60 -o /dev/null -D "$HEADERS" -w '%{http_code}' \
+            -H "Authorization: Bearer $WINGET_TOKEN" https://api.github.com/user || true)
+
+          case "$STATUS" in
+            200) ;;
+            401)
+              echo "GitHub refused WINGET_TOKEN: it has expired, been revoked, or is mistyped."
+              exit 1
+              ;;
+            *)
+              echo "GitHub answered '$STATUS' when WINGET_TOKEN was checked; re-run once it answers."
+              exit 1
+              ;;
+          esac
+
+          # Only a classic token reports its scopes, so a fine-grained one reads as having none.
+          SCOPES=$(tr -d '\r' < "$HEADERS" | sed -n 's/^x-oauth-scopes: *//Ip')
+
+          case ", $SCOPES," in
+            *", public_repo,"* | *", repo,"*)
+              echo "WINGET_TOKEN is a classic token with: $SCOPES"
+              ;;
+            *)
+              echo "WINGET_TOKEN reports the scopes '$SCOPES'. wingetcreate needs a classic token with public_repo."
+              exit 1
+              ;;
+          esac
+
+      # The published copy, which is the file winget downloads, rather than the artifact the release
+      # job uploaded.
+      - name: The published executable matches SHA256SUMS
+        id: published
+        if: steps.due.outputs.needed == 'true'
+        run: |
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          curl -fsSL --connect-timeout 20 --max-time 300 -o published.exe "$BASE/isuzu-unity-cli-win-x64.exe"
+          curl -fsSL --connect-timeout 20 --max-time 60 -o SHA256SUMS "$BASE/SHA256SUMS"
+
+          EXPECTED=$(awk '$2 == "isuzu-unity-cli-win-x64.exe" { print $1 }' SHA256SUMS)
+          ACTUAL=$(sha256sum published.exe | cut -d' ' -f1)
+
+          if [ -z "$EXPECTED" ] || [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "The published executable hashes to $ACTUAL; SHA256SUMS says '$EXPECTED'."
+            exit 1
+          fi
+
+          echo "url=$BASE/isuzu-unity-cli-win-x64.exe" >> "$GITHUB_OUTPUT"
+          echo "sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+
+      - name: Get wingetcreate
+        if: steps.due.outputs.needed == 'true'
+        run: |
+          curl -fsSL --connect-timeout 20 --max-time 300 -o wingetcreate.exe \
+            "https://github.com/microsoft/winget-create/releases/download/$WINGETCREATE_VERSION/wingetcreate.exe"
+          ACTUAL=$(sha256sum wingetcreate.exe | cut -d' ' -f1)
+
+          if [ "$ACTUAL" != "$WINGETCREATE_SHA256" ]; then
+            echo "wingetcreate.exe hashes to $ACTUAL, not the pinned $WINGETCREATE_SHA256."
+            exit 1
+          fi
+
+      # The token goes through the environment variable wingetcreate reads, never onto its command
+      # line, which wingetcreate warns may be logged.
+      - name: Write the manifest
+        id: manifest
+        if: steps.due.outputs.needed == 'true'
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.published.outputs.url }}
+          SHA256: ${{ steps.published.outputs.sha256 }}
+        run: |
+          RELEASED=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq '.publishedAt[0:10]')
+
+          ./wingetcreate.exe update "$PACKAGE" \
+            --version "$VERSION" \
+            --urls "$URL|x64" \
+            --release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --release-date "$RELEASED" \
+            --out manifests
+
+          shopt -s globstar nullglob
+          INSTALLERS=(manifests/**/"$PACKAGE".installer.yaml)
+
+          if [ "${#INSTALLERS[@]}" != "1" ]; then
+            echo "Expected one installer manifest under manifests/, found ${#INSTALLERS[@]}."
+            exit 1
+          fi
+
+          # wingetcreate downloads the installer again to hash it, so this compares the copy it saw.
+          RECORDED=$(sed -n 's/^ *InstallerSha256: *//p' "${INSTALLERS[0]}" | tr -d '\r' | tr 'A-F' 'a-f')
+
+          if [ "$RECORDED" != "$SHA256" ]; then
+            echo "The manifest records $RECORDED for the installer; the published file is $SHA256."
+            exit 1
+          fi
+
+          DIRECTORY=$(dirname "${INSTALLERS[0]}")
+
+          for file in "$DIRECTORY"/*.yaml; do
+            echo "::group::$file"
+            cat "$file"
+            echo "::endgroup::"
+          done
+
+          echo "directory=$DIRECTORY" >> "$GITHUB_OUTPUT"
+
+      - name: Submit
+        if: steps.due.outputs.needed == 'true'
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          DIRECTORY: ${{ steps.manifest.outputs.directory }}
+        run: |
+          ./wingetcreate.exe submit --no-open \
+            --prtitle "New version: $PACKAGE version $VERSION" \
+            "$DIRECTORY" | tee submit.log
+
+          PR=$(grep -o 'https://github.com/microsoft/winget-pkgs/pull/[0-9]*' submit.log | head -n 1 || true)
+
+          {
+            echo "## winget"
+            echo ""
+            echo "- Submitted $PACKAGE $VERSION: ${PR:-the pull request is named in the job log}"
           } >> "$GITHUB_STEP_SUMMARY"
