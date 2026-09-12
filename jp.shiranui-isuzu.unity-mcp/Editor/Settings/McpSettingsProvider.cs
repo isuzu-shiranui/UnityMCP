@@ -140,12 +140,39 @@ namespace UnityMCP.Editor.Settings
                     MessageType.Warning);
             }
 
+            this.DrawReleaseRow();
+
             EditorGUILayout.LabelField(
-                $"{Application.productName} · {Application.unityVersion}"
+                $"{Application.productName} · {Application.unityVersion} · {McpHttpServer.ProtocolVersion}"
                 + (this.mcpServer != null && this.mcpServer.IsRunning
                     ? " · " + this.mcpServer.ConnectedSince.ToString("HH:mm:ss")
                     : string.Empty),
                 EditorStyles.miniLabel);
+        }
+
+        /// <summary>
+        /// Names a newer release, when the CLI has found one.
+        /// </summary>
+        /// <remarks>
+        /// Read from the file the CLI leaves behind, so this page stays something that shows what
+        /// is on the machine rather than something that reaches out from it. A machine where the
+        /// CLI has never run has nothing to read, and says nothing.
+        /// </remarks>
+        private void DrawReleaseRow()
+        {
+            var tag = ReleaseNotice.Tag();
+
+            if (tag == null || !ReleaseNotice.IsNewer(tag, McpHttpServer.ProtocolVersion))
+            {
+                return;
+            }
+
+            EditorGUILayout.HelpBox(
+                string.Format(
+                    McpEditorText.Tr("{0} is out and this package is {1}. Run 'isuzu-unity-cli update' to install it and bring this project's package up with it."),
+                    tag,
+                    McpHttpServer.ProtocolVersion),
+                MessageType.Info);
         }
 
         private void DrawServerRow()

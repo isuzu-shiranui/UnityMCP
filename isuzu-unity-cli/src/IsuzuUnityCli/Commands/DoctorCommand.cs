@@ -253,7 +253,7 @@ public static class DoctorCommand
 
         try
         {
-            tag = ReleaseCheck.LatestTag(Fetch, context.Cancellation).GetAwaiter().GetResult();
+            tag = ReleaseCheck.LatestTag(ReleaseCheck.FromGitHub, context.Cancellation).GetAwaiter().GetResult();
         }
         catch (Exception)
         {
@@ -271,17 +271,6 @@ public static class DoctorCommand
             + "Install it with 'isuzu-unity-cli upgrade', and update the Unity package to match. "
             + "'upgrade --release <tag>' goes back if one turns out to be broken.");
         context.Out.WriteLine();
-    }
-
-    private static async Task<string> Fetch(CancellationToken cancellation)
-    {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-
-        // GitHub refuses a request with no User-Agent, and the refusal arrives as a 403 that
-        // reads like a permission problem.
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("isuzu-unity-cli/" + Program.Version());
-
-        return await http.GetStringAsync(ReleaseCheck.LatestUrl, cancellation);
     }
 
     /// <summary>
@@ -351,31 +340,46 @@ public static class DoctorCommand
                + "left in place they stop the project compiling. Delete that folder.";
     }
 
-    /// <summary>Says which side is behind when the package and this CLI disagree on the major.</summary>
+    /// <summary>Says which side is behind when the package and this CLI are not the same release.</summary>
     /// <remarks>
     /// The descriptor has carried protocolVersion all along and nothing compared it, so a CLI and
     /// a package from different releases failed in whatever way the missing piece happened to
     /// fail — a tool that is not there, an argument that is not read — with nothing pointing at
-    /// the version. Only the major is compared: within one, the two are meant to work together,
-    /// and a warning on every patch difference would be noise nobody reads.
+    /// the version.
+    /// <para>
+    /// Any difference is reported, not only a difference in the major. The two are released
+    /// together under one number and the release refuses to publish them apart, so 4.0.0 against
+    /// 4.3.0 is three releases of tools and fixes the older half does not have — which is the
+    /// case that was silent while only the major was compared.
+    /// </para>
     /// </remarks>
     public static string? Skew(string protocolVersion, string cliVersion)
     {
-        if (!TryMajor(protocolVersion, out var editor) || !TryMajor(cliVersion, out var cli))
+        if (string.IsNullOrEmpty(protocolVersion) || string.IsNullOrEmpty(cliVersion))
         {
             return null;
         }
 
-        if (editor == cli)
+        if (string.Equals(protocolVersion, cliVersion, StringComparison.Ordinal))
         {
             return null;
         }
 
-        return editor < cli
+        // Field by field rather than as text, so 4.10.0 is not read as older than 4.9.0.
+        var editorIsBehind = ReleaseCheck.IsNewer(cliVersion, protocolVersion);
+        var cliIsBehind = ReleaseCheck.IsNewer(protocolVersion, cliVersion);
+
+        if (!editorIsBehind && !cliIsBehind)
+        {
+            // Two spellings of one version, or two versions neither of which parses.
+            return null;
+        }
+
+        return editorIsBehind
             ? $"version skew: this Editor's package is {protocolVersion} and this CLI is "
-              + $"{cliVersion}. Update the package in the Unity Package Manager."
+              + $"{cliVersion}. 'isuzu-unity-cli update' lines the package up with the CLI."
             : $"version skew: this Editor's package is {protocolVersion} and this CLI is "
-              + $"{cliVersion}. Update the CLI with 'isuzu-unity-cli upgrade'.";
+              + $"{cliVersion}. Update the CLI with 'isuzu-unity-cli update'.";
     }
 
     private static bool TryMajor(string version, out int major)

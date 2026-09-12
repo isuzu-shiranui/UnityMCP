@@ -9,11 +9,10 @@ namespace UnityMCP.Editor.Tests
     /// The size a tool declares is a limit rather than a note about one.
     /// </summary>
     /// <remarks>
-    /// It rode along in <c>_meta</c> and nothing checked it. A production scene answered
-    /// scene_browse_hierarchy with 893,153 characters against the 200,000 it declares, under a
+    /// It rode along in <c>_meta</c> and nothing checked it, so a large scene could answer
+    /// scene_browse_hierarchy with several times the 200,000 characters it declares, under a
     /// <c>truncated</c> of false: most of a context window, spent on a reply that says nothing
-    /// was left out. The bench that every scenario runs against answers the same call with
-    /// 86,919, so this was not visible until a real project was asked.
+    /// was left out. A small test scene stays under the limit, so only a large one shows it.
     /// </remarks>
     [TestFixture]
     internal sealed class ResultSizeCapTests

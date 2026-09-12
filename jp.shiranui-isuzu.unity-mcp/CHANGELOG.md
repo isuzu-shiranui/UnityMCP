@@ -10,7 +10,7 @@
 - `asset_export_package` names its destination `destination` rather than `file`, which the CLI keeps for itself.
 - JSON-RPC requests are checked more strictly: `id: null`, and `params` or `arguments` that are not objects, are refused.
 - CLI: an option the command does not have, and an option missing its value, are refused with exit code 2. An option given twice is sent as a list.
-- `console_read_logs` leaves the stack trace out unless `stack_trace` asks for it, and cuts each entry's file path to its last three segments. Twenty exceptions cost 612 tokens rather than 2,872, and the entry still names its file and line.
+- `console_read_logs` leaves the stack trace out unless `stack_trace` asks for it, and cuts each entry's file path to its last three segments. Twenty exceptions cost 612 tokens rather than 1,692, and the entry still names its file and line.
 
 ### Added
 - Twelve tools:
@@ -52,11 +52,9 @@
 - `isuzu-unity-cli jobs <id> --wait` polls a job to its end and prints only its last answer,
   exiting 0 when it completed and 1 when it failed or was cancelled. `--timeout` gives up waiting
   without stopping the job.
-
 - `memory_usage` weighs the loaded objects and splits them by whether the project owns them. That
   split is the answer: an Editor's own render targets and icon atlases are routinely the largest
-  textures in memory. On a real project it reported 7.3 GB of textures of which 5.5 GB belonged to
-  the project, and named the two 4K face maps costing 67 MB each.
+  textures in memory.
 - `build_report` reads the report Unity writes beside the Library, so what a build contained and
   weighed can be answered after the output is gone: the summary, a row per asset type, the heaviest
   assets with their paths, and the slowest build steps. `compare_with` takes a second report and
@@ -84,6 +82,27 @@
   under it, which reads like a correctly-answered question about a broken UI. The tool ships in an
   assembly constrained on com.unity.ugui, so a project without that package loses the tool rather
   than failing to compile.
+- `isuzu-unity-cli update` brings the CLI and every project's copy of the package to the newest
+  release. The two are published under one version and the release refuses to publish them apart,
+  but on a machine they drift anyway: `upgrade` replaces the CLI, and the package is updated
+  somewhere else entirely. Four of the six ways the package can be installed cannot be updated
+  from the CLI — a working copy, a folder under `Packages/` that Unity loads in preference to the
+  manifest, and anything VCC or ALCOM manages — and each is refused by name with the step that
+  does move it. `--dry-run` says what would change.
+- `package_resolve` makes the Package Manager read the manifest again without waiting for the
+  Editor to regain focus. Resolving reloads the domain, so it answers before the reload rather
+  than during it: a call in flight when the domain goes is lost, and a caller waiting on one is
+  waiting for something that will not arrive.
+- Every command says once, on stderr, when a newer release exists. It is read from what `doctor`
+  or `update` last found out and never fetched: a whole `call` finishes in about twenty
+  milliseconds and asking GitHub carries a five-second timeout, so a check on the way out of every
+  command would be the slowest thing the command did.
+- Preferences names a newer release too, and shows the package version beside the Unity version.
+  It reads the same file the CLI wrote. This package still makes no outbound request of its own,
+  which is also why the answer appears only on a machine where the CLI has run.
+- The Preferences page, the README and the illustrated setup guide are available in Vietnamese
+  (#34, thanks @meiiie). A Preferences string with no Vietnamese entry draws in English, so a new
+  one does not wait on a translation.
 
 ### Fixed
 - A VRChat project no longer logs a fatal error for this package on every Editor start. ([#36](https://github.com/isuzu-shiranui/UnityMCP/issues/36))
@@ -118,6 +137,10 @@
   progress window clears when the work behind it finishes, and answering it abandons that work;
   the one whose message says Unity is waiting for its own code to finish is the call you made, and
   nothing outside the Editor can interrupt it.
+- The version skew warning reports any difference between the package and the CLI, not only a
+  difference in the major. They ship as one version, so 4.0.0 against 4.3.0 is three releases of
+  tools and fixes the older half does not have — the case that stayed silent while only the major
+  was compared.
 
 ## [4.2.0] - 2026-09-09
 

@@ -14,12 +14,13 @@ On Unity 6.5 and later, `instanceId` comes back as a JSON string rather than a n
 
 | Tool | Idempotency | Purpose |
 |---|---|---|
-| `console_read_logs` | safe | Console entries. `total` counts what the filter matched, `inConsole` every entry the console holds, `errors` and `warnings` by severity regardless of the filter. **Stack traces are left out by default**, since each entry carries its file in `f` and its line in `l`; pass `stack_trace: true` for them. Twenty exceptions cost 612 tokens without and 2,872 with. A file path is cut to its last three segments |
+| `console_read_logs` | safe | Console entries. `total` counts what the filter matched, `inConsole` every entry the console holds, `errors` and `warnings` by severity regardless of the filter. **Stack traces are left out by default**, since each entry carries its file in `f` and its line in `l`; pass `stack_trace: true` for them. Twenty exceptions cost 612 tokens without and 1,692 with. A file path is cut to its last three segments |
 | `console_get_count` | safe | Error / warning / log counts |
 | `console_clear` | unsafe | Clear the console |
 | `editor_log_tail` | safe | `Editor.log` from disk (works while the Editor is wedged) |
 | `editor_dialog_list` | safe | Title, message and buttons of the modal dialogs the Editor is showing, plus how long the main thread has been stalled (works while the Editor is wedged; Windows only) |
 | `editor_dialog_press` | unsafe | Press a button on an open dialog to unblock the main thread. Needs `confirm: true`. Buttons like "Don't Save" discard unsaved work, so read the message with `editor_dialog_list` first |
+| `package_resolve` | unsafe | Make the Package Manager read `Packages/manifest.json` again and install what changed. Unity does this by itself when the Editor next has focus, so this is for the case where something edited the manifest and the answer is wanted now — which is what `isuzu-unity-cli update` does to move a project to a new release. Resolving reloads the domain, so this answers first and the reload follows: a call in flight when it lands is lost. Needs `confirm: true`. Nothing is installed that the manifest does not already ask for |
 | `compile_status` | safe | Whether scripts are compiling, and whether the last compile succeeded |
 | `compile_request` | unsafe | Ask for a recompile. Runs a full asset refresh first, which imports changed assets and can open a modal dialog |
 | `test_run` | unsafe | Start an EditMode or PlayMode test run |

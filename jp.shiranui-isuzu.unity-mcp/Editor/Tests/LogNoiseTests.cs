@@ -18,7 +18,7 @@ namespace UnityMCP.Editor.Tests
             "ConsoleFilterTests: a warning that survives the Log toggle.",
             "UnityEngine.Debug:LogWarning (object)",
             "UnityMCP.Editor.Tests.ConsoleFilterTests:TheCountsAgree () " +
-            "(at H:/PublicGithub/UnityMCP/jp.shiranui-isuzu.unity-mcp/Editor/Tests/ConsoleFilterTests.cs:182)",
+            "(at C:/Projects/UnityMCP/jp.shiranui-isuzu.unity-mcp/Editor/Tests/ConsoleFilterTests.cs:182)",
             "System.Reflection.MethodBase:Invoke (object,object[])",
             "NUnit.Framework.Internal.Reflect:InvokeMethod (System.Reflection.MethodInfo,object,object[])",
             "NUnit.Framework.Internal.MethodWrapper:Invoke (object,object[])",
@@ -66,6 +66,50 @@ namespace UnityMCP.Editor.Tests
         }
 
         /// <summary>
+        /// A frame inside a nested type can arrive without the type that contains it, and the file
+        /// it points at is then the only thing saying it is delivery.
+        /// </summary>
+        [Test]
+        public void ADeliveryFrameThatLostItsContainingTypeIsStillCut()
+        {
+            var thrown = new[]
+            {
+                "InvalidOperationException: bench failure 19",
+                "McpCodeExecution.Runner.Execute () (at <e9da18a3a4784cb7a1e2a1ca59b592fc>:0)",
+                "UnityMCP.Editor.Core.<>c__DisplayClass4_0:<Run>b__0() "
+                + "(at ./Packages/jp.shiranui-isuzu.unity-mcp/Editor/Core/ToolCallRunner.cs:70)",
+                "UnityMCP.Editor.Core.WorkItem:Run() "
+                + "(at ./Packages/jp.shiranui-isuzu.unity-mcp/Editor/Core/McpMainThreadDispatcher.cs:310)",
+                "UnityEditor.EditorApplication:Internal_CallUpdateFunctions ()",
+            };
+
+            var kept = LogNoise.TrimStacks(thrown);
+
+            Assert.That(kept, Has.None.Contains("ToolCallRunner.cs"));
+            Assert.That(kept, Has.None.Contains("McpMainThreadDispatcher.cs"));
+            Assert.That(kept, Has.Some.Contains("Runner.Execute"), "the snippet's own frame is what the entry is about");
+        }
+
+        /// <summary>
+        /// Matching delivery by file must not take a frame of the caller's that happens to live in a
+        /// folder with the same name.
+        /// </summary>
+        [Test]
+        public void AFrameOutsideThisPackageInAFileOfTheSameNameIsKept()
+        {
+            var thrown = new[]
+            {
+                "NullReferenceException",
+                "Game.Core.<>c__DisplayClass2_0:<Run>b__0() (at Assets/Game/Editor/Core/ToolInvoker.cs:12)",
+                "UnityEditor.EditorApplication:Internal_CallUpdateFunctions ()",
+            };
+
+            var kept = LogNoise.TrimStacks(thrown);
+
+            Assert.That(kept, Has.Some.Contains("Game.Core.<>c__DisplayClass2_0:<Run>b__0()"));
+        }
+
+        /// <summary>
         /// A failure inside a tool still names the tool, which the delivery path around it does not.
         /// </summary>
         [Test]
@@ -108,7 +152,7 @@ namespace UnityMCP.Editor.Tests
             var kept = LogNoise.TrimStacks(NUnitTrace);
 
             Assert.That(kept[1], Does.Contain("(at Editor/Tests/ConsoleFilterTests.cs:182)"));
-            Assert.That(kept[1], Does.Not.Contain("H:/PublicGithub"));
+            Assert.That(kept[1], Does.Not.Contain("C:/Projects"));
         }
 
         /// <summary>
@@ -235,7 +279,7 @@ namespace UnityMCP.Editor.Tests
         {
             Assert.That(
                 LogNoise.ShortenPath(
-                    "H:/PublicGithub/UnityMCP/jp.shiranui-isuzu.unity-mcp/Editor/Handlers/CodeExecutor.cs"),
+                    "C:/Projects/UnityMCP/jp.shiranui-isuzu.unity-mcp/Editor/Handlers/CodeExecutor.cs"),
                 Is.EqualTo("Editor/Handlers/CodeExecutor.cs"));
             Assert.That(LogNoise.ShortenPath("Assets/Scripts/Thing.cs"), Is.EqualTo("Assets/Scripts/Thing.cs"));
             Assert.That(LogNoise.ShortenPath("Thing.cs"), Is.EqualTo("Thing.cs"));

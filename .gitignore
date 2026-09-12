@@ -16,8 +16,7 @@ isuzu-unity-cli/**/bin/
 node_modules/
 *.tgz
 
-# Tooling scratch that has ended up here before
-.orchestra/
+# Crash dumps and logs
 *.stackdump
 *.log
 

@@ -20,8 +20,10 @@ public sealed class HousekeepingCommandTests
     /// fail, with nothing pointing at the version.
     /// </summary>
     [Theory]
-    [InlineData("3.2.0", "4.2.0", "Package Manager")]
-    [InlineData("5.0.0", "4.2.0", "upgrade")]
+    [InlineData("3.2.0", "4.2.0", "lines the package up")]
+    [InlineData("5.0.0", "4.2.0", "Update the CLI")]
+    [InlineData("4.0.1", "4.9.9", "lines the package up")]
+    [InlineData("4.3.0", "4.3.1", "lines the package up")]
     public void SkewNamesTheSideThatIsBehind(string editor, string cli, string advice)
     {
         var reported = DoctorCommand.Skew(editor, cli);
@@ -33,14 +35,26 @@ public sealed class HousekeepingCommandTests
     }
 
     /// <summary>
-    /// Within one major the two are meant to work together, so a warning on every patch
-    /// difference would be noise nobody reads.
+    /// 4.10.0 against 4.9.0 is the case a text comparison gets backwards, and it decides which
+    /// of the two sides is told to update.
+    /// </summary>
+    [Fact]
+    public void ADoubleDigitMinorIsNewerThanASingleDigitOne()
+    {
+        Assert.Contains("Update the CLI", DoctorCommand.Skew("4.10.0", "4.9.0"));
+        Assert.Contains("lines the package up", DoctorCommand.Skew("4.9.0", "4.10.0"));
+    }
+
+    /// <summary>
+    /// The two are released under one number and the release refuses to publish them apart, so
+    /// the same version on both sides is the only case with nothing to say.
     /// </summary>
     [Theory]
     [InlineData("4.2.0", "4.2.0")]
-    [InlineData("4.0.1", "4.9.9")]
     [InlineData("", "4.2.0")]
+    [InlineData("4.2.0", "")]
     [InlineData("not-a-version", "4.2.0")]
+    [InlineData("not-a-version", "also-not")]
     public void NoSkewIsReportedWhereThereIsNothingToSay(string editor, string cli)
     {
         Assert.Null(DoctorCommand.Skew(editor, cli));

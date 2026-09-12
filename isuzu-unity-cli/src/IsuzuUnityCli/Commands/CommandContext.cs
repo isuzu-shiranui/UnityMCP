@@ -1,6 +1,7 @@
 ﻿using System.Text.Json.Nodes;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
+using IsuzuUnityCli.Housekeeping;
 using IsuzuUnityCli.Http;
 
 namespace IsuzuUnityCli.Commands;
@@ -42,6 +43,12 @@ public sealed class CommandContext
     /// </summary>
     public string CaptureDirectory { get; init; } =
         Path.Combine(Path.GetTempPath(), "isuzu-unity-cli");
+
+    /// <summary>
+    /// Where the release check keeps its answer. Substitutable so a test is not answered by
+    /// whatever this machine happened to cache.
+    /// </summary>
+    public string? ReleaseCachePath { get; init; }
 
     public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
     {
@@ -146,5 +153,29 @@ public sealed class CommandContext
     public void ReportError(string? code, string message)
     {
         Err.WriteLine(string.IsNullOrEmpty(code) ? $"error: {message}" : $"error [{code}]: {message}");
+    }
+
+    /// <summary>
+    /// Names a newer release once, from what is already on disk.
+    /// </summary>
+    /// <remarks>
+    /// Read from the cache and never fetched. A whole `call` finishes in about twenty
+    /// milliseconds, and asking GitHub carries a five-second timeout: a check on the way out of
+    /// every command would be the slowest thing the command did, on the runs where it is slowest
+    /// already. Only `doctor` and `update` go and look, and every other command answers with what
+    /// those two left behind. An empty cache says nothing.
+    /// </remarks>
+    public void ReportNewRelease()
+    {
+        var tag = ReleaseCheck.KnownTag(ReleaseCachePath);
+
+        if (tag is null || !ReleaseCheck.IsNewer(tag, Program.Version()))
+        {
+            return;
+        }
+
+        Err.WriteLine(
+            $"{tag} is out and this is {Program.Version()}. "
+            + "'isuzu-unity-cli update' installs it and lines the Unity package up with it.");
     }
 }

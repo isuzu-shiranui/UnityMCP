@@ -25,11 +25,11 @@ namespace UnityMCP.Editor.Tools
             "is refused when another application is in front of the Editor. It also focuses the " +
             "window first, which raises a docked tab over whatever the person at the Editor was " +
             "looking at. An MCP client receives the picture as an image; the CLI writes it to " +
-            "a file and prints the path, because the same picture costs about ninety times as " +
-            "much read out of a terminal as base64 than it does as an image. A picture is still " +
-            "the most expensive thing here: one at the default size is around 40,000 tokens, so " +
-            "four of them outweigh every other call of a session put together. Lower 'max_size' " +
-            "when the question is about layout rather than detail, and read the numbers with " +
+            "a file and prints the path, because the same picture read out of a terminal as " +
+            "base64 costs over a hundred times what it does as an image. Even as an image it " +
+            "costs more than all but a few replies here, about 800 tokens at the default size, " +
+            "so lower 'max_size' when the question is about layout rather than detail, and " +
+            "read the numbers with " +
             "inspect_read or reflect_read when a number would answer it. Name the object the " +
             "picture is about in 'focus' so a camera pointed somewhere else is refused rather " +
             "than paid for.",
