@@ -230,4 +230,131 @@ public sealed class ReleaseNoticeTests : IDisposable
 
         Assert.Equal("", error.ToString());
     }
+
+    [Fact]
+    public void ACopyWingetInstalledIsToldToUpdateThroughWinget()
+    {
+        Cached("v9.9.9", TimeSpan.FromMinutes(1));
+
+        var error = new StringWriter();
+        new CommandContext
+        {
+            Err = error,
+            ReleaseCachePath = cache,
+            ExecutablePath = Path.Combine(Path.GetTempPath(), "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"),
+        }.ReportNewRelease();
+
+        Assert.Contains(CliInstall.WingetUpgrade, error.ToString());
+    }
+}
+
+/// <summary>
+/// The CLI half of update, over a copy another tool installed.
+/// </summary>
+/// <remarks>
+/// The release is read from a fresh cache, so the context can be cancelled before the run: should
+/// the channel be misread, upgrade's download of the real installer is refused at once and
+/// nothing on this machine is replaced.
+/// </remarks>
+public sealed class UpdateCommandTests : IDisposable
+{
+    private static readonly string WingetLink =
+        Path.Combine(Path.GetTempPath(), "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe");
+
+    private readonly string root = Path.Combine(Path.GetTempPath(), "mcp-update-" + Guid.NewGuid().ToString("N"));
+
+    private string Cache => Path.Combine(root, "latest-release.json");
+
+    public UpdateCommandTests()
+    {
+        Directory.CreateDirectory(root);
+        File.WriteAllLines(Cache, new[] { "v99.0.0", DateTimeOffset.UtcNow.ToString("o") });
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(root, recursive: true);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private (CommandContext Context, StringWriter Out) Context(string executablePath, params InstanceDescriptor[] running)
+    {
+        var output = new StringWriter();
+
+        return (new CommandContext
+        {
+            Out = output,
+            Err = new StringWriter(),
+            ReadDescriptors = () => running,
+            ExecutablePath = executablePath,
+            ReleaseCachePath = Cache,
+            Cancellation = new CancellationToken(canceled: true),
+        }, output);
+    }
+
+    /// <summary>A project whose manifest asks for the package at <paramref name="dependency"/>.</summary>
+    private InstanceDescriptor Project(string name, string dependency)
+    {
+        var packages = Path.Combine(root, name, "Packages");
+        Directory.CreateDirectory(packages);
+        File.WriteAllText(
+            Path.Combine(packages, "manifest.json"),
+            "{\n  \"dependencies\": {\n    \"" + PackageInstall.PackageId + "\": \"" + dependency + "\"\n  }\n}\n");
+
+        return new InstanceDescriptor { ProjectName = name, ProjectPath = Path.Combine(root, name, "Assets") };
+    }
+
+    private string? Dependency(string name)
+    {
+        using var manifest = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(root, name, "Packages", "manifest.json")));
+
+        return manifest.RootElement.GetProperty("dependencies").GetProperty(PackageInstall.PackageId).GetString();
+    }
+
+    [Fact]
+    public async Task UntilWingetHasTheReleaseAProjectMovesOnlyAsFarAsTheCli()
+    {
+        var (context, output) = Context(WingetLink, Project("Behind", "0.0.1"), Project("Ahead", "98.0.0"));
+
+        Assert.Equal(0, await Program.Run(["update"], context));
+        Assert.Equal(Program.Version(), Dependency("Behind"));
+        Assert.Equal("98.0.0", Dependency("Ahead"));
+        Assert.Contains("'isuzu-unity-cli update' again", output.ToString());
+    }
+
+    [Fact]
+    public async Task ReleaseIsRefusedForACopyWingetInstalledBeforeAnyProjectIsTouched()
+    {
+        var (context, _) = Context(WingetLink, Project("Game", "0.0.1"));
+
+        Assert.Equal(1, await Program.Run(["update", "--release", "v4.2.0"], context));
+        Assert.Equal("0.0.1", Dependency("Game"));
+    }
+
+    [Fact]
+    public async Task ACopyWingetInstalledIsLeftToWinget()
+    {
+        var (context, output) = Context(
+            Path.Combine(Path.GetTempPath(), "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"));
+
+        Assert.Equal(0, await Program.Run(["update"], context));
+        Assert.Contains(CliInstall.WingetUpgrade, output.ToString());
+    }
+
+    [Fact]
+    public async Task ADryRunOverADotnetToolNamesDotnetInsteadOfSayingItWouldInstall()
+    {
+        var (context, output) = Context(
+            Path.Combine(Path.GetTempPath(), ".dotnet", "tools", "isuzu-unity-cli.exe"));
+
+        Assert.Equal(0, await Program.Run(["update", "--dry-run"], context));
+        Assert.Contains("dotnet tool update -g IsuzuUnityCli", output.ToString());
+        Assert.DoesNotContain("would install", output.ToString());
+    }
 }

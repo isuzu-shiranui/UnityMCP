@@ -8,6 +8,11 @@ namespace IsuzuUnityCli.Tests;
 
 public sealed class UpgradeCommandTests
 {
+    // Given to every run of upgrade over a copy another tool installed. Should the channel be
+    // misread, the download of the real installer is refused at once, so nothing on this machine
+    // is replaced and no PATH is rewritten.
+    private static readonly CancellationToken Cancelled = new(canceled: true);
+
     [Fact]
     public async Task CustomToolPathGetsItsOwnUpdateCommandWithoutRunningInstaller()
     {
@@ -16,20 +21,11 @@ public sealed class UpgradeCommandTests
         var output = new StringWriter();
         try
         {
-            var context = new CommandContext { Out = output, Err = new StringWriter(), ExecutablePath = Path.Combine(directory, "isuzu-unity-cli") };
+            var context = new CommandContext { Out = output, Err = new StringWriter(), ExecutablePath = Path.Combine(directory, "isuzu-unity-cli"), Cancellation = Cancelled };
             Assert.Equal(0, await Program.Run(["upgrade"], context));
             Assert.Contains("--tool-path '" + directory + "'", output.ToString());
             Assert.DoesNotContain(" -g ", output.ToString());
         }
-        finally { Directory.Delete(directory, true); }
-    }
-
-    [Fact]
-    public void CustomToolPathIsRecognizedFromItsPackageStore()
-    {
-        var directory = Path.Combine(Path.GetTempPath(), "cli-upgrade-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(Path.Combine(directory, ".store", "isuzuunitycli"));
-        try { Assert.True(UpgradeCommand.IsDotnetTool(Path.Combine(directory, "isuzu-unity-cli"))); }
         finally { Directory.Delete(directory, true); }
     }
 
@@ -100,6 +96,7 @@ public sealed class UpgradeCommandTests
             Out = output,
             Err = new StringWriter(),
             ExecutablePath = Path.Combine(Path.GetTempPath(), ".dotnet", "tools", "isuzu-unity-cli.exe"),
+            Cancellation = Cancelled,
         };
 
         Assert.Equal(0, await Program.Run(["upgrade"], context));
@@ -107,12 +104,35 @@ public sealed class UpgradeCommandTests
     }
 
     [Fact]
-    public void OnlyAPathInsideDotnetToolsCountsAsADotnetTool()
+    public async Task AWingetCopyIsUpdatedThroughWingetRatherThanReplaced()
     {
-        Assert.True(UpgradeCommand.IsDotnetTool(Path.Combine("/home/u", ".dotnet", "tools", "isuzu-unity-cli")));
-        Assert.True(UpgradeCommand.IsDotnetTool(Path.Combine("/home/u", ".dotnet", "tools", "store", "x", "isuzu-unity-cli")));
-        Assert.False(UpgradeCommand.IsDotnetTool(Path.Combine("/usr", "local", "bin", "isuzu-unity-cli")));
-        Assert.False(UpgradeCommand.IsDotnetTool(Path.Combine("/home/u", "tools", "isuzu-unity-cli")));
+        var output = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = output,
+            Err = new StringWriter(),
+            ExecutablePath = Path.Combine(Path.GetTempPath(), "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"),
+            Cancellation = Cancelled,
+        };
+
+        Assert.Equal(0, await Program.Run(["upgrade"], context));
+        Assert.Contains("winget upgrade --id IsuzuShiranui.IsuzuUnityCli -e", output.ToString());
+    }
+
+    [Fact]
+    public async Task ReleaseIsRefusedForACopyWingetInstalledRatherThanIgnored()
+    {
+        var error = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = new StringWriter(),
+            Err = error,
+            ExecutablePath = Path.Combine(Path.GetTempPath(), "Microsoft", "WinGet", "Links", "isuzu-unity-cli.exe"),
+            Cancellation = Cancelled,
+        };
+
+        Assert.Equal(1, await Program.Run(["upgrade", "--release", "v4.2.0"], context));
+        Assert.Contains("--release", error.ToString());
     }
 
     [Fact]

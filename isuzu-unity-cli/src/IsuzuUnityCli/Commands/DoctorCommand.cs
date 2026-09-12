@@ -39,7 +39,9 @@ public static class DoctorCommand
         var running = context.ReadDescriptors();
         var known = context.ReadAllDescriptors();
 
-        ReportExecutable(context);
+        var cli = CliInstall.Read(context.ExecutablePath);
+
+        ReportExecutable(cli, context);
 
         context.Out.WriteLine("Agents");
 
@@ -72,7 +74,7 @@ public static class DoctorCommand
         }
 
         context.Out.WriteLine();
-        ReportRelease(context);
+        ReportRelease(cli, context);
 
         context.Out.WriteLine("Running Editors");
 
@@ -127,10 +129,11 @@ public static class DoctorCommand
     /// own build passes its tests. Found by an agent hitting a bug that had already been fixed
     /// three versions earlier.
     /// </remarks>
-    private static void ReportExecutable(CommandContext context)
+    private static void ReportExecutable(CliInstall.Install cli, CommandContext context)
     {
         context.Out.WriteLine("Executable");
-        context.Out.WriteLine($"  [running]  {Environment.ProcessPath ?? "unknown"} ({Program.Version()})");
+        context.Out.WriteLine($"  [running]  {context.ExecutablePath} ({Program.Version()})");
+        context.Out.WriteLine($"  [channel]  installed {cli.Description}; update with: {cli.UpdateCommand}");
 
         var onPath = FirstOnPath();
 
@@ -138,7 +141,7 @@ public static class DoctorCommand
         {
             context.Out.WriteLine("  [absent]   no isuzu-unity-cli on PATH; the command name will not resolve");
         }
-        else if (!SamePath(onPath, Environment.ProcessPath))
+        else if (!SamePath(onPath, context.ExecutablePath))
         {
             var version = VersionOf(onPath);
 
@@ -247,7 +250,7 @@ public static class DoctorCommand
     /// turns a bad release into a broken machine, and 'upgrade --release' is the way back when
     /// one turns out to be.
     /// </remarks>
-    private static void ReportRelease(CommandContext context)
+    private static void ReportRelease(CliInstall.Install cli, CommandContext context)
     {
         string? tag;
 
@@ -266,10 +269,26 @@ public static class DoctorCommand
         }
 
         context.Out.WriteLine("Release");
-        context.Out.WriteLine(
-            $"  {tag} is out and this is {Program.Version()}. "
-            + "Install it with 'isuzu-unity-cli upgrade', and update the Unity package to match. "
-            + "'upgrade --release <tag>' goes back if one turns out to be broken.");
+
+        if (cli.ReplacesItself)
+        {
+            context.Out.WriteLine(
+                $"  {tag} is out and this is {Program.Version()}. "
+                + "Install it with 'isuzu-unity-cli upgrade', and update the Unity package to match. "
+                + "'upgrade --release <tag>' goes back if one turns out to be broken.");
+        }
+        else
+        {
+            context.Out.WriteLine($"  {tag} is out and this is {Program.Version()}. Update this CLI with: {cli.UpdateCommand}");
+
+            if (cli.Channel is CliChannel.Winget)
+            {
+                context.Out.WriteLine("  " + CliInstall.WingetDelay);
+            }
+
+            context.Out.WriteLine("  Then 'isuzu-unity-cli update' updates the Unity package to match.");
+        }
+
         context.Out.WriteLine();
     }
 

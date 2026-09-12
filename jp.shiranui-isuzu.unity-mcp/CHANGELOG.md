@@ -1,8 +1,22 @@
 # Changelog
 
-## [Unreleased]
+## [4.3.1] - 2026-09-12
+
+### Changed
+- A CLI installed with winget is left to winget, and one installed as a dotnet tool to
+  `dotnet tool update`. `upgrade` and `update` print that command instead of replacing the
+  executable, which would make winget refuse to upgrade or uninstall it, and refuse `--release`
+  rather than ignore it. Until the CLI has been updated that way, `update` moves each project's
+  package only as far as the version the CLI runs, so the two keep matching.
+- `doctor` says how the running CLI was installed and which command updates it, and the notice
+  after each command names the same command.
+- The Settings window also looks for the CLI where winget puts it: winget's folder of links, and
+  the package folder winget adds to PATH when it cannot create a link. An Editor started before
+  winget changed PATH does not find either on its own PATH.
 
 ### Fixed
+- `update --dry-run` said it would install the new release over a CLI installed as a dotnet tool.
+- The Settings window finds the CLI in a PATH entry written in double quotes.
 - `install.ps1` says why it could not read the downloaded executable, and waits for security
   software that still has it open, instead of failing on Windows PowerShell 5.1 with "You cannot
   call a method on a null-valued expression". ([#38](https://github.com/isuzu-shiranui/UnityMCP/issues/38))
