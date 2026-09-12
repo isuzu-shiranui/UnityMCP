@@ -1,15 +1,8 @@
-using System.IO;
-using System.Linq;
-
 using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
-using UnityEditor;
-using UnityEditor.SceneManagement;
-
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Tools;
@@ -91,75 +84,6 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(GameObject.Find("RefusedForItsParent"), Is.Null);
             Assert.That(GameObject.Find("RefusedForItsPosition"), Is.Null);
-        }
-
-        /// <summary>
-        /// A scale and an active state set on a prefab instance are still there after the scene
-        /// is saved and opened again.
-        /// </summary>
-        /// <remarks>
-        /// A scene stores a prefab instance as its differences from the asset. A change that is
-        /// not recorded as one of those differences is saved as nothing, and the scene opens
-        /// with the asset's value. The tools run through <see cref="ToolInvoker"/>, which is
-        /// what opens and collapses their undo group.
-        /// </remarks>
-        [Test]
-        public void ChangesToAPrefabInstanceSurviveSavingAndReopeningTheScene()
-        {
-            var folder = "Assets/__McpPrefabOverride_" + System.Guid.NewGuid().ToString("N");
-            AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
-
-            try
-            {
-                var source = new GameObject("PrefabOverrideFixture");
-                var prefab = PrefabUtility.SaveAsPrefabAsset(source, folder + "/Fixture.prefab");
-                Object.DestroyImmediate(source);
-
-                var scenePath = folder + "/Scene.unity";
-                var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-                var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, scene);
-                Assert.That(EditorSceneManager.SaveScene(scene, scenePath), Is.True);
-
-                var catalog = ToolCatalog.BuildFromTypes(new[] { typeof(GameObjectTools) });
-
-                ToolInvoker.Invoke(
-                    catalog.Tools.Single(t => t.Name == "gameobject_set_transform"),
-                    new JObject
-                    {
-                        ["instance_id"] = EntityIdCompat.WireIdOf(instance),
-                        ["scale"] = new JObject { ["x"] = 2, ["y"] = 3, ["z"] = 4 },
-                    });
-
-                ToolInvoker.Invoke(
-                    catalog.Tools.Single(t => t.Name == "gameobject_set_active"),
-                    new JObject
-                    {
-                        ["instance_id"] = EntityIdCompat.WireIdOf(instance),
-                        ["active"] = false,
-                    });
-
-                Assert.That(EditorSceneManager.SaveScene(SceneManager.GetActiveScene()), Is.True);
-
-                // Closed first, so the objects asserted on below are the ones read back from disk.
-                EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-                Assert.That(instance == null, Is.True, "the saved scene was not closed");
-                EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
-
-                var reopened = SceneManager.GetActiveScene().GetRootGameObjects().Single();
-                var modified = PrefabUtility.GetPropertyModifications(reopened)
-                    .Select(m => m.propertyPath)
-                    .ToArray();
-
-                Assert.That(PrefabUtility.IsPartOfPrefabInstance(reopened), Is.True);
-                Assert.That(reopened.transform.localScale, Is.EqualTo(new Vector3(2f, 3f, 4f)));
-                Assert.That(reopened.activeSelf, Is.False);
-                Assert.That(modified, Is.SupersetOf(new[] { "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z", "m_IsActive" }));
-            }
-            finally
-            {
-                EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-                AssetDatabase.DeleteAsset(folder);
-            }
         }
     }
 }

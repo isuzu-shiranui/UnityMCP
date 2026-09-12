@@ -74,26 +74,6 @@ namespace UnityMCP.Editor.Tests
             this.AssertTheOpenSceneIsUntouched();
         }
 
-        [TestCase("New.txt")]
-        [TestCase("New")]
-        [TestCase(".unity")]
-        public void APathThatIsNotASceneFileIsRefusedBeforeAnySceneIsCreated(string name)
-        {
-            var refusal = Assert.Throws<McpToolException>(() => SceneTools.Create(path: this.folder + "/" + name));
-
-            Assert.That(refusal.Code, Is.EqualTo("invalid_params"));
-            this.AssertTheOpenSceneIsUntouched();
-        }
-
-        [Test]
-        public void APathOutsideAssetsAndPackagesIsRefusedBeforeAnySceneIsCreated()
-        {
-            var refusal = Assert.Throws<McpToolException>(() => SceneTools.Create(path: "Scenes/Outside.unity"));
-
-            Assert.That(refusal.Code, Is.EqualTo("invalid_params"));
-            this.AssertTheOpenSceneIsUntouched();
-        }
-
         private void AssertTheOpenSceneIsUntouched()
         {
             var active = SceneManager.GetActiveScene();

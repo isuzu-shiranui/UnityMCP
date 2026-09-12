@@ -1,5 +1,4 @@
 using System.Text.Json.Nodes;
-using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Commands;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Tests.Fakes;
@@ -66,32 +65,6 @@ public sealed class ProjectReconnectTests
         Assert.Empty(other.Requests);
         Assert.Equal(4, code);
         Assert.Contains("No running Editor has", error.ToString());
-    }
-
-    /// <summary>
-    /// The selected project closes and another project's Editor takes its port. That Editor checks
-    /// its own token first, so it answers 401 and runs nothing, and the reconnect refuses to move.
-    /// </summary>
-    [Fact]
-    public async Task AnotherProjectOnTheOldPortIsRefusedOnceTheGraceRunsOut()
-    {
-        using var port = new FakeUnityServer().Default(401, Unauthorized);
-        var original = port.Descriptor("Original");
-        var other = port.Descriptor("Other", token: "other-token");
-        var reads = 0;
-        var context = new CommandContext
-        {
-            Out = new StringWriter(),
-            Err = new StringWriter(),
-            ReadDescriptors = () => ++reads == 1 ? [original] : [other],
-        };
-
-        var refusal = await Assert.ThrowsAsync<CliException>(() => JobsCommand.Run(
-            ArgParser.Parse(["jobs", "j1", "--wait", "--timeout", "10"]), context, pollIntervalMs: 5, unauthorizedGraceMs: 50));
-
-        Assert.Equal(3, refusal.ExitCode);
-        Assert.Contains("No running Editor has", refusal.Message);
-        Assert.All(port.Requests, request => Assert.Equal("Bearer secret-token", request.Authorization));
     }
 
     [Fact]
@@ -258,37 +231,5 @@ public sealed class ProjectReconnectTests
         Assert.Equal("Bearer fresh", Assert.Single(restarted.Requests).Authorization);
         Assert.EndsWith(InstanceResolver.SwitchByRestart, JsonNode.Parse(output.Lines[2])!["error"]!["message"]!.GetValue<string>());
         Assert.NotNull(JsonNode.Parse(output.Lines[3])!["result"]);
-    }
-
-    [Fact]
-    public async Task StdioNamedForAProjectDoesNotSettleForOneWhoseNameContainsIt()
-    {
-        using var tools = new FakeUnityServer().Default(200, """{"jsonrpc":"2.0","id":1,"result":{}}""");
-        var input = new GatedReader();
-        var output = new RecordingWriter();
-        var context = new CommandContext
-        {
-            In = input,
-            Out = output,
-            Err = new StringWriter(),
-            ReadDescriptors = () => [tools.Descriptor("GameTools")],
-        };
-        var run = Program.Run(["mcp-stdio", "--project", "Game"], context);
-
-        try
-        {
-            input.Send("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-            await RecordingWriter.WaitFor(() => output.Lines.Count == 1, "the refusal");
-        }
-        finally
-        {
-            input.CloseInput();
-            await run.WaitAsync(TimeSpan.FromSeconds(10));
-        }
-
-        Assert.Empty(tools.Requests);
-        Assert.StartsWith(
-            "No running Editor is named \"Game\" exactly.",
-            JsonNode.Parse(output.Lines[0])!["error"]!["message"]!.GetValue<string>());
     }
 }

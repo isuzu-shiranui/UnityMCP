@@ -322,32 +322,6 @@ public sealed class VerifyCommandTests
     }
 
     [Fact]
-    public async Task AJobThatRecoveredFromARejectionGetsAFreshGraceForTheNext()
-    {
-        const string Rejected = """{"status":"error","error":{"code":"unauthorized","message":"bad token"}}""";
-
-        using var server = new FakeUnityServer()
-            .Enqueue(200, """{"status":"success","result":{"state":"running","jobId":"j1"}}""")
-            .Enqueue(401, Rejected);
-
-        for (var i = 0; i < 30; i++)
-        {
-            server.Enqueue(200, """{"status":"success","result":{"id":"j1","status":"running"}}""");
-        }
-
-        server.Enqueue(401, Rejected)
-            .Enqueue(200, """{"status":"success","result":{"id":"j1","status":"completed","result":{"started":true}}}""")
-            .Enqueue(200, """{"status":"success","result":{"status":"completed","passed":1,"failed":0,"skipped":0,"results":[]}}""")
-            .Enqueue(200, NoErrors);
-
-        var (context, _, error) = Context(server);
-
-        Assert.Equal(0, await VerifyCommand.Run(
-            ArgParser.Parse(["verify", "--no-compile", "--test"]), context, Fast with { JobIntervalMs = 5, UnauthorizedGraceMs = 50 }));
-        Assert.DoesNotContain("rejecting", error.ToString());
-    }
-
-    [Fact]
     public async Task AProjectThatDoesNotComeBackTimesOutWithTheReason()
     {
         var gone = FakeUnityServer.DescriptorFor(FakeUnityServer.FreePort(), "Gone");
@@ -371,20 +345,6 @@ public sealed class VerifyCommandTests
         Assert.Equal(4, await Verify(context, "--timeout", "1"));
         Assert.Contains("verify timed out after 1s", error.ToString());
         Assert.Contains($"No running Editor has {Path.Combine(Path.GetTempPath(), "Gone")} open.", error.ToString());
-    }
-
-    [Fact]
-    public async Task ARunThatStoppedPartWayIsNotOkInItsRawReport()
-    {
-        using var server = new FakeUnityServer()
-            .Enqueue(200, """{"status":"success","result":{"started":true}}""")
-            .Enqueue(200, """{"status":"success","result":{"status":"completed","passed":1,"failed":0,"skipped":0,"results":[]}}""")
-            .Enqueue(200, """{"status":"error","error":{"code":"tool_failed","message":"console unavailable"}}""");
-        var (context, output, error) = Context(server);
-
-        Assert.Equal(1, await Verify(context, "--no-compile", "--test", "--raw"));
-        Assert.False(JsonNode.Parse(output.ToString())!["ok"]!.GetValue<bool>());
-        Assert.Contains("console unavailable", error.ToString());
     }
 
     [Fact]

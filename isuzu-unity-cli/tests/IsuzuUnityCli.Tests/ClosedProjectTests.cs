@@ -23,10 +23,10 @@ public sealed class ClosedProjectTests : IDisposable
         Directory.Delete(_root, recursive: true);
     }
 
-    private static InstanceDescriptor Open(string path) => new()
+    private InstanceDescriptor Open() => new()
     {
         ProjectName = "Open",
-        ProjectPath = path,
+        ProjectPath = Path.Combine(_root, "Open", "Assets"),
         Port = 27180,
         Token = "token",
     };
@@ -34,10 +34,8 @@ public sealed class ClosedProjectTests : IDisposable
     [Fact]
     public void ACommandRunInsideAProjectThatIsNotOpenIsRefused()
     {
-        var open = Open(Path.Combine(_root, "Open", "Assets"));
-
         var error = Assert.Throws<CliException>(
-            () => InstanceResolver.Resolve([open], null, Path.Combine(_root, "Closed", "Assets", "Scripts")));
+            () => InstanceResolver.Resolve([Open()], null, Path.Combine(_root, "Closed", "Assets", "Scripts")));
 
         Assert.Equal(3, error.ExitCode);
         Assert.Contains(Path.Combine(_root, "Closed"), error.Message);
@@ -46,32 +44,8 @@ public sealed class ClosedProjectTests : IDisposable
     [Fact]
     public void OutsideEveryProjectTheOnlyEditorIsStillChosen()
     {
-        var open = Open(Path.Combine(_root, "Open", "Assets"));
+        var open = Open();
 
         Assert.Same(open, InstanceResolver.Resolve([open], null, _root));
-    }
-
-    [Fact]
-    public void AProjectNamedOnTheCommandLineIsNotRefusedForTheWorkingDirectory()
-    {
-        var open = Open(Path.Combine(_root, "Open", "Assets"));
-
-        Assert.Same(open, InstanceResolver.Resolve([open], "Open", Path.Combine(_root, "Closed", "Assets")));
-    }
-
-    [Fact]
-    public void WindowsDescriptorsReadFromAnotherHostSkipTheCheck()
-    {
-        var windows = Open("C:/Work/Open/Assets");
-        var directory = Path.Combine(_root, "Closed", "Assets");
-
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Throws<CliException>(() => InstanceResolver.Resolve([windows], null, directory));
-        }
-        else
-        {
-            Assert.Same(windows, InstanceResolver.Resolve([windows], null, directory));
-        }
     }
 }

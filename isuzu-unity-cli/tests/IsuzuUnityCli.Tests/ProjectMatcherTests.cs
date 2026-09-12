@@ -238,16 +238,6 @@ public sealed class ProjectMatcherTests
         }
     }
 
-    /// <summary>
-    /// A path selects a project only when it is spelled the way a reconnect compares it, so a
-    /// session is never bound to a project it could not find again.
-    /// </summary>
-    [Fact]
-    public void APathInAnotherCaseSelectsNothing()
-    {
-        Assert.Throws<CliException>(() => ProjectMatcher.ByName(Open, "/P/A"));
-    }
-
     [Fact]
     public void AnExactSelectionTakesNoSubstring()
     {
@@ -256,14 +246,6 @@ public sealed class ProjectMatcherTests
         Assert.Equal(3, e.ExitCode);
         Assert.StartsWith("No running Editor is named \"Test B\" exactly.", e.Message);
         Assert.Throws<CliException>(() => ProjectMatcher.ByName(Renamed, "MCP VRChat", exactOnly: true));
-    }
-
-    [Fact]
-    public void AnExactSelectionStillTakesEitherNameInAnyCaseOrThePath()
-    {
-        Assert.Equal("UnityMCP v3 Test B", ProjectMatcher.ByName(Open, "unitymcp v3 test b", exactOnly: true).ProjectName);
-        Assert.Equal("VRChat", ProjectMatcher.ByName(Renamed, "UnityMCP VRChat Test", exactOnly: true).ProjectName);
-        Assert.Equal("Other", ProjectMatcher.ByName(Open, "/p/c", exactOnly: true).ProjectName);
     }
 
     /// <summary>

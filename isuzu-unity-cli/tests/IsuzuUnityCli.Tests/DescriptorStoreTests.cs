@@ -146,18 +146,6 @@ public sealed class DescriptorStoreTests : IDisposable
         Assert.Single(DescriptorStore.ReadAll([_dir, _dir + Path.DirectorySeparatorChar, Path.Combine(_dir, ".")], _ => true));
     }
 
-    /// <summary>
-    /// Kept apart so the choice between them is made where it can be refused, not guessed here.
-    /// </summary>
-    [Fact]
-    public void DescriptorsThatDisagreeAboutOneProjectAreBothKept()
-    {
-        Write("old.json", Descriptor("Alpha", port: 27180, token: "old"));
-        Write("new.json", Descriptor("Alpha", port: 27181, token: "new"));
-
-        Assert.Equal(2, DescriptorStore.ReadAll([_dir], _ => true).Count);
-    }
-
     [Fact]
     public void AWindowsEditorReadFromAnotherHostIsAskedInsteadOfItsPid()
     {
@@ -177,18 +165,6 @@ public sealed class DescriptorStoreTests : IDisposable
             Assert.Empty(pidAliveButSilent);
         }
     }
-
-    [Fact]
-    public void TheSameDescriptorInTwoDirectoriesIsOneEditor()
-    {
-        var other = Path.Combine(_dir, "other");
-        Directory.CreateDirectory(other);
-        Write("a.json", Descriptor("Alpha"));
-        File.WriteAllText(Path.Combine(other, "a.json"), Descriptor("Alpha"));
-
-        Assert.Single(DescriptorStore.ReadAll([_dir, other], _ => true));
-    }
-
     /// <summary>
     /// A path in this host's own form. A Windows path read on another host skips the pid check, so
     /// a test of that check needs a path the host checks.

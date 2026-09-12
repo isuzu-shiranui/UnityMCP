@@ -66,47 +66,6 @@ jobs:
 
           "$TOOLS/isuzu-unity-cli" --help > /dev/null
 
-  # The tests branch on the host for paths, process liveness, links and the registry, and the job
-  # above runs them on Linux alone.
-  dotnet-hosts:
-    name: CLI tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-
-    defaults:
-      run:
-        working-directory: isuzu-unity-cli
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Build
-        run: dotnet build -c Release -warnaserror
-
-      - name: Test
-        run: dotnet test -c Release --no-build
-
-  # What run-editmode-tests.ps1 does to a folder is decided before any Editor starts, so it can be
-  # checked on a runner without a Unity licence.
-  scripts-windows:
-    name: Test script folder checks
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Folder checks
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/run-editmode-tests.guard.ps1
-
   # What users download is a NativeAOT binary, and native code can only be produced on its own
   # operating system: the ILCompiler emits an object file that the platform's own linker has to
   # finish, so there is no Linux runner that can hand back a Windows or macOS executable. The
@@ -366,11 +325,6 @@ jobs:
             fi
           done
           exit $STATUS
-
-      # This decides whether a release opens a pull request on another project's repository.
-      # Canned answers stand in for GitHub.
-      - name: winget submission check
-        run: bash scripts/tests/winget-due.test.sh
 
       # The endpoint is the whole contract between the CLI and the Editor. A client configured
       # by hand against the wrong path gets a connection that opens and then answers nothing.

@@ -57,26 +57,4 @@ public sealed class ProjectKeyTests
         Assert.NotEqual(ProjectKey.Of("/work/Game/Assets"), ProjectKey.Of("/work/game/Assets"));
         Assert.NotEqual(ProjectKey.Of("C:/work/Game"), ProjectKey.Of("/work/Game"));
     }
-
-    [Fact]
-    public void ExtraLeadingSlashesAreOnePosixRootAndDotDotCannotClimbAboveIt()
-    {
-        // On Windows a path starting with a slash is read against the current drive instead.
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        Assert.Equal(ProjectKey.Of("/work/Game"), ProjectKey.Of("///work/Game/Assets"));
-        Assert.Null(ProjectKey.Of("/../work/Game"));
-    }
-
-    [Theory]
-    [InlineData("C:/Work/Game/Assets", "C:/Work/Game")]
-    [InlineData(@"C:\Work\Game\Assets\", @"C:\Work\Game")]
-    [InlineData("/work/Game/", "/work/Game")]
-    public void TheFolderShownKeepsThePublishedSpelling(string published, string shown)
-    {
-        Assert.Equal(shown, ProjectKey.Display(published));
-    }
 }

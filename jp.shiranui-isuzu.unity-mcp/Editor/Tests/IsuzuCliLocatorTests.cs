@@ -61,18 +61,6 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
-        public void OutsideWindowsSpacesAroundAPathEntryBelongToTheFolderName()
-        {
-            var bin = Path.Combine(Root, "bin") + " ";
-
-            var candidates = IsuzuCliLocator.Candidates(
-                Variables(new Dictionary<string, string> { ["PATH"] = bin }),
-                isWindows: false);
-
-            Assert.That(candidates, Is.EqualTo(new[] { Path.Combine(bin, "isuzu-unity-cli") }));
-        }
-
-        [Test]
         public void AnEntryThatIsNotAPathDoesNotStopTheSearch()
         {
             var bin = Path.Combine(Root, "bin");

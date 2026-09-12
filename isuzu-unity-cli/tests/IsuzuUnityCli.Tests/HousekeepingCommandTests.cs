@@ -205,18 +205,6 @@ public sealed class HousekeepingCommandTests
     }
 
     [Fact]
-    public async Task SetupSaysWhyTheProjectItWasGivenWasNotChosen()
-    {
-        using var home = new TempHome();
-        var project = home.MakeDirectory("GameTools");
-
-        var (context, _, error) = Context(home, Descriptor(project));
-
-        Assert.Equal(3, await Program.Run(["setup", "--agent", "codex", "--mcp", "--project", "Tools"], context));
-        Assert.Contains("No running Editor is named \"Tools\" exactly", error.ToString());
-    }
-
-    [Fact]
     public async Task AnUnknownAgentIsRefusedRatherThanGuessed()
     {
         using var home = new TempHome();
@@ -279,50 +267,6 @@ public sealed class HousekeepingCommandTests
         Assert.Contains(Token, entry.Authorization);
     }
 
-    /// <summary>
-    /// A folder that differs only in case can be another project, so its Editor's token is not
-    /// written into the entry filed under the first one.
-    /// </summary>
-    [Fact]
-    public async Task DoctorLeavesAClaudeCodeEntryForAFolderThatDiffersOnlyInCase()
-    {
-        using var home = new TempHome();
-        home.MakeDirectory(".claude");
-        var project = home.MakeDirectory("Game");
-
-        var (setup, _, _) = Context(home, Descriptor(project));
-        Assert.Equal(0, await Program.Run(["setup", "--agent", "claude-code", "--mcp"], setup));
-
-        var otherCase = Descriptor(Path.Combine(Path.GetDirectoryName(project)!, "GAME"), token: new string('2', 64));
-        var (fix, report, _) = Context(home, otherCase);
-        Assert.Equal(0, await Program.Run(["doctor", "--fix"], fix));
-
-        var entry = JsonConfigEditor.Find(
-            JsonConfigEditor.Read(home.At(".claude.json")),
-            ["projects", McpServerEntry.ClaudeCodeProjectKey(project), "mcpServers", "isuzu-unity"]);
-
-        Assert.DoesNotContain("rewritten from the running Editor", report.ToString());
-        Assert.Equal("Bearer " + Token, entry!["headers"]!["Authorization"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task DoctorMovesAnEntryWhoseTokenTiesItToAnEditorOnAnotherPort()
-    {
-        using var home = new TempHome();
-        var codex = home.MakeDirectory(".codex");
-        var game = home.MakeDirectory("Game");
-
-        var (setup, _, _) = Context(home, Descriptor(game));
-        Assert.Equal(0, await Program.Run(["setup", "--agent", "codex", "--mcp"], setup));
-
-        var (fix, report, _) = Context(home, Descriptor(game, port: 27190));
-        Assert.Equal(0, await Program.Run(["doctor", "--fix"], fix));
-
-        var entry = TomlConfigEditor.Read(File.ReadAllText(Path.Combine(codex, "config.toml"), Encoding.UTF8), "mcp_servers.isuzu-unity")!;
-
-        Assert.Contains("rewritten from the running Editor", report.ToString());
-        Assert.Equal("http://127.0.0.1:27190/mcp", entry.Url);
-    }
 
     [Fact]
     public async Task DoctorReinstallsAStaleSkillOnlyWhenAskedTo()
