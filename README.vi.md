@@ -45,7 +45,7 @@ irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 |
 curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh
 ```
 
-Bạn cũng có thể tải tệp thực thi từ GitHub Releases và đối chiếu mã băm với `SHA256SUMS`. Nếu đã cài .NET SDK, bạn có thể dùng `dotnet tool install -g IsuzuUnityCli`.
+Bạn cũng có thể tải tệp thực thi từ GitHub Releases và đối chiếu mã băm với `SHA256SUMS`. Nếu đã cài .NET 10 SDK, bạn có thể dùng `dotnet tool install -g IsuzuUnityCli`.
 
 Sau đó cài skill cho tác nhân AI và đăng ký ứng dụng khách MCP:
 

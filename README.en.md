@@ -43,7 +43,7 @@ irm https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.ps1 |
 curl -fsSL https://raw.githubusercontent.com/isuzu-shiranui/UnityMCP/main/install.sh | sh
 ```
 
-You can also download a binary from GitHub Releases and verify it against `SHA256SUMS`. With the .NET SDK installed, `dotnet tool install -g IsuzuUnityCli` works too.
+You can also download a binary from GitHub Releases and verify it against `SHA256SUMS`. With the .NET 10 SDK installed, `dotnet tool install -g IsuzuUnityCli` works too.
 
 Then install the agent skill and register an MCP client:
 
