@@ -1,4 +1,4 @@
-# Runs the package's EditMode tests in a real Unity Editor and records the result.
+﻿# Runs the package's EditMode tests in a real Unity Editor and records the result.
 #
 # No runner has a Unity licence, so nothing automated compiles the Editor assemblies. This is
 # what makes them releasable: run it, and it writes an attestation naming the sources it ran
@@ -112,6 +112,7 @@ function Resolve-Bundled([string] $name, [string] $fallback) {
 }
 $timelineVersion = Resolve-Bundled 'com.unity.timeline' '1.8.7'
 $recorderVersion = Resolve-Bundled 'com.unity.recorder' '5.0.0'
+$uguiVersion = Resolve-Bundled 'com.unity.ugui' '1.0.0'
 
 if ($unityVersion -match '^(\d+)\.') {
     $editorMajor = [int]$Matches[1]
@@ -136,7 +137,8 @@ $manifest = @"
     "com.unity.modules.animation": "1.0.0",
     "com.unity.modules.director": "1.0.0",
     "com.unity.timeline": "$timelineVersion",
-    "com.unity.recorder": "$recorderVersion"
+    "com.unity.recorder": "$recorderVersion",
+    "com.unity.ugui": "$uguiVersion"
   },
   "testables": [ "jp.shiranui-isuzu.unity-mcp" ]
 }
@@ -154,6 +156,14 @@ if (-not (Test-Path $link)) {
     $source = Join-Path $repo $package
     cmd /c mklink /J "`"$link`"" "`"$source`"" | Out-Null
     if (-not (Test-Path $link)) { throw "Could not link the package into $link." }
+}
+
+# The reference pages, linked the same way so the test that checks every tool has a row can
+# find them. Without this that test has nowhere to look and passes by skipping, which is the
+# one outcome a guard must not have.
+$docsLink = Join-Path $ProjectPath 'docs'
+if (-not (Test-Path $docsLink)) {
+    cmd /c mklink /J "`"$docsLink`"" "`"$(Join-Path $repo 'docs')`"" | Out-Null
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────
@@ -226,11 +236,30 @@ $attestation = [ordered]@{
     ranAt        = (Get-Date).ToUniversalTime().ToString('o')
 }
 
-$path = Join-Path $repo 'scripts\editmode-attestation.json'
+# Named by the hash rather than by a fixed name, so two branches that each recorded a run write
+# different files and merge without a conflict. Under a fixed name they conflict whenever both
+# touched Editor sources, and resolving that teaches nothing: the merged result has a hash
+# neither run covers, which the gate catches on its own a moment later.
+$directory = Join-Path $repo 'scripts\attested'
+New-Item -ItemType Directory -Force -Path $directory | Out-Null
+$path = Join-Path $directory "$hash.json"
+
 [System.IO.File]::WriteAllText(
     $path,
     (($attestation | ConvertTo-Json) + "`n").Replace("`r`n", "`n"),
     (New-Object System.Text.UTF8Encoding($false)))
+
+# Only the run covering the sources on disk is ever read; the rest are history. Kept by the time
+# recorded inside them rather than the file's own: a checkout resets modification times, so
+# sorting by those would prune whichever files git happened to write last.
+$stale = Get-ChildItem -Path $directory -Filter '*.json' |
+    Sort-Object { (Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json).ranAt } -Descending |
+    Select-Object -Skip 10
+
+foreach ($old in $stale) {
+    Remove-Item -LiteralPath $old.FullName -Force
+    Write-Host "  pruned $($old.Name)"
+}
 
 Write-Host ''
 Write-Host "Wrote $path" -ForegroundColor Green

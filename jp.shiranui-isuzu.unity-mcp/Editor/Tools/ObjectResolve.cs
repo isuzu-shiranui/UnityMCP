@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -48,11 +49,29 @@ namespace UnityMCP.Editor.Tools
         {
             if (instanceId.HasValue)
             {
-                var byId = EntityIdCompat.Find(instanceId.Value) as GameObject;
+                var found = EntityIdCompat.Find(instanceId.Value);
 
-                if (byId != null)
+                if (found is GameObject byId)
                 {
                     return byId;
+                }
+
+                // A live id for something else is not an expired id, and saying so sends the
+                // caller to re-read a hierarchy that will never contain it. A material's id was
+                // answered with "ids do not survive a domain reload" while the material was open
+                // in front of them.
+                if (found is Component component)
+                {
+                    return component.gameObject;
+                }
+
+                if (found != null)
+                {
+                    throw new McpToolException(
+                        "invalid_params",
+                        $"Instance id {instanceId.Value} is a {found.GetType().Name} named "
+                        + $"'{found.name}', not a GameObject. This argument takes an object in the "
+                        + "scene; an asset is named by its path under Assets/ or Packages/.");
                 }
 
                 throw new McpToolException(
@@ -127,6 +146,62 @@ namespace UnityMCP.Editor.Tools
             }
 
             return builder.ToString();
+        }
+
+        /// <summary>Path construction shared only within one synchronous hierarchy read.</summary>
+        internal sealed class PathBatch
+        {
+            private readonly Dictionary<Transform, string> segments = new();
+            private readonly Dictionary<Transform, string> paths = new();
+            private readonly HashSet<Transform> parents = new();
+            private bool rootsRead;
+
+            public string PathOf(GameObject go)
+            {
+                if (go == null) return null;
+                return PathOf(go.transform);
+            }
+
+            private string PathOf(Transform transform)
+            {
+                if (this.paths.TryGetValue(transform, out var path)) return path;
+                var parent = transform.parent;
+                if (parent == null && !this.rootsRead)
+                {
+                    this.rootsRead = true;
+                    this.Index(SceneRoots().Select(root => root.transform));
+                }
+                else if (parent != null && this.parents.Add(parent))
+                {
+                    this.Index(parent.Cast<Transform>());
+                }
+
+                // Preserve SceneRoots' PrefabStage behavior even for an object outside that set.
+                var segment = this.segments.TryGetValue(transform, out var named) ? named : Segment(transform);
+                path = (parent == null ? "" : this.PathOf(parent)) + "/" + segment;
+                this.paths[transform] = path;
+                return path;
+            }
+
+            private void Index(IEnumerable<Transform> siblings)
+            {
+                var nodes = new List<(Transform Transform, string Name)>();
+                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var sibling in siblings)
+                {
+                    var name = sibling.name;
+                    nodes.Add((sibling, name));
+                    counts.TryGetValue(name, out var count);
+                    counts[name] = count + 1;
+                }
+                var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var (transform, name) in nodes)
+                {
+                    seen.TryGetValue(name, out var index);
+                    this.segments[transform] = counts[name] > 1 ? $"{name}[{index}]" : name;
+                    seen[name] = index + 1;
+                }
+            }
         }
 
         /// <summary>Finds a component on an object, by type name.</summary>

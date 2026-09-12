@@ -41,6 +41,37 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void StopRejectsQueuedAndConcurrentSubmissionsUntilResume()
+        {
+            var ran = 0;
+            Func<JObject> work = () => { Interlocked.Increment(ref ran); return new JObject(); };
+            var before = this.dispatcher.Submit(work);
+            var items = new McpMainThreadDispatcher.WorkItem[100];
+            Parallel.Invoke(
+                () => this.dispatcher.DrainAndFail("Stopped"),
+                () => { for (var i = 0; i < items.Length; i++) items[i] = this.dispatcher.Submit(work); });
+            this.dispatcher.Pump();
+            Assert.That(ran, Is.Zero);
+            Assert.That(before.IsCompleted, Is.True);
+            foreach (var item in items)
+            {
+                Assert.That(item.IsCompleted, Is.True);
+
+                // The type is what decides the status. Anything other than an McpToolException
+                // leaves the call a 500, which a client repeats on a read-only tool until its
+                // retry budget is gone - once for every call while the server stays stopped.
+                Assert.That(item.Error, Is.TypeOf<McpToolException>());
+                Assert.That(((McpToolException)item.Error).HttpStatus, Is.EqualTo(409));
+            }
+            Assert.That(this.dispatcher.PendingCount, Is.Zero);
+            this.dispatcher.Resume();
+            var resumed = this.dispatcher.Submit(work);
+            this.dispatcher.Pump();
+            Assert.That(resumed.Error, Is.Null);
+            Assert.That(ran, Is.EqualTo(1));
+        }
+
+        [Test]
         public void AbandonedWorkNeverRuns()
         {
             // A request that gives up must not leave its action queued: the side effect would

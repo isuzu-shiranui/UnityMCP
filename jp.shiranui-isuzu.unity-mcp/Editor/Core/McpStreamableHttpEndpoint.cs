@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -38,28 +39,13 @@ namespace UnityMCP.Editor.Core
         private const string DefaultProtocolVersion = "2025-03-26";
 
         public const string Instructions =
-            "Controls a running Unity Editor. Search this server's tools for any Unity work:\n" +
-            "inspecting or editing a scene, assets and prefabs, Timeline and Recorder, shaders and\n" +
-            "rendering, play mode, the console, tests, and builds.\n" +
-            "\n" +
-            "Tool name prefixes: scene_ gameobject_ inspect_ asset_ prefab_ console_ compile_\n" +
-            "play_mode_ timeline_ recorder_ render_ shader_ material_ reflect_ gpu_ test_ build_\n" +
-            "project_ editor_ menu_ capture_ execute_ job_ input_ definitions_.\n" +
-            "\n" +
-            "Reach for these when asked to look at, change or debug anything in a Unity project,\n" +
-            "including questions like why a material renders wrong, what a Timeline does at a given\n" +
-            "moment, why a script did not compile, or what the console reported. Read the console\n" +
-            "(console_read_logs) before building any instrumentation of your own; Unity has usually\n" +
-            "already written down the cause. Prefer a specific tool over execute_code, which cannot\n" +
-            "be undone and is the last resort when nothing else reaches.\n" +
-            "\n" +
-            "This endpoint belongs to one Unity project: the Editor that opened it. Which tools exist\n" +
-            "depends on that project's packages, so Timeline and Recorder tools appear only where those\n" +
-            "packages are present. If a tool you used earlier is missing, the project's packages\n" +
-            "changed; reconnect to refresh the tool list.\n" +
-            "\n" +
-            "A call that takes longer than a few seconds returns a job id instead of a result. Fetch\n" +
-            "it with job_status; do not repeat the call, the work is still running.";
+            "Controls this project's running Unity Editor. Search tools for Unity inspection, edits or debugging: " +
+            "scenes, assets, prefabs, rendering, play mode, tests and builds.\n" +
+            "Prefixes: scene_ gameobject_ inspect_ asset_ prefab_ console_ compile_ play_mode_ timeline_ recorder_ " +
+            "render_ shader_ material_ reflect_ gpu_ test_ build_ project_ editor_ menu_ capture_ execute_ job_ input_ definitions_.\n" +
+            "Read console_read_logs before adding instrumentation. Prefer specific tools; execute_code is a last resort and cannot be undone.\n" +
+            "Tools depend on installed packages (including Timeline/Recorder). If tools disappear after package changes or reload, reconnect to refresh the list.\n" +
+            "When a call returns a job id, fetch job_status. Do not repeat it: the work is still running.";
 
         private readonly Func<ToolCatalog> catalog;
         private readonly Func<McpToolDescriptor, JObject, ToolCallOutcome> run;
@@ -143,18 +129,35 @@ namespace UnityMCP.Editor.Core
             var id = message["id"];
             var method = message["method"]?.Type == JTokenType.String ? message["method"].Value<string>() : null;
 
-            if (message["jsonrpc"]?.Value<string>() != "2.0" || string.IsNullOrEmpty(method))
+            var usable = id != null && (id.Type == JTokenType.String || id.Type == JTokenType.Integer);
+
+            if (message["jsonrpc"]?.Type != JTokenType.String
+                || message["jsonrpc"].Value<string>() != "2.0" || string.IsNullOrEmpty(method)
+                || (id != null && !usable))
             {
-                return EndpointResponse.Json(200, RpcError(id, -32600, "Not a JSON-RPC 2.0 request."));
+                // The id goes back when it is one the client can match on. Answering a request
+                // that carried a perfectly good id with a null one leaves the client waiting for
+                // a reply it will never recognise.
+                return EndpointResponse.Json(200, RpcError(usable ? id : null, -32600, "Not a JSON-RPC 2.0 request."));
             }
 
             // A notification or a response from the client has no id and expects nothing back.
-            if (id == null || id.Type == JTokenType.Null)
+            if (id == null)
             {
                 return new EndpointResponse(202, null);
             }
 
+            if (message["params"] != null && message["params"] is not JObject)
+            {
+                return EndpointResponse.Json(200, RpcError(id, -32602, "params must be an object."));
+            }
+
             var parameters = message["params"] as JObject ?? new JObject();
+            if (method == "initialize" && parameters["protocolVersion"] != null
+                && parameters["protocolVersion"].Type != JTokenType.String)
+            {
+                return EndpointResponse.Json(200, RpcError(id, -32602, "protocolVersion must be a string."));
+            }
 
             switch (method)
             {
@@ -219,6 +222,11 @@ namespace UnityMCP.Editor.Core
 
         private EndpointResponse CallTool(JToken id, JObject parameters)
         {
+            if (parameters["arguments"] != null && parameters["arguments"] is not JObject)
+            {
+                return EndpointResponse.Json(200, RpcError(id, -32602, "params.arguments must be an object."));
+            }
+
             var name = parameters["name"]?.Type == JTokenType.String ? parameters["name"].Value<string>() : null;
             if (string.IsNullOrEmpty(name))
             {
@@ -247,11 +255,22 @@ namespace UnityMCP.Editor.Core
                     }
 
                     var answered = WithoutInlineImage(outcome.Result, out var picture);
+                    var body = answered.ToString(Formatting.None);
+                    var refused = TooLarge(body, descriptor);
 
+                    // A refusal is not an answer. Sent as an ordinary result it reads as the reply
+                    // the caller asked for, and a model takes the explanation for the data.
+                    if (refused != null)
+                    {
+                        return EndpointResponse.Json(200, RpcResult(id, ToolError(refused)));
+                    }
+
+                    // No structuredContent: no tool here declares an outputSchema, so a client has
+                    // nothing to validate it against, and the spec asks for the same JSON in a text
+                    // block regardless. Sending both put every reply in the model's context twice.
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
-                        ["content"] = ResultContent(answered, picture),
-                        ["structuredContent"] = answered,
+                        ["content"] = ResultContent(body, picture),
                     }));
 
                 case ToolCallOutcome.Kind.Failed:
@@ -268,23 +287,16 @@ namespace UnityMCP.Editor.Core
                         $"Call job_status with job_id \"{outcome.JobId}\" to fetch the result. " +
                         "Do not retry this call; the work is in progress and retrying would run it twice.";
 
-                    var structured = new JObject
-                    {
-                        ["state"] = "running",
-                        ["jobId"] = outcome.JobId,
-                    };
-
                     var notice = this.runningNotice?.Invoke();
+
                     if (notice != null)
                     {
                         text += " " + notice;
-                        structured["message"] = notice;
                     }
 
                     return EndpointResponse.Json(200, RpcResult(id, new JObject
                     {
                         ["content"] = TextContent(text),
-                        ["structuredContent"] = structured,
                     }));
             }
         }
@@ -299,7 +311,7 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>
-        /// The result with its inline PNG taken out, and that PNG, so the picture can travel as
+        /// The result with inline PNGs taken out in document order, so every picture travels as
         /// image content instead of as text.
         /// </summary>
         /// <remarks>
@@ -308,9 +320,9 @@ namespace UnityMCP.Editor.Core
         /// else in the reply. The structured copy is stripped too: keeping it there shipped the
         /// same picture twice, once priced by its size and once by its dimensions.
         /// </remarks>
-        private static JObject WithoutInlineImage(JObject result, out string image)
+        private static JObject WithoutInlineImage(JObject result, out List<string> images)
         {
-            image = null;
+            images = new List<string>();
 
             if (ImageCarrier(result) == null)
             {
@@ -318,12 +330,28 @@ namespace UnityMCP.Editor.Core
             }
 
             var describing = (JObject)result.DeepClone();
-            var carrier = ImageCarrier(describing);
-
-            image = carrier["image"].ToString();
-            carrier.Remove("image");
+            ExtractImages(describing, images);
 
             return describing;
+        }
+
+        private static void ExtractImages(JToken node, List<string> images)
+        {
+            if (node is JObject body)
+            {
+                if (body["image"] is JValue value && value.Type == JTokenType.String
+                    && IsEncodedPng(value.ToString()))
+                {
+                    images.Add(value.ToString());
+                    body.Remove("image");
+                }
+
+                foreach (var property in body.Properties()) ExtractImages(property.Value, images);
+            }
+            else if (node is JArray array)
+            {
+                foreach (var item in array) ExtractImages(item, images);
+            }
         }
 
         /// <summary>The object holding an <c>image</c> that is base64 of a PNG, or null.</summary>
@@ -371,23 +399,61 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>The MCP content for a result whose picture has already been taken out.</summary>
-        private static JArray ResultContent(JObject describing, string image)
+        private static JArray ResultContent(string text, List<string> images)
         {
-            if (image == null)
+            var content = TextContent(text);
+            foreach (var image in images)
             {
-                return TextContent(describing.ToString(Formatting.None));
-            }
-
-            return new JArray
-            {
-                new JObject { ["type"] = "text", ["text"] = describing.ToString(Formatting.None) },
-                new JObject
+                content.Add(new JObject
                 {
                     ["type"] = "image",
                     ["data"] = image,
                     ["mimeType"] = "image/png",
-                },
-            };
+                });
+            }
+            return content;
+        }
+
+        /// <summary>
+        /// What to say instead of a reply past the size the tool declares, or null to send it.
+        /// </summary>
+        /// <remarks>
+        /// The size was a hint in <c>_meta</c> that nothing checked. A production scene answered
+        /// scene_browse_hierarchy with 893,153 characters against the 200,000 it declares, under
+        /// a <c>truncated</c> of false, which is most of a context window spent on one call that
+        /// says nothing was left out. Refusing costs the caller a round trip; sending costs it
+        /// the conversation.
+        /// </remarks>
+        internal static string TooLarge(string text, McpToolDescriptor descriptor)
+        {
+            var cap = descriptor?.MaxResultSizeChars ?? 0;
+
+            if (cap <= 0 || text.Length <= cap)
+            {
+                return null;
+            }
+
+            // JSON runs near 2.8 characters to the token, which is the number worth quoting: the
+            // caller is deciding whether to spend that much of what it has left.
+            var tokens = text.Length / 2.8;
+
+            // The tool's own optional arguments rather than a guess at them. Naming 'limit' and
+            // 'offset' to a tool that has neither is advice that cannot be followed, which is
+            // the same dead end as being told to update through a Package Manager that is not
+            // what loads the package.
+            var narrowing = descriptor.Parameters == null
+                ? null
+                : string.Join(", ", descriptor.Parameters
+                    .Where(p => !p.Required)
+                    .Select(p => "'" + p.Name + "'"));
+
+            var advice = string.IsNullOrEmpty(narrowing)
+                ? "This tool takes no arguments to narrow it by, so ask something narrower instead."
+                : $"Ask for less of it with one of this tool's own arguments: {narrowing}.";
+
+            return $"'{descriptor.Name}' answered with {text.Length:N0} characters, past the "
+                   + $"{cap:N0} it declares as its limit, so the reply was not sent: it would "
+                   + $"have cost roughly {tokens:N0} tokens. {advice}";
         }
 
         /// <summary>Whether the text is base64 of something that begins like a PNG.</summary>

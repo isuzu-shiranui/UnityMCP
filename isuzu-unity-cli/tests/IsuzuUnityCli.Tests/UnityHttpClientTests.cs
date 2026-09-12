@@ -83,14 +83,39 @@ public sealed class UnityHttpClientTests
     }
 
     [Fact]
-    public async Task ConnectionRefusedBeyondBudgetReportsTheCode()
+    public async Task UnreachablePortReportsATransportCodeWithinBudget()
     {
         var descriptor = FakeUnityServer.DescriptorFor(FakeUnityServer.FreePort());
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
 
         var e = await Assert.ThrowsAsync<UnityError>(() => Client(budgetMs: 200).GetAsync(descriptor, "/health"));
 
-        Assert.Equal("ECONNREFUSED", e.Code);
+        // Windows may still be connecting when the 200ms budget expires; waiting for
+        // the OS refusal would violate the deadline. Both outcomes identify transport failure.
+        Assert.Contains(e.Code, new[] { "ECONNREFUSED", "ECONNTIMEOUT" });
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2));
         Assert.StartsWith("Retry budget exhausted after ", e.Message);
+    }
+
+    /// <summary>
+    /// A write whose connection dies mid-request says what that is, not just the error code.
+    /// </summary>
+    /// <remarks>
+    /// Entering or leaving play mode takes the Editor away in the middle of whatever is in
+    /// flight, and the Editor cannot explain itself once it is gone: this message is the only
+    /// text the caller gets. Reported four times from hands-on runs as calls that "failed with
+    /// no recovery route", against a message that read "Fetch failed: ECONNRESET".
+    /// </remarks>
+    [Fact]
+    public async Task AWriteDroppedMidRequestExplainsTheReload()
+    {
+        using var server = new FakeUnityServer().EnqueueDrop();
+
+        var e = await Assert.ThrowsAsync<UnityError>(
+            () => Client(budgetMs: 200).PostAsync(server.Descriptor(), "/tools/scene_save", new System.Text.Json.Nodes.JsonObject()));
+
+        Assert.Contains("rebuilds its domain", e.Message);
+        Assert.Contains("not repeated automatically", e.Message);
     }
 
     [Fact]

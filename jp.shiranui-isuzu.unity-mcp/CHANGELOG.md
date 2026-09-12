@@ -1,5 +1,124 @@
 # Changelog
 
+## [4.3.0] - 2026-09-12
+
+### Breaking
+- Over MCP, a reply larger than its tool's `MaxResultSizeChars` is refused with `isError` instead of being sent.
+- Replies no longer carry `structuredContent`. The text content holds the same JSON.
+- `capture_screenshot`, `reflect_read` and `gpu_readback` are no longer marked read-only, so clients stop retrying or auto-approving them.
+- An argument a tool does not declare is refused instead of ignored.
+- `asset_export_package` names its destination `destination` rather than `file`, which the CLI keeps for itself.
+- JSON-RPC requests are checked more strictly: `id: null`, and `params` or `arguments` that are not objects, are refused.
+- CLI: an option the command does not have, and an option missing its value, are refused with exit code 2. An option given twice is sent as a list.
+- `console_read_logs` leaves the stack trace out unless `stack_trace` asks for it, and cuts each entry's file path to its last three segments. Twenty exceptions cost 612 tokens rather than 2,872, and the entry still names its file and line.
+
+### Added
+- Twelve tools:
+  - `project_settings` and `scene_settings` read and change project and scene-wide settings.
+  - `material_create`, `animator_create`, `animation_clip_create` and `animation_clip_write_curves` create the assets the editing tools work on. Overwriting keeps the asset's GUID.
+  - `animator_set_parameter` drives a parameter on a running Animator.
+  - `asset_export_package` writes assets to a `.unitypackage`. A failed export leaves an existing file untouched.
+  - `asset_broken_references` finds references whose target is gone.
+  - `search_query` runs a query through the Editor's own search.
+  - `render_stats` reports what the last frame cost.
+  - `editor_state` answers while the main thread is busy.
+- `inspect_write` sets object references, grows arrays, and takes layer masks by name.
+- `inspect_read` returns an array's elements, up to 20.
+- `material_read` takes `property`, `object_paths` and `group`.
+- `capture_screenshot` takes `camera` and `focus`. With `focus`, a capture of the game or scene view that would not show the object is refused.
+- `scene_browse_hierarchy` reports `childrenNotShown` on a filtered parent, and takes `object_path` to walk one branch instead of the whole scene.
+- `console_read_logs` takes `stack_trace`.
+- `play_mode_step` takes `animators`, `play_mode_status` reports `frameCount`, and `animator_inspect` reports a running Animator's state.
+- `gameobject_create` takes `collider: false`.
+- A job id and a `scene_browse_hierarchy` snapshot id carry the domain they were made in, so an id kept across a reload names nothing rather than someone else's work.
+- `scene_browse_hierarchy` refuses `since` against a snapshot that covered only one page, instead of reporting everything outside that page as removed.
+- CLI: `tools <name>` prints one tool, and `doctor` reports version skew, newer releases and which executable is running.
+- Preferences > Unity MCP shows whether a client is registered, and can register one.
+- `render_capture_ab` captures the frame, captures it again with the named objects hidden, and
+  reports what changed alongside how much changes on its own. Two captures of an unchanged scene
+  are not identical — animation, water, particles and temporal anti-aliasing all move between
+  frames — so a difference smaller than that movement means nothing, and neither picture shows
+  that. The two numbers are measured over the same number of frames so they can be compared. The
+  objects are put back before the call answers, and also when it is cancelled or the domain
+  reloads, which hiding them from `execute_code` cannot promise.
+- `render_capture_buffer` saves one of the pipeline's intermediate targets — depth, normals,
+  motion or opaque — as a picture. A foam, fog or outline pass reads the depth texture rather than
+  the finished frame, and the two are not the same silhouette. Depth comes back as grey shading
+  plus the nearest and farthest distance in metres, so a pixel can be read as a number. The
+  capture happens inside `endCameraRendering`, because the globals are pooled and reading one
+  after `Camera.Render` returns hands back a released target: every pixel zero, which on a
+  reversed-Z buffer is the far plane and reads as a correctly captured empty scene. A buffer the
+  pipeline is not producing is refused by name with the setting that turns it on.
+- `isuzu-unity-cli jobs <id> --wait` polls a job to its end and prints only its last answer,
+  exiting 0 when it completed and 1 when it failed or was cancelled. `--timeout` gives up waiting
+  without stopping the job.
+
+- `memory_usage` weighs the loaded objects and splits them by whether the project owns them. That
+  split is the answer: an Editor's own render targets and icon atlases are routinely the largest
+  textures in memory. On a real project it reported 7.3 GB of textures of which 5.5 GB belonged to
+  the project, and named the two 4K face maps costing 67 MB each.
+- `build_report` reads the report Unity writes beside the Library, so what a build contained and
+  weighed can be answered after the output is gone: the summary, a row per asset type, the heaviest
+  assets with their paths, and the slowest build steps. `compare_with` takes a second report and
+  says what appeared, what grew, and by how much — the only form of the question that answers why a
+  build got bigger, and one nothing else in the ecosystem does.
+- `render_profile_frame` samples a window of frames and reports where the time and the garbage
+  went: CPU total, main thread, render thread and GPU as a median and a worst frame, plus the bytes
+  allocated per frame and how many allocations. Name your own ProfilerMarkers to sample them
+  alongside. About 240 tokens. Draw call and triangle counts stay in `render_stats`. A frame-timing
+  counter the manager is not feeding is named in `silent` rather than reported as zero, because a
+  zero there is indistinguishable from a frame that cost nothing.
+- `shader_batching_check` reports whether the SRP Batcher can keep a shader's material data on the
+  GPU, and names the shader variable that stops it when it cannot. One incompatible shader breaks
+  the batch for everything drawn with it, and nothing in the Editor reports that outside the Shader
+  Inspector, one shader at a time. `scope: scene` checks everything the open scenes draw with and
+  answers in about 280 tokens. It is refused on the built-in pipeline, which has no batcher, and a
+  shader that failed to compile is reported as such rather than given a verdict that would mean
+  nothing.
+- `ui_hit_test` answers why a click never reaches a uGUI element. It lists what is under a screen
+  point in the order the event system sees them, names what covers the element you asked about, and
+  reports the elements under the point that cannot be hit at all with the reason for each: Raycast
+  Target off, an inactive object, a CanvasGroup that blocks nothing, a Canvas with no
+  GraphicRaycaster. A full answer costs about 200 tokens. It needs play mode, because
+  `EventSystem.current` is only set while the game runs; outside it every point reports nothing
+  under it, which reads like a correctly-answered question about a broken UI. The tool ships in an
+  assembly constrained on com.unity.ugui, so a project without that package loses the tool rather
+  than failing to compile.
+
+### Fixed
+- A VRChat project no longer logs a fatal error for this package on every Editor start. ([#36](https://github.com/isuzu-shiranui/UnityMCP/issues/36))
+- `upgrade --release vX` installs a named release. `--version` only printed the CLI's version.
+- A `gameobject_create` refused for a bad parent or position no longer leaves the object in the scene.
+- A `timeline_create_clip` refused for its `control_source` or `animation_clip` leaves neither an empty clip on the track nor an exposed reference on the director.
+- `timeline_set_track` no longer rewrites the `.playable` when only a binding changes.
+- `inspect_read`, `inspect_list` and `inspect_write` find inactive objects and `/Name[1]` paths.
+- `inspect_list` includes properties a custom Inspector draws, such as a HingeJoint's `m_ConnectedBody`.
+- `inspect_write` without `component_type` writes to the GameObject instead of listing its components.
+- Integer properties refuse a value outside their type's range instead of storing a clamped one.
+- An instance id that does not fit in an int no longer resolves to a different object.
+- CLI: a whole number keeps its digits. An instance id past 2^53 was carried as a double, and the call answered about whichever object the rounded id belonged to.
+- `verify` fails when the Editor is already running tests instead of reporting that run's results, and `verify --test --test-mode play` no longer skips the tests.
+- `verify` counts a test that ended inconclusive as a failure. It was listed as one and exited 0.
+- The MCP stdio bridge answers a request once. A stream that broke after a payload had gone out put a second reply under the same id.
+- `asset_export_package` refuses a destination that names an existing folder. It appended the extension to the folder's own name and wrote the package beside it.
+- A stopped server refuses a call instead of answering 500, which a client repeated until its retry budget was gone.
+- `recorder_add_track` cleans up when Timeline cannot create the clip, instead of leaving the track and its settings inside the asset.
+- Console entries logged from a snippet no longer carry this server's call path.
+
+### Changed
+- The agent skill is a short guide plus two reference pages, all ASCII.
+- The CLI prints `truncated` and `next` when a listing stopped early.
+- `inspect_write` warns when Play Mode will discard a scene change.
+- Request bodies over 8 MiB are refused with 413.
+- `inspect_read` and `inspect_list` carry a reply ceiling, so a component with many array fields is refused over MCP rather than filling the caller's context.
+- `input_pointer` caps `frames_per_step` at 1000. The work a drag schedules is steps times frames per step, and only the first of the two was bounded.
+- The notice on a still-running call tells Unity's own progress window apart from a dialog that is
+  asking something. Both are dialogs by every test the window enumerator applies and both carry
+  buttons, so the advice to answer one read as if pressing it would let the call through. A
+  progress window clears when the work behind it finishes, and answering it abandons that work;
+  the one whose message says Unity is waiting for its own code to finish is the call you made, and
+  nothing outside the Editor can interrupt it.
+
 ## [4.2.0] - 2026-09-09
 
 ### Breaking

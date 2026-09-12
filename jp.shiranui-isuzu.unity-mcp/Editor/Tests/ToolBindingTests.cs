@@ -279,6 +279,42 @@ namespace UnityMCP.Editor.Tests
                 Is.EqualTo("a+b"));
         }
 
+        /// <summary>
+        /// A list where one value belongs, or a list with its quotes stripped where a list belongs,
+        /// is refused rather than read as something else.
+        /// </summary>
+        /// <remarks>
+        /// The CLI turns an option given twice into a list, and a string argument flattened it into
+        /// the text of a name. The other way round, a shell that strips quotes turns ["a"] into
+        /// [a], which was taken as a one-item list of something named [a].
+        /// </remarks>
+        [Test]
+        public void ListsAreRefusedWhereTheyWouldBeReadAsSomethingElse()
+        {
+            var intoText = Assert.Throws<McpToolException>(() =>
+                Invoke("b_default", new JObject { ["text"] = new JArray("A", "B") }));
+
+            Assert.That(intoText.Code, Is.EqualTo("invalid_params"));
+
+            var stripped = Assert.Throws<McpToolException>(() =>
+                Invoke("b_list", new JObject { ["items"] = "[a,b]" }));
+
+            Assert.That(stripped.Code, Is.EqualTo("invalid_params"));
+
+            Assert.That(
+                Invoke("b_list", new JObject { ["items"] = "a" })["result"].Value<string>(),
+                Is.EqualTo("a"),
+                "one plain value is still a one-item list");
+            Assert.That(
+                Invoke("b_list", new JObject { ["items"] = "[Managers]" })["result"].Value<string>(),
+                Is.EqualTo("[Managers]"),
+                "a bracketed root name is a name, and there is no other way to write it");
+            Assert.That(
+                Invoke("b_default", new JObject { ["text"] = "[Player]" })["result"].Value<string>(),
+                Is.EqualTo("[Player]"),
+                "a single value that happens to wear brackets is still that value");
+        }
+
         [Test]
         public void PassesAJsonObjectThrough()
         {

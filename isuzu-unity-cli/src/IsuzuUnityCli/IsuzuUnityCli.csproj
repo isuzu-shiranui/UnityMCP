@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>isuzu-unity-cli</AssemblyName>
     <RootNamespace>IsuzuUnityCli</RootNamespace>
-    <Version>4.2.0</Version>
+    <Version>4.3.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -45,8 +45,14 @@
     <OptimizationPreference>Speed</OptimizationPreference>
   </PropertyGroup>
 
+  <!--
+    Every file of the skill, named by its path under the skill folder. A wildcard rather than a
+    list because a reference page added to the folder and left out of the build installs as a
+    link to a file that is not there.
+  -->
   <ItemGroup>
-    <EmbeddedResource Include="..\..\skills\isuzu-unity-cli\SKILL.md" LogicalName="skills/isuzu-unity-cli/SKILL.md" />
+    <EmbeddedResource Include="..\..\skills\isuzu-unity-cli\**\*.md"
+                      LogicalName="skills/isuzu-unity-cli/$([System.String]::Copy('%(RecursiveDir)%(Filename)%(Extension)').Replace('\','/'))" />
   </ItemGroup>
 
   <ItemGroup>

@@ -35,6 +35,21 @@ namespace UnityMCP.Editor.Core
         private static readonly Regex LoggingCall =
             new Regex(@"^UnityEngine\.(Debug|Logger):Log", RegexOptions.Compiled);
 
+        /// <summary>
+        /// The path a tool call arrives through, which is on every entry a snippet logged.
+        /// </summary>
+        /// <remarks>
+        /// It names only the request the caller has just sent, and every frame of it names source,
+        /// so it fills the four kept frames and pushes out whatever the entry was about: a
+        /// one-line log came back as four frames of this and a count of the rest.
+        /// </remarks>
+        private static readonly Regex Delivery = new Regex(
+            @"^UnityMCP\.Editor\.(Core\.(ToolInvoker|ToolCallRunner|McpHttpServer"
+            + @"|McpStreamableHttpEndpoint|McpMainThreadDispatcher|FrameSequencer)"
+            + @"|Handlers\.CodeExecutor)[\w<>/`+$.]*:"
+            + @"|^UnityMCP\.Editor\.Tools\.EditorTools:ExecuteCode\b",
+            RegexOptions.Compiled);
+
         /// <summary>What makes two otherwise identical lines differ: ids, times, counts.</summary>
         private static readonly Regex Varying =
             new Regex(@"[0-9a-f]{8,}|\d+\.\d+|\d+", RegexOptions.Compiled);
@@ -68,6 +83,67 @@ namespace UnityMCP.Editor.Core
         /// <summary>The location at the end of a frame, so the path inside it can be shortened.</summary>
         private static readonly Regex Location =
             new Regex(@"\(at (?<path>.+):(?<line>\d+)\)\s*$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// A file path cut to its last few segments, the way a frame's location is cut.
+        /// </summary>
+        /// <remarks>
+        /// The console repeats the path on every entry, and an absolute one names the machine and
+        /// the package root each time: twenty errors carried about 500 tokens of the same prefix.
+        /// Three segments still name the file well enough to open it.
+        /// </remarks>
+        public static string ShortenPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            var forward = path.Replace('\\', '/');
+            var segments = forward.Split('/');
+
+            return segments.Length <= PathSegments
+                ? forward
+                : string.Join("/", segments, segments.Length - PathSegments, PathSegments);
+        }
+
+        /// <summary>
+        /// The message without its stack: the lines before the first frame Unity printed.
+        /// </summary>
+        /// <remarks>
+        /// The entry already carries the file and the line it came from, so the trace is the part
+        /// a caller can ask for rather than the part it has to take. Twenty errors read with their
+        /// traces cost about 3,500 tokens and about 650 without.
+        /// </remarks>
+        public static string WithoutStack(string message)
+        {
+            if (string.IsNullOrEmpty(message) || message.IndexOf('\n') < 0)
+            {
+                return message;
+            }
+
+            var lines = message.Replace("\r\n", "\n").Split('\n');
+            var text = new StringBuilder();
+
+            foreach (var line in lines)
+            {
+                if (Frame.IsMatch(line) || Located.IsMatch(line))
+                {
+                    break;
+                }
+
+                if (text.Length > 0)
+                {
+                    text.Append('\n');
+                }
+
+                text.Append(line);
+            }
+
+            // A trace with no line the patterns recognise leaves nothing behind, and an entry
+            // with no message at all is worse than one carrying its trace.
+            return text.Length == 0 ? lines[0] : text.ToString().TrimEnd();
+        }
 
         /// <summary>One message with its stack reduced to the frames that name source.</summary>
         public static string TrimStack(string message)
@@ -118,14 +194,16 @@ namespace UnityMCP.Editor.Core
                         break;
                     }
 
-                    if (Located.IsMatch(frame) && !LoggingCall.IsMatch(frame))
+                    if (Located.IsMatch(frame) && !LoggingCall.IsMatch(frame) && !Delivery.IsMatch(frame))
                     {
                         kept.Add(frame);
                     }
                 }
 
                 // Nothing named source, so there is no better frame to choose than the first few.
-                if (kept.Count == 0)
+                // Where frames did name source and none survived the cut, they were all machinery
+                // the caller already knows about, and standing them back in undoes the cut.
+                if (kept.Count == 0 && !AnyLocated(run))
                 {
                     for (var i = 0; i < run.Count && i < KeepWhenNoneLocated; i++)
                     {
@@ -241,6 +319,19 @@ namespace UnityMCP.Editor.Core
 
             return frame.Substring(0, match.Index)
                    + "(at " + tail + ":" + match.Groups["line"].Value + ")";
+        }
+
+        private static bool AnyLocated(List<string> run)
+        {
+            foreach (var frame in run)
+            {
+                if (Located.IsMatch(frame))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static bool Foldable(string line)

@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using IsuzuUnityCli.Agents;
@@ -39,6 +39,8 @@ public static class DoctorCommand
         var running = context.ReadDescriptors();
         var known = context.ReadAllDescriptors();
 
+        ReportExecutable(context);
+
         context.Out.WriteLine("Agents");
 
         foreach (var agent in agents)
@@ -70,6 +72,8 @@ public static class DoctorCommand
         }
 
         context.Out.WriteLine();
+        ReportRelease(context);
+
         context.Out.WriteLine("Running Editors");
 
         if (running.Count == 0)
@@ -87,10 +91,306 @@ public static class DoctorCommand
                     $"    warning: this Editor wanted port {descriptor.PreferredPort} and took {descriptor.Port}. " +
                     "Another instance holds the preferred port, so a config written for it points somewhere else.");
             }
+
+            var skew = Skew(descriptor.ProtocolVersion, Program.Version());
+
+            if (skew != null)
+            {
+                context.Out.WriteLine("    " + skew);
+
+                var embedded = EmbeddedCopy(descriptor.ProjectPath);
+
+                if (embedded != null)
+                {
+                    context.Out.WriteLine("    " + embedded);
+                }
+            }
+
+            var samples = LeftBehindSamples(descriptor.ProjectPath);
+
+            if (samples != null)
+            {
+                context.Out.WriteLine("    " + samples);
+            }
         }
 
         // Always zero: doctor reports, and a report that fails the shell is a report nobody runs.
         return 0;
+    }
+
+    /// <summary>
+    /// Where this build is, and what a caller typing the command's name actually gets.
+    /// </summary>
+    /// <remarks>
+    /// A copy installed once and left behind stays first on PATH, and an agent driving the Editor
+    /// through the command name runs that one: every fix made since goes unseen while the repo's
+    /// own build passes its tests. Found by an agent hitting a bug that had already been fixed
+    /// three versions earlier.
+    /// </remarks>
+    private static void ReportExecutable(CommandContext context)
+    {
+        context.Out.WriteLine("Executable");
+        context.Out.WriteLine($"  [running]  {Environment.ProcessPath ?? "unknown"} ({Program.Version()})");
+
+        var onPath = FirstOnPath();
+
+        if (onPath is null)
+        {
+            context.Out.WriteLine("  [absent]   no isuzu-unity-cli on PATH; the command name will not resolve");
+        }
+        else if (!SamePath(onPath, Environment.ProcessPath))
+        {
+            var version = VersionOf(onPath);
+
+            var note = version is null ? "" : $" ({version})";
+            var stale = version is not null && ReleaseCheck.IsNewer(Program.Version(), version);
+
+            context.Out.WriteLine($"  {(stale ? "[stale]   " : "[other]   ")} {onPath}{note}");
+            context.Out.WriteLine(
+                stale
+                    ? "    this is what the command name runs, and it is older than the build you are in. "
+                      + "Replace it, or the fixes in this build are not the ones being used"
+                    : "    this is what the command name runs, and it is not the build you are in");
+        }
+
+        context.Out.WriteLine();
+    }
+
+    /// <summary>
+    /// Whether two paths name the same file.
+    /// </summary>
+    /// <remarks>
+    /// Environment.ProcessPath is the resolved target on Linux, while a PATH entry usually is not:
+    /// install.sh puts the binary under ~/.local/bin, which is commonly a link. Compared as text,
+    /// every such installation reported that the command name runs some other build. Case is only
+    /// ignored where the filesystem ignores it.
+    /// </remarks>
+    private static bool SamePath(string? left, string? right)
+    {
+        if (left is null || right is null)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(left, right, comparison))
+        {
+            return true;
+        }
+
+        try
+        {
+            return string.Equals(
+                new FileInfo(left).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? left,
+                new FileInfo(right).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? right,
+                comparison);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The first isuzu-unity-cli a shell would find, or null when there is none.</summary>
+    private static string? FirstOnPath()
+    {
+        var names = OperatingSystem.IsWindows()
+            ? new[] { "isuzu-unity-cli.exe", "isuzu-unity-cli.cmd", "isuzu-unity-cli" }
+            : new[] { "isuzu-unity-cli" };
+
+        foreach (var directory in (Environment.GetEnvironmentVariable("PATH") ?? "")
+                     .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (var name in names)
+            {
+                try
+                {
+                    var candidate = Path.Combine(directory.Trim(), name);
+
+                    if (File.Exists(candidate))
+                    {
+                        return Path.GetFullPath(candidate);
+                    }
+                }
+                catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException)
+                {
+                    // A PATH entry that is not a usable directory is the shell's problem, not this.
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The version another copy reports, or null when it cannot be read.</summary>
+    private static string? VersionOf(string executable)
+    {
+        try
+        {
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(executable);
+
+            return string.IsNullOrWhiteSpace(info.ProductVersion) ? info.FileVersion : info.ProductVersion;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Says so when a newer release exists. Never installs one.</summary>
+    /// <remarks>
+    /// Nothing told anyone a release had happened, so an installation stayed where it was until
+    /// something broke. This says it and stops there: installing without being asked is what
+    /// turns a bad release into a broken machine, and 'upgrade --release' is the way back when
+    /// one turns out to be.
+    /// </remarks>
+    private static void ReportRelease(CommandContext context)
+    {
+        string? tag;
+
+        try
+        {
+            tag = ReleaseCheck.LatestTag(Fetch, context.Cancellation).GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        if (tag is null || !ReleaseCheck.IsNewer(tag, Program.Version()))
+        {
+            return;
+        }
+
+        context.Out.WriteLine("Release");
+        context.Out.WriteLine(
+            $"  {tag} is out and this is {Program.Version()}. "
+            + "Install it with 'isuzu-unity-cli upgrade', and update the Unity package to match. "
+            + "'upgrade --release <tag>' goes back if one turns out to be broken.");
+        context.Out.WriteLine();
+    }
+
+    private static async Task<string> Fetch(CancellationToken cancellation)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+
+        // GitHub refuses a request with no User-Agent, and the refusal arrives as a 403 that
+        // reads like a permission problem.
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("isuzu-unity-cli/" + Program.Version());
+
+        return await http.GetStringAsync(ReleaseCheck.LatestUrl, cancellation);
+    }
+
+    /// <summary>
+    /// Where a copy of the package sits inside the project, which is the copy the Editor loads.
+    /// </summary>
+    /// <remarks>
+    /// A folder under Packages/ wins over the manifest entry of the same name, and Unity says
+    /// nothing about it. Told to update through the Package Manager, someone with an embedded
+    /// copy changes the manifest, sees the version stay where it was, and has no way to tell why.
+    /// </remarks>
+    public static string? EmbeddedCopy(string projectPath)
+    {
+        if (string.IsNullOrEmpty(projectPath))
+        {
+            return null;
+        }
+
+        // The descriptor names the Assets folder; the packages sit beside it.
+        var root = Path.GetDirectoryName(projectPath.TrimEnd('/', '\\'));
+
+        if (root == null)
+        {
+            return null;
+        }
+
+        var embedded = Path.Combine(root, "Packages", "jp.shiranui-isuzu.unity-mcp");
+        var manifest = Path.Combine(embedded, "package.json");
+
+        if (!File.Exists(manifest))
+        {
+            return null;
+        }
+
+        return $"an embedded copy at {embedded} is what this Editor loads. A folder under "
+               + "Packages/ wins over the manifest entry of the same name, so updating the "
+               + "manifest changes nothing until that folder is removed or replaced.";
+    }
+
+    /// <summary>
+    /// Samples an older version of the package imported, which it no longer ships.
+    /// </summary>
+    /// <remarks>
+    /// Importing a sample copies it into Assets/, where it stays through every later upgrade.
+    /// The 1.1.1 samples were written against an IMcpCommandHandler that no longer exists, so a
+    /// project carrying them stops compiling and Unity opens asking whether to enter Safe Mode —
+    /// with nothing on screen connecting that to a package update.
+    /// </remarks>
+    public static string? LeftBehindSamples(string projectPath)
+    {
+        if (string.IsNullOrEmpty(projectPath))
+        {
+            return null;
+        }
+
+        var samples = Path.Combine(projectPath, "Samples", "Unity MCP");
+
+        if (!Directory.Exists(samples))
+        {
+            return null;
+        }
+
+        var versions = Directory.GetDirectories(samples).Select(Path.GetFileName).ToArray();
+        var named = versions.Length == 0 ? "" : $" ({string.Join(", ", versions)})";
+
+        return $"samples from an older release are still at {samples}{named}. This package ships "
+               + "no samples now, and the ones it used to are written against APIs that are gone: "
+               + "left in place they stop the project compiling. Delete that folder.";
+    }
+
+    /// <summary>Says which side is behind when the package and this CLI disagree on the major.</summary>
+    /// <remarks>
+    /// The descriptor has carried protocolVersion all along and nothing compared it, so a CLI and
+    /// a package from different releases failed in whatever way the missing piece happened to
+    /// fail — a tool that is not there, an argument that is not read — with nothing pointing at
+    /// the version. Only the major is compared: within one, the two are meant to work together,
+    /// and a warning on every patch difference would be noise nobody reads.
+    /// </remarks>
+    public static string? Skew(string protocolVersion, string cliVersion)
+    {
+        if (!TryMajor(protocolVersion, out var editor) || !TryMajor(cliVersion, out var cli))
+        {
+            return null;
+        }
+
+        if (editor == cli)
+        {
+            return null;
+        }
+
+        return editor < cli
+            ? $"version skew: this Editor's package is {protocolVersion} and this CLI is "
+              + $"{cliVersion}. Update the package in the Unity Package Manager."
+            : $"version skew: this Editor's package is {protocolVersion} and this CLI is "
+              + $"{cliVersion}. Update the CLI with 'isuzu-unity-cli upgrade'.";
+    }
+
+    private static bool TryMajor(string version, out int major)
+    {
+        major = 0;
+
+        if (string.IsNullOrEmpty(version))
+        {
+            return false;
+        }
+
+        var dot = version.IndexOf('.');
+        var head = dot < 0 ? version : version.Substring(0, dot);
+
+        return int.TryParse(head, out major);
     }
 
     /// <summary>
@@ -244,6 +544,19 @@ public static class DoctorCommand
             {
                 context.Out.WriteLine($"  [stale]     {destination} (could not reinstall: {e.Message})");
             }
+        }
+
+        // Reported and not removed, even with --fix: this tool did not put it there, and what
+        // else a skills directory holds is the user's to decide.
+        foreach (var guide in directories
+            .Append(SkillInstaller.SharedSkillsDirectory)
+            .Distinct(StringComparer.Ordinal)
+            .SelectMany(SkillInstaller.ObsoleteGuides))
+        {
+            context.Out.WriteLine($"  [old guide] {guide}");
+            context.Out.WriteLine(
+                "    describes the HTTP interface this server replaced. Agents read it alongside "
+                + "the current guide; delete it");
         }
     }
 

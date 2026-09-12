@@ -31,9 +31,10 @@ namespace UnityMCP.Editor.Core
 
         /// <summary>
         /// Parameter names the invoker injects itself. A tool method that declares one of
-        /// these would be shadowed at call time, so the catalog rejects it at discovery.
+        /// these would be shadowed at call time, so the catalog rejects it at discovery, and
+        /// the invoker lets them through the check for arguments no tool declares.
         /// </summary>
-        private static readonly HashSet<string> ReservedParameterNames = new(StringComparer.Ordinal)
+        internal static readonly HashSet<string> ReservedParameterNames = new(StringComparer.Ordinal)
         {
             "confirm",
             "dry_run",
@@ -254,7 +255,12 @@ namespace UnityMCP.Editor.Core
             buffer.Append('[');
 
             var first = true;
-            foreach (var descriptor in this.Select(groups))
+            // MCP clients can only poll deferred calls with tools exposed by this list.
+            // Keep the one polling helper even when diagnostics was not requested.
+            var selected = mcpShape && groups != null && groups.Count > 0
+                ? this.Tools.Where(t => groups.Contains(t.Group) || t.Name == "job_status")
+                : this.Select(groups);
+            foreach (var descriptor in selected)
             {
                 if (!first)
                 {

@@ -108,10 +108,42 @@ public static class ProjectMatcher
         throw new CliException($"No running Editor matches \"{query}\". Running: {Names(candidates)}", 3);
     }
 
+    /// <summary>Whether two paths name the same folder, whichever slash and trailing form.</summary>
+    private static bool SamePath(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
+            return false;
+        }
+
+        return string.Equals(Normalise(a), Normalise(b), StringComparison.OrdinalIgnoreCase);
+
+        // Both sides through GetFullPath, because that is what fills in the drive and settles the
+        // separator. Normalising only the query left a rooted path compared against a bare one,
+        // which never matched.
+        static string Normalise(string path)
+        {
+            try
+            {
+                return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
+            }
+            catch (Exception)
+            {
+                // Not a path at all, which is the usual case: the query is normally a name.
+                return path.Trim();
+            }
+        }
+    }
+
     private static IEnumerable<Func<T, bool>> Attempts<T>(string query) where T : IProjectLike
     {
         yield return c => string.Equals(c.ProjectName, query, StringComparison.OrdinalIgnoreCase);
         yield return c => string.Equals(FolderNameOf(c.ProjectPath), query, StringComparison.OrdinalIgnoreCase);
+        // The project root, because that is what a caller already holding a path will pass and
+        // what the error above prints back at them. Placed after the two exact names so a folder
+        // called the same thing as another project's product name still decides first.
+        yield return c => SamePath(ProjectRootOf(c.ProjectPath), query);
+
         yield return c => c.ProjectName.Contains(query, StringComparison.OrdinalIgnoreCase)
             || FolderNameOf(c.ProjectPath).Contains(query, StringComparison.OrdinalIgnoreCase);
     }

@@ -224,29 +224,45 @@ jobs:
       - name: Editor tests cover these sources
         if: steps.work.outputs.needed == 'true'
         run: |
-          ATTESTATION=scripts/editmode-attestation.json
+          EXPECTED=$(dotnet run scripts/source-hash.cs)
+          ATTESTATION="scripts/attested/$EXPECTED.json"
+
+          echo "sources: $EXPECTED"
 
           if [ ! -f "$ATTESTATION" ]; then
-            echo "$ATTESTATION is missing. Run: pwsh scripts/run-editmode-tests.ps1"
+            echo ""
+            echo "No recorded run covers the Editor sources being released."
+            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the file it writes."
             exit 1
           fi
 
-          EXPECTED=$(dotnet run scripts/source-hash.cs)
           RECORDED=$(jq -r .sourceHash "$ATTESTATION")
           TOTAL=$(jq -r .total "$ATTESTATION")
           FAILED=$(jq -r .failed "$ATTESTATION")
           PASSED=$(jq -r .passed "$ATTESTATION")
           SKIPPED=$(jq -r .skipped "$ATTESTATION")
+          RAN_ON=$(jq -r .unityVersion "$ATTESTATION")
+          PINNED=$(sed -n "s/^\$PinnedUnityVersion = '\([^']*\)'.*/\1/p" scripts/run-editmode-tests.ps1)
 
-          echo "recorded: $RECORDED  ($PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL)"
-          echo "sources:  $EXPECTED"
+          echo "recorded: $PASSED passed, $FAILED failed, $SKIPPED skipped of $TOTAL, on $RAN_ON"
 
           if [ "$EXPECTED" != "$RECORDED" ]; then
-            echo ""
-            echo "The Editor sources have changed since the tests were last run."
-            echo "Run pwsh scripts/run-editmode-tests.ps1 and commit the attestation it writes."
+            echo "$ATTESTATION records $RECORDED, which is not its own name."
             exit 1
           fi
+
+          if [ -z "$PINNED" ]; then
+            echo "Could not read PinnedUnityVersion from scripts/run-editmode-tests.ps1."
+            exit 1
+          fi
+
+          case "$RAN_ON" in
+            "$PINNED".*) ;;
+            *)
+              echo "The run was recorded on $RAN_ON; the gate is pinned to $PINNED.x."
+              exit 1
+              ;;
+          esac
 
           if [ "$FAILED" != "0" ] || [ "$PASSED" = "0" ]; then
             echo "The recorded run is not a clean pass."

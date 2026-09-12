@@ -133,7 +133,9 @@ Codex は Streamable HTTP にも直接つなげます。`isuzu-unity-cli setup -
 - エンドポイントはステートレスです。セッション ID を持ちません。
 - プロトコルのバージョンは 2025-11-25 / 2025-06-18 / 2025-03-26 に対応しています。
 - `tools/list` にはアノテーションが付きます。`Idempotency` が `Safe` のツールには `readOnlyHint` と `idempotentHint` が付きます。破壊的なツールには `destructiveHint` が付きます。
-- `tools/call` はテキストと `structuredContent` の両方を返します。ツール自体のエラーは、トランスポートのエラーにはなりません。`isError` の結果として、モデルに読める形で返ります。
+- `tools/call` は JSON をテキストの content ブロックで返します。スクリーンショットは画像の content ブロックを追加し、`structuredContent` は返しません。ツール自体のエラーは、トランスポートのエラーにはなりません。`isError` の結果として、モデルに読める形で返ります。
 - GET と DELETE は 405 を返します。`Origin` が別ドメインなら 403 を返します。
 - `tools/list_changed` は送られません。パッケージの追加・削除や定義ツールの変更で、ツールが増減することがあります。その場合はクライアントを再接続してください。
 - MCP の URL には `?group=diagnostics,authoring` のようにグループを付けられます。付けると `tools/list` がそのグループだけを返します。呼び出し自体は絞り込みの影響を受けません。
+- Preferences の「Tool groups」で選ぶと、生成される設定に URL ごと入ります。選んだ本数がその場に出ます。stdio ブリッジなら `isuzu-unity-cli mcp-stdio --group diagnostics` です。
+- **クライアントはツールの説明文を毎回の要求で払います。** 全ツールで約 40,000 トークン、`diagnostics` だけなら約 9,500 トークンです。

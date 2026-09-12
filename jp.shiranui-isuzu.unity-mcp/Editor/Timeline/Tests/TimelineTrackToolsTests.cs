@@ -346,6 +346,38 @@ namespace UnityMCP.Editor.Timeline.Tests
                         "the mute was applied before the binding was checked");
         }
 
+        /// <summary>
+        /// A binding is scene data, so the .playable file is left alone.
+        /// </summary>
+        /// <remarks>
+        /// Saving the timeline for a binding writes back whatever the graph rebuild recomputed on
+        /// the way — a clip's m_PostExtrapolationTime goes from 0 to Infinity on the first build —
+        /// and a track bound from a tool then shows up as a modified asset in version control.
+        /// The stamp is set into the past because the write it guards against lands in the same
+        /// second as the call.
+        /// </remarks>
+        [Test]
+        public void BindingATrackDoesNotRewriteTheAsset()
+        {
+            var playable = this.Stage();
+            this.subject = new GameObject("Target");
+
+            var stamp = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(this.AssetPath, stamp);
+
+            TimelineTrackTools.SetTrack(
+                instanceId: this.Id, track: "Shots", binding: ObjectResolve.PathOf(this.subject));
+
+            Assert.That(File.GetLastWriteTimeUtc(this.AssetPath), Is.EqualTo(stamp));
+            Assert.That(playable.GetGenericBinding(TimelineResolve.Track(TimelineOf(playable), "Shots")),
+                        Is.Not.Null);
+
+            // Muting lives in the asset, so that one still has to reach the file.
+            TimelineTrackTools.SetTrack(instanceId: this.Id, track: "Shots", muted: true);
+
+            Assert.That(File.GetLastWriteTimeUtc(this.AssetPath), Is.GreaterThan(stamp));
+        }
+
         [Test]
         public void DeletingAMissingTrackNamesTheOnesThatExist()
         {

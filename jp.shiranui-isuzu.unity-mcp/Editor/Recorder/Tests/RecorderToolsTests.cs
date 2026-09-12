@@ -8,6 +8,9 @@ using NUnit.Framework;
 
 using UnityEditor;
 using UnityEditor.Recorder;
+#if UNITY_RECORDER_ENCODER_SETTINGS
+using UnityEditor.Recorder.Encoder;
+#endif
 using UnityEditor.Recorder.Input;
 using UnityEditor.Recorder.Timeline;
 
@@ -38,6 +41,38 @@ namespace UnityMCP.Editor.Recorder.Tests
     {
         private string folder;
         private GameObject director;
+
+        [TestCase(-1d, 1d)]
+        [TestCase(0d, 0d)]
+        [TestCase(0d, -1d)]
+        [TestCase(double.NaN, 1d)]
+        [TestCase(0d, double.PositiveInfinity)]
+        public void InvalidTimingCreatesNeitherTracksNorSubAssets(double start, double duration)
+        {
+            var playable = this.Director("InvalidTiming");
+            var timeline = (TimelineAsset)playable.playableAsset;
+            var path = AssetDatabase.GetAssetPath(timeline);
+            var before = AssetDatabase.LoadAllAssetsAtPath(path).Length;
+            Assert.Throws<McpToolException>(() => RecorderTools.AddTrack(
+                objectPath: "/" + this.director.name, start: start, duration: duration));
+            Assert.That(timeline.GetRootTracks(), Is.Empty);
+            Assert.That(AssetDatabase.LoadAllAssetsAtPath(path).Length, Is.EqualTo(before));
+        }
+
+        [Test]
+        public void UnsavedTimelineIsRefusedBeforeCreatingTracks()
+        {
+            this.director = new GameObject("UnsavedRecorderDirector");
+            var playable = this.director.AddComponent<PlayableDirector>();
+            var timeline = ScriptableObject.CreateInstance<TimelineAsset>();
+            playable.playableAsset = timeline;
+            try
+            {
+                Assert.Throws<McpToolException>(() => RecorderTools.AddTrack(objectPath: "/" + this.director.name));
+                Assert.That(timeline.GetRootTracks(), Is.Empty);
+            }
+            finally { UnityObject.DestroyImmediate(timeline); }
+        }
 
         [SetUp]
         public void SetUp()
@@ -144,10 +179,39 @@ namespace UnityMCP.Editor.Recorder.Tests
 
             var settings = (MovieRecorderSettings)SettingsOf(playable);
 
+#if UNITY_RECORDER_ENCODER_SETTINGS
+            Assert.That(
+                ((CoreEncoderSettings)settings.EncoderSettings).Codec,
+                Is.EqualTo(CoreEncoderSettings.OutputCodec.WEBM));
+#else
             Assert.That(settings.OutputFormat, Is.EqualTo(MovieRecorderSettings.VideoRecorderOutputFormat.WebM));
+#endif
             Assert.That(settings.ImageInputSettings.OutputWidth, Is.EqualTo(1280));
             Assert.That(settings.ImageInputSettings.OutputHeight, Is.EqualTo(720));
         }
+
+#if UNITY_RECORDER_ENCODER_SETTINGS
+        /// <summary>
+        /// A mov keeps the ProRes encoder the deprecated property used to select.
+        /// </summary>
+        /// <remarks>
+        /// The encoder API split what was one enum into two encoders, and the built-in one has no
+        /// mov: asking for it there would have silently produced an mp4.
+        /// </remarks>
+        [Test]
+        public void AMovieAskedForAsMovUsesTheProResEncoder()
+        {
+            var playable = this.Director("Movie");
+
+            RecorderTools.AddTrack(objectPath: null, instanceId: EntityIdCompat.IdOf(playable.gameObject),
+                                   outputPath: this.folder + "/Out", format: "mov",
+                                   width: 640, height: 360, duration: 1);
+
+            var settings = (MovieRecorderSettings)SettingsOf(playable);
+
+            Assert.That(settings.EncoderSettings, Is.TypeOf<ProResEncoderSettings>());
+        }
+#endif
 
         [Test]
         public void AnImageSequenceUsesTheImageRecorder()

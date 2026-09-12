@@ -35,7 +35,9 @@ namespace UnityMCP.Editor.Timeline
             "Mute, lock, rename a Timeline track, or set what it drives. Binding a track is how you " +
             "fix 'the animation does nothing': pass the GameObject and the right component is " +
             "resolved for the track's type. Muting can shorten the timeline, so the new duration is " +
-            "reported back. Track paths come from timeline_inspect.",
+            "reported back. A binding is scene data on the director, so scene_save is what keeps it; " +
+            "muting, locking and renaming live in the asset and are written to the .playable before " +
+            "this returns. Track paths come from timeline_inspect.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Set Track")]
         public static JObject SetTrack(
@@ -97,6 +99,7 @@ namespace UnityMCP.Editor.Timeline
 
             var changed = new JArray();
             var touchedScene = false;
+            var touchedAsset = false;
 
             if (muted.HasValue || locked.HasValue || name != null)
             {
@@ -106,18 +109,21 @@ namespace UnityMCP.Editor.Timeline
                 {
                     trackAsset.muted = muted.Value;
                     changed.Add($"muted = {muted.Value.ToString().ToLowerInvariant()}");
+                    touchedAsset = true;
                 }
 
                 if (locked.HasValue && trackAsset.locked != locked.Value)
                 {
                     trackAsset.locked = locked.Value;
                     changed.Add($"locked = {locked.Value.ToString().ToLowerInvariant()}");
+                    touchedAsset = true;
                 }
 
                 if (name != null && trackAsset.name != name)
                 {
                     changed.Add($"name = {name}");
                     trackAsset.name = name;
+                    touchedAsset = true;
                 }
             }
 
@@ -139,7 +145,15 @@ namespace UnityMCP.Editor.Timeline
                 touchedScene = true;
             }
 
-            Commit(timeline, director, structural: muted.HasValue || name != null);
+            // A binding lives on the director, in the scene. Saving the timeline for it rewrites the
+            // .playable with whatever the graph rebuild recomputed on the way - a clip's
+            // m_PostExtrapolationTime goes from 0 to Infinity on the first build - so binding a
+            // track leaves a modified asset in version control that nobody asked for.
+            Commit(
+                timeline,
+                director,
+                structural: muted.HasValue || name != null,
+                saveAsset: touchedAsset);
 
             var current = director.GetGenericBinding(trackAsset);
 
@@ -231,7 +245,10 @@ namespace UnityMCP.Editor.Timeline
             var descendants = TimelineResolve.AllTracks(timeline)
                 .Where(t => t != trackAsset && IsUnder(t, trackAsset))
                 .ToList();
-            var clipCount = trackAsset.GetClips().Count();
+            // The whole subtree, because DeleteTrack takes the children with it. Counting
+            // only the named track put "clipsRemoved": 68 next to "tracksRemoved": 3 in the same
+            // reply, where the three tracks between them held 139.
+            var clipCount = descendants.Concat(new[] { trackAsset }).Sum(t => t.GetClips().Count());
 
             // DeleteTrack takes the whole subtree, so a locked track further down would be removed
             // without its lock ever being consulted. Checked before anything is touched.
@@ -307,10 +324,17 @@ namespace UnityMCP.Editor.Timeline
             return $"{binding.name} ({binding.GetType().Name})";
         }
 
-        private static void Commit(TimelineAsset timeline, PlayableDirector director, bool structural)
+        private static void Commit(
+            TimelineAsset timeline,
+            PlayableDirector director,
+            bool structural,
+            bool saveAsset = true)
         {
-            EditorUtility.SetDirty(timeline);
-            AssetDatabase.SaveAssetIfDirty(timeline);
+            if (saveAsset)
+            {
+                EditorUtility.SetDirty(timeline);
+                AssetDatabase.SaveAssetIfDirty(timeline);
+            }
 
             if (director != null)
             {

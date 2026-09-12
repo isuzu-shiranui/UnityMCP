@@ -31,6 +31,8 @@ namespace UnityMCP.Editor.Core
 
         private readonly Dictionary<string, JobEntry> entries = new(StringComparer.Ordinal);
         private readonly object gate = new();
+        // A client may still poll an old id after a reload; it must never name new work.
+        private readonly string generation = Guid.NewGuid().ToString("N");
         private long counter;
 
         /// <summary>
@@ -39,7 +41,7 @@ namespace UnityMCP.Editor.Core
         /// <param name="label">Endpoint or tool name; becomes part of the readable id.</param>
         public string Track(McpMainThreadDispatcher.WorkItem item, string label)
         {
-            var id = $"{Sanitize(label)}-{Interlocked.Increment(ref this.counter)}";
+            var id = $"{Sanitize(label)}-{this.generation}-{Interlocked.Increment(ref this.counter)}";
             var entry = new JobEntry(id, label, item);
 
             lock (this.gate)

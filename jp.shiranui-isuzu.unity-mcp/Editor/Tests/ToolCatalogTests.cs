@@ -351,6 +351,23 @@ namespace UnityMCP.Editor.Tests
                 "Test fixture tools must not leak into the live catalog.");
         }
 
+        [TestCase("capture_screenshot")]
+        [TestCase("reflect_read")]
+        [TestCase("gpu_readback")]
+        public void CallsThatCanWriteDoNotAdvertiseReadOnlyOrAutomaticRetry(string name)
+        {
+            var catalog = ToolCatalog.BuildFromTypes(new[]
+            {
+                typeof(UnityMCP.Editor.Tools.EditorTools), typeof(UnityMCP.Editor.Tools.ReflectTools),
+                typeof(UnityMCP.Editor.Tools.GpuTools),
+            });
+            Assert.That(catalog.TryGet(name, out var tool), Is.True);
+            Assert.That(tool.Idempotency, Is.EqualTo(McpIdempotency.Unsafe));
+            var annotations = tool.ToMcpToolEntry()["annotations"];
+            Assert.That(annotations["readOnlyHint"].Value<bool>(), Is.False);
+            Assert.That(annotations["idempotentHint"].Value<bool>(), Is.False);
+        }
+
         [Test]
         public void DirectDescriptorRegistersLikeAnAttributeTool()
         {

@@ -1,0 +1,30 @@
+{
+  "name": "UnityMCP.Editor.Ugui",
+  "rootNamespace": "",
+  "references": [
+    "UnityMCP.Editor",
+    "UnityEngine.UI",
+    "Newtonsoft.Json"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Newtonsoft.Json.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_UGUI"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.unity.ugui",
+      "expression": "1.0.0",
+      "define": "UNITY_UGUI"
+    }
+  ],
+  "noEngineReferences": false
+}

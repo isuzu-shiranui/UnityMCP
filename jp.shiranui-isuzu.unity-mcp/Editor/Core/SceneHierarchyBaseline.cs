@@ -24,6 +24,7 @@ namespace UnityMCP.Editor.Core
         {
             public string Walk;
             public Dictionary<string, string> Nodes;
+            public bool Partial;
         }
 
         private static readonly Dictionary<string, Snapshot> Snapshots =
@@ -39,6 +40,8 @@ namespace UnityMCP.Editor.Core
         private const int KeepAtMost = 16;
 
         private static long counter;
+        // Stale client baselines must stay absent after the store is replaced on reload.
+        private static string generation = Guid.NewGuid().ToString("N");
 
         private static readonly object Gate = new object();
 
@@ -51,15 +54,15 @@ namespace UnityMCP.Editor.Core
         }
 
         /// <summary>Records what was returned and names it, without comparing it to anything.</summary>
-        public static string Remember(string walk, IReadOnlyList<JObject> nodes)
+        public static string Remember(string walk, IReadOnlyList<JObject> nodes, bool partial = false)
         {
             var state = Serialise(nodes);
 
             lock (Gate)
             {
                 counter++;
-                var id = "snap-" + counter.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                Snapshots[id] = new Snapshot { Walk = walk, Nodes = state };
+                var id = "snap-" + generation + "-" + counter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Snapshots[id] = new Snapshot { Walk = walk, Nodes = state, Partial = partial };
                 Touch(id);
                 return id;
             }
@@ -71,6 +74,14 @@ namespace UnityMCP.Editor.Core
             lock (Gate)
             {
                 return Snapshots.TryGetValue(id, out var snapshot) ? snapshot.Walk : null;
+            }
+        }
+
+        public static bool IsPartial(string id)
+        {
+            lock (Gate)
+            {
+                return Snapshots.TryGetValue(id, out var snapshot) && snapshot.Partial;
             }
         }
 
@@ -135,7 +146,7 @@ namespace UnityMCP.Editor.Core
                 }
 
                 counter++;
-                newId = "snap-" + counter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                newId = "snap-" + generation + "-" + counter.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 Snapshots[newId] = new Snapshot { Walk = walk, Nodes = state };
                 Touch(sinceId);
                 Touch(newId);
@@ -151,6 +162,7 @@ namespace UnityMCP.Editor.Core
                 Snapshots.Clear();
                 Recent.Clear();
                 counter = 0;
+                generation = Guid.NewGuid().ToString("N");
             }
         }
 

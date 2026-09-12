@@ -23,6 +23,119 @@ public sealed class SkillInstallerTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A guide from before the MCP interface is found, and the current one is not mistaken for it.
+    /// </summary>
+    /// <remarks>
+    /// An installed copy from an earlier release stays where every agent reads it, and the one
+    /// that turned up in a hands-on run documented endpoints on 127.0.0.1:27182 that no longer
+    /// answer. The folder name cannot decide it: other Unity MCP servers use names like
+    /// "unity-mcp" as well.
+    /// </remarks>
+    [Fact]
+    public void AGuideForTheInterfaceThisServerReplacedIsReported()
+    {
+        var obsolete = Path.Combine(_skills, "unity-mcp");
+        Directory.CreateDirectory(obsolete);
+        File.WriteAllText(Path.Combine(obsolete, "SKILL.md"),
+            "Interact with a running Unity Editor via HTTP on `http://127.0.0.1:27182/`. "
+            + "| `/execute_code` | POST | Run C# code |");
+
+        SkillInstaller.Install(_skills);
+
+        Assert.Equal(
+            new[] { Path.Combine(obsolete, "SKILL.md") },
+            SkillInstaller.ObsoleteGuides(_skills).ToArray());
+    }
+
+    [Fact]
+    public void AnotherProjectsGuideIsNotReportedAsThisOne()
+    {
+        var other = Path.Combine(_skills, "unity-mcp");
+        Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(other, "SKILL.md"),
+            "Some other Unity MCP server, with its own tools and no fixed port.");
+
+        Assert.Empty(SkillInstaller.ObsoleteGuides(_skills));
+    }
+
+    [Fact]
+    public void NoGuidesAreReportedWhereThereIsNoSkillsDirectory()
+    {
+        Assert.Empty(SkillInstaller.ObsoleteGuides(Path.Combine(_skills, "nothing here")));
+    }
+
+    /// <summary>
+    /// The guide is ASCII, because of how the agents that read it read files.
+    /// </summary>
+    /// <remarks>
+    /// It is UTF-8 with no BOM, which is what the skill loaders want, and Windows PowerShell 5.1
+    /// decodes exactly that as the ANSI codepage: an em dash arrives as "a-hat euro" and the
+    /// reader, seeing mojibake, fetches the whole file again with -Encoding utf8. Four hands-on
+    /// runs in a row read 26 KB twice for the sake of six em dashes.
+    /// </remarks>
+    [Fact]
+    public void TheSkillIsAsciiSoThatAnAnsiReaderSeesItWhole()
+    {
+        var content = SkillInstaller.Content();
+        var offending = content.Where(c => c > 127).Distinct().ToArray();
+
+        Assert.True(
+            offending.Length == 0,
+            "Replace with ASCII: " + string.Join(", ", offending.Select(c => $"U+{(int)c:X4} '{c}'")));
+    }
+
+    /// <summary>
+    /// The pages the guide points at are installed with it.
+    /// </summary>
+    /// <remarks>
+    /// The guide sends the reader to reference/tools.md and reference/workflows.md rather than
+    /// carrying both, which is what keeps the first read to a third of the file. Installed
+    /// without them, those lines point at files that are not there.
+    /// </remarks>
+    [Fact]
+    public void TheReferencePagesAreInstalledBesideTheGuide()
+    {
+        SkillInstaller.Install(_skills);
+
+        var directory = SkillInstaller.DirectoryFor(_skills);
+
+        Assert.True(File.Exists(Path.Combine(directory, "SKILL.md")));
+        Assert.True(File.Exists(Path.Combine(directory, "reference", "tools.md")));
+        Assert.True(File.Exists(Path.Combine(directory, "reference", "workflows.md")));
+        Assert.False(SkillInstaller.IsStale(_skills));
+    }
+
+    [Fact]
+    public void AnEditedReferencePageIsStaleToo()
+    {
+        SkillInstaller.Install(_skills);
+
+        var page = Path.Combine(SkillInstaller.DirectoryFor(_skills), "reference", "tools.md");
+        File.AppendAllText(page, "\nedited by hand\n");
+
+        Assert.True(SkillInstaller.IsStale(_skills), "staleness has to cover every file installed");
+
+        SkillInstaller.Install(_skills);
+
+        Assert.False(SkillInstaller.IsStale(_skills));
+    }
+
+    /// <summary>Every page the skill ships is ASCII, for the reason above.</summary>
+    [Fact]
+    public void EveryPageOfTheSkillIsAscii()
+    {
+        foreach (var (relative, text) in SkillInstaller.Files())
+        {
+            var offending = text.Where(c => c > 127).Distinct().ToArray();
+
+            Assert.True(
+                offending.Length == 0,
+                relative + " - replace with ASCII: "
+                + string.Join(", ", offending.Select(c => $"U+{(int)c:X4} '{c}'")));
+        }
+    }
+
     [Fact]
     public void TheSkillIsEmbeddedInThisExecutable()
     {

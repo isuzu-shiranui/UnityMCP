@@ -30,6 +30,17 @@ namespace UnityMCP.Editor.Tests
         private static readonly Vector2 From = new(100f, 200f);
         private static readonly Vector2 To = new(300f, 260f);
 
+        [TestCase(101, 30)]
+        [TestCase(1, 1001)]
+        [TestCase(int.MaxValue, 30)]
+        public void ExcessiveEventCountsFailBeforeResolvingOrFocusingAWindow(int clicks, int steps)
+        {
+            var error = Assert.Throws<McpToolException>(() => InputTools.Pointer(
+                "no-window-should-be-resolved", clickCount: clicks, steps: steps));
+            Assert.That(error.Code, Is.EqualTo("invalid_params"));
+            Assert.That(error.Message, Does.Contain("must not exceed"));
+        }
+
         [Test]
         public void BuildDragDeltasSumToTheDisplacementAndTheEndpointsMatch()
         {

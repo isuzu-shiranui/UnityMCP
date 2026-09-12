@@ -40,6 +40,21 @@ The MCP endpoint and the CLI's `/tools/<name>` both go through the same `ToolCat
 
 An unfocused Editor runs its main loop about every 100 ms. The server wakes it while a request is waiting, so calls normally complete in a few milliseconds. `/health` reports `loopWaker` as `on-demand`, `always` or `unavailable`.
 
+### `[McpTool]` properties
+
+| Property | Default | Meaning |
+|---|---|---|
+| `Idempotency` | `Unsafe` | Whether the call may be retried automatically after a connection failure. Read-only tools should say `Safe` |
+| `MainThread` | `true` | Whether the Editor main thread is required. `false` keeps the tool answerable while the Editor is busy. Use it only for tools that touch no Unity API |
+| `Destructive` | `false` | When true, the call refuses to run without `confirm: true`. It also supports `dry_run` |
+| `UndoGroup` | `null` | When set, the whole call collapses into a single Undo step |
+| `Examples` | none | Calls published with the tool, which a model reads before choosing arguments |
+| `AlwaysLoad` | `false` | Keeps the tool in context instead of behind a tool search. Reserve it for the few tools nearly every session opens with |
+| `MaxResultSizeChars` | `0` (no limit) | The largest reply sent over MCP, in characters. A reply past it comes back as an error rather than cut short |
+| `Group` | from the name prefix | The group `tools/list` filters by. Set it when the name prefix is not the group |
+
+Tool names must match `^[a-z][a-z0-9_]{0,63}$`. The description is the only cue the model has for choosing a tool. Say when to use it, not just what it does.
+
 ## Settings (Preferences > Unity MCP)
 
 These settings live in Unity's preferences folder and are shared by every Unity project on the machine. They are not stored per project. A positive `httpPort` therefore makes every other project try that port too. The defaults below are what a machine that has never saved them starts with.
@@ -77,4 +92,4 @@ A test run holds the main thread for its whole duration, so no other tool answer
 
 Running the package's tests needs `"testables": ["jp.shiranui-isuzu.unity-mcp"]` in the project's `Packages/manifest.json`.
 
-The EditMode suite is verified on 2022.3.22f1, 6000.0.35f1 and 6000.5.10f1.
+The EditMode suite is run on Unity 6000.0.x, and the run is recorded in `scripts/attested/<source hash>.json`. Naming the record after the sources it covered is what lets two branches each record a run without colliding: CI finds the right one by computing the hash, so there is nothing to compare and nothing to merge.

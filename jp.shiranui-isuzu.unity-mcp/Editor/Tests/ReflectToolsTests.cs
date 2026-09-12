@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 
 using Newtonsoft.Json.Linq;
@@ -284,6 +284,103 @@ namespace UnityMCP.Editor.Tests
         public void NullSerialisesAsNullRatherThanBeingDropped()
         {
             Assert.That(Read($"{typeof(Probe).FullName}/Nothing").Type, Is.EqualTo(JTokenType.Null));
+        }
+
+        [Test]
+        public void AColliderBoundsReadFollowsTheTransformRatherThanTheLastPhysicsStep()
+        {
+            // The physics engine keeps its own copy of the box and only takes a Transform change
+            // at the next step, which never comes in the Editor. Without a sync the reply is the
+            // box the collider had before the move, with nothing saying so.
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+
+            try
+            {
+                go.name = "ReflectBoundsProbe";
+                go.transform.position = new Vector3(10f, 0f, 0f);
+                go.transform.localScale = new Vector3(4f, 4f, 4f);
+
+                var read = ReflectTools.Read("@scene:/ReflectBoundsProbe/BoxCollider/bounds");
+                var centre = read["value"]["center"];
+                var extents = read["value"]["extents"];
+
+                Assert.That(centre["x"].Value<float>(), Is.EqualTo(10f).Within(0.001f));
+                Assert.That(extents["x"].Value<float>(), Is.EqualTo(2f).Within(0.001f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// A Bounds reads back under the names the API uses, size among them.
+        /// </summary>
+        /// <remarks>
+        /// Field by field it comes back as m_Center and m_Extents, and extents is a half size. A
+        /// caller comparing that against a BoxCollider's own 'size', which is a full one, is out
+        /// by two with both numbers looking reasonable; the scenario that asks whether a collider
+        /// matches what is drawn is exactly where that happens.
+        /// </remarks>
+        [Test]
+        public void ABoundsReportsItsSizeAndNotOnlyItsHalfSize()
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+
+            try
+            {
+                go.name = "ReflectBoundsShape";
+                go.transform.localScale = new Vector3(4f, 0.5f, 4f);
+
+                var value = ReflectTools.Read("@scene:/ReflectBoundsShape/MeshRenderer/bounds")["value"];
+
+                Assert.That(value["size"]["x"].Value<float>(), Is.EqualTo(4f).Within(0.001f));
+                Assert.That(value["extents"]["x"].Value<float>(), Is.EqualTo(2f).Within(0.001f));
+                Assert.That(value["min"]["y"].Value<float>(), Is.EqualTo(-0.25f).Within(0.001f));
+                Assert.That(value["max"]["y"].Value<float>(), Is.EqualTo(0.25f).Within(0.001f));
+                Assert.That(value["m_Extents"], Is.Null, "the private field names are not the API's");
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void SeveralPathsComeBackKeyedByThePathTheyWereAskedFor()
+        {
+            var read = ReflectTools.Read(
+                null,
+                new[] { typeof(Probe).FullName + "/Value", typeof(Probe).FullName + "/Nothing" });
+
+            var reads = (JObject)read["reads"];
+
+            Assert.That(reads.Count, Is.EqualTo(2));
+            Assert.That(reads[typeof(Probe).FullName + "/Value"]["value"], Is.Not.Null);
+        }
+
+        [Test]
+        public void OnePathThatCannotBeReadDoesNotCostTheOthers()
+        {
+            // The point of asking for several at once is losing none of them to one bad path.
+            var read = ReflectTools.Read(
+                null,
+                new[] { "No.Such.Type/atAll", typeof(Probe).FullName + "/Value" });
+
+            var reads = (JObject)read["reads"];
+
+            Assert.That(reads["No.Such.Type/atAll"]["error"], Is.Not.Null);
+            Assert.That(reads[typeof(Probe).FullName + "/Value"]["error"], Is.Null,
+                "the readable one still has to come back");
+        }
+
+        [Test]
+        public void PathAndPathsAreAlternativesRatherThanBothAtOnce()
+        {
+            Assert.That(Assert.Throws<McpToolException>(
+                () => ReflectTools.Read(typeof(Probe).FullName + "/Value",
+                                        new[] { typeof(Probe).FullName + "/Map" })).Code,
+                Is.EqualTo("invalid_params"));
         }
 
         [Test]

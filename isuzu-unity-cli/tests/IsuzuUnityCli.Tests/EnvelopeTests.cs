@@ -56,6 +56,27 @@ public sealed class EnvelopeTests
         Assert.Equal(502, e.HttpStatus);
     }
 
+    /// <summary>
+    /// An empty body says what happened, rather than trailing off after the colon.
+    /// </summary>
+    /// <remarks>
+    /// Polling compile_status straight after compile_request meets the reload that request set
+    /// off, and the reload answers with nothing. The excerpt is empty there, so the general
+    /// message ended mid-sentence and read as a fault in the reporting.
+    /// </remarks>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AnEmptyBodySaysAReloadIsLikely(string body)
+    {
+        var e = Assert.Throws<UnityError>(() => Envelope.Parse(200, body));
+
+        Assert.Equal("non_json", e.Code);
+        Assert.Contains("empty body", e.Message);
+        Assert.Contains("reloading", e.Message);
+        Assert.DoesNotContain(":  ", e.Message);
+    }
+
     [Fact]
     public void TruncatedAndNextPassThrough()
     {

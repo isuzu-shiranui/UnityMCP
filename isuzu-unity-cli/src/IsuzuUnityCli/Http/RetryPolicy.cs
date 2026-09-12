@@ -51,7 +51,7 @@ public static class RetryPolicy
     /// </summary>
     public static Classification Classify(Idempotency idempotency, Exception exception)
     {
-        if (IsConnectionRefused(exception))
+        if (IsConnectionRefused(exception) || exception is LoopbackHttp.ConnectNotCompletedException)
         {
             return Classification.Retryable;
         }
@@ -66,9 +66,22 @@ public static class RetryPolicy
             return "ECONNREFUSED";
         }
 
+        // Separate from ETIMEDOUT because the two differ in what the Editor may have done with the
+        // request. A connect that never completed cannot have delivered one, and a caller deciding
+        // whether to repeat a call that must not run twice has to be able to tell them apart.
+        if (exception is LoopbackHttp.ConnectNotCompletedException)
+        {
+            return "ECONNTIMEOUT";
+        }
+
         if (exception is OperationCanceledException)
         {
             return "ETIMEDOUT";
+        }
+
+        if (exception is LoopbackHttp.MalformedResponseException)
+        {
+            return "EPROTO";
         }
 
         for (Exception? e = exception; e is not null; e = e.InnerException)

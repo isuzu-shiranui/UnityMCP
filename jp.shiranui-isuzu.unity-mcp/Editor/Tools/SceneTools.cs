@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 
@@ -24,7 +24,9 @@ namespace UnityMCP.Editor.Tools
             "type, or tag. Prefer narrowing with a filter and a small limit over fetching the " +
             "whole tree: a full hierarchy dump is large and mostly irrelevant to any one question. " +
             "A filtered walk also returns the parents leading down to each match, so results " +
-            "include objects that do not themselves satisfy the filter. While a prefab is open for " +
+            "include objects that do not themselves satisfy the filter. What it leaves out is a " +
+            "match's own children, when they do not match too: a filter naming a parent answers " +
+            "with that parent alone, and 'childrenNotShown' on it counts what is under it. While a prefab is open for " +
             "editing this still reports the scene behind it, and paths from that scene cannot be " +
             "resolved by the gameobject_ and inspect_ tools, which address the prefab contents " +
             "instead. In a reply that was not narrowed by 'fields', a key missing from a node " +
@@ -61,6 +63,11 @@ namespace UnityMCP.Editor.Tools
             bool missingScripts = false,
             [McpArg("scene_index", "Restrict to a single open scene by index; omit for all scenes.")]
             int? sceneIndex = null,
+            [McpArg("object_path", "Start from this object instead of the scene roots, and report " +
+                                   "it and what is under it. This is how to read one branch: " +
+                                   "without it the only way to the objects under a known object " +
+                                   "is to take the whole scene and find them in it.")]
+            string objectPath = null,
             [McpArg("limit", "Maximum entries to return. Omit it, or pass 0, to return every entry. " +
                              "When paging separates children from their parent they are reported " +
                              "at the top level rather than nested.")]
@@ -78,8 +85,11 @@ namespace UnityMCP.Editor.Tools
                              "own place and nobody else's call moves it; a reply that never " +
                              "arrives leaves the last id usable. It covers the whole filtered " +
                              "set, so 'limit' and 'offset' are refused with it. A " +
-                             "snapshot the Editor no longer holds is an error asking for a " +
-                             "fresh read; it does not survive the Editor reloading its scripts. " +
+                             "snapshot does not survive the Editor reloading its scripts, and " +
+                             "one it no longer holds is answered with the tree under a " +
+                             "'sinceExpired' naming it, rather than an error: the walk that " +
+                             "answers it has already happened, so asking again would cost a " +
+                             "round trip for a reply already in hand. " +
                              "Ask with the same filters the snapshot was taken under: comparing " +
                              "across two different walks is refused, because everything the " +
                              "narrower one leaves out would otherwise read as removed. " +
@@ -103,6 +113,7 @@ namespace UnityMCP.Editor.Tools
                 ("activeOnly", activeOnly),
                 ("missingScripts", missingScripts),
                 ("sceneIndex", sceneIndex),
+                ("objectPath", objectPath),
                 ("limit", limit),
                 ("offset", offset),
                 ("fields", fields),

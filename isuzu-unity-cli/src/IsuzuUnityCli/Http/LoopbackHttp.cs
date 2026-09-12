@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -17,20 +18,39 @@ public static class LoopbackHttp
     /// <summary>Per-exchange socket timeout; the retry loop above it enforces the shorter budget.</summary>
     private const int TimeoutMs = 30000;
 
+    /// <summary>A connection that was never made, so nothing of the request was sent.</summary>
+    public sealed class ConnectNotCompletedException(string message) : IOException(message);
+
+    /// <summary>
+    /// An answer that arrived and could not be read as HTTP.
+    /// </summary>
+    /// <remarks>
+    /// Separate from a connection that dropped, which is what a domain reload looks like and
+    /// resolves on its own. This one does not, so advising the caller to wait a few seconds and
+    /// try again would send them nowhere.
+    /// </remarks>
+    public sealed class MalformedResponseException(string message) : IOException(message);
+
     /// <summary>
     /// Synchronous on purpose: the asynchronous socket path starts a completion-port engine and
     /// its thread on first use, several milliseconds that a single loopback exchange never earns
-    /// back. Cancellation is honoured between steps and through the socket timeouts.
+    /// back. Cancellation closes the socket to interrupt a blocked connect, send or receive.
     /// </summary>
+    /// <param name="connectCancellation">
+    /// Stops waiting for the connection only. A refused loopback connect takes about two seconds on
+    /// Windows, and that wait belongs to the retry budget; the wait for a reply does not, because by
+    /// then the request has been sent.
+    /// </param>
     public static Task<(int Status, string Body)> SendAsync(
         string endpoint,
         string method,
         string path,
         string? bearer,
         string? jsonBody,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        CancellationToken connectCancellation = default)
     {
-        return Task.FromResult(Send(endpoint, method, path, bearer, jsonBody, cancellation));
+        return Task.FromResult(Send(endpoint, method, path, bearer, jsonBody, cancellation, connectCancellation));
     }
 
     public static (int Status, string Body) Send(
@@ -39,7 +59,8 @@ public static class LoopbackHttp
         string path,
         string? bearer,
         string? jsonBody,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        CancellationToken connectCancellation = default)
     {
         var (host, port) = HostAndPort(endpoint);
         var address = IPAddress.TryParse(host, out var literal) ? literal : null;
@@ -49,6 +70,8 @@ public static class LoopbackHttp
         socket.NoDelay = true;
         socket.SendTimeout = TimeoutMs;
         socket.ReceiveTimeout = TimeoutMs;
+        using var registration = cancellation.Register(static state => ((Socket)state!).Dispose(), socket);
+        var connecting = connectCancellation.Register(static state => ((Socket)state!).Dispose(), socket);
 
         try
         {
@@ -61,9 +84,22 @@ public static class LoopbackHttp
                 socket.Connect(host, port);
             }
         }
+        catch (Exception) when (cancellation.IsCancellationRequested)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            throw;
+        }
+        catch (Exception) when (connectCancellation.IsCancellationRequested)
+        {
+            throw new ConnectNotCompletedException($"Connect to {host}:{port} did not complete in time.");
+        }
         catch (SocketException e)
         {
             throw new IOException($"Connect to {host}:{port} failed: {e.SocketErrorCode}", e);
+        }
+        finally
+        {
+            connecting.Dispose();
         }
 
         StageTrace.Mark("connected");
@@ -91,14 +127,21 @@ public static class LoopbackHttp
 
         try
         {
-            socket.Send(head);
+            SendAll(socket, head, cancellation);
 
             if (bodyBytes.Length > 0)
             {
-                socket.Send(bodyBytes);
+                SendAll(socket, bodyBytes, cancellation);
             }
 
-            return Parse(ReadAll(socket, cancellation));
+            var response = ReadAll(socket, cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            return Parse(response);
+        }
+        catch (Exception) when (cancellation.IsCancellationRequested)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            throw;
         }
         catch (SocketException e) when (e.SocketErrorCode == SocketError.TimedOut)
         {
@@ -107,6 +150,19 @@ public static class LoopbackHttp
         catch (SocketException e)
         {
             throw new IOException($"Request to {host}:{port} failed: {e.SocketErrorCode}", e);
+        }
+    }
+
+    private static void SendAll(Socket socket, byte[] bytes, CancellationToken cancellation)
+    {
+        var offset = 0;
+        while (offset < bytes.Length)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var sent = socket.Send(bytes, offset, bytes.Length - offset, SocketFlags.None);
+            if (sent == 0)
+                throw new IOException("The server closed the connection during the request.");
+            offset += sent;
         }
     }
 
@@ -137,7 +193,10 @@ public static class LoopbackHttp
     private static byte[] ReadAll(Socket socket, CancellationToken cancellation)
     {
         var buffer = new byte[16 * 1024];
-        var received = new MemoryStream();
+        using var received = new MemoryStream();
+        var headerEnd = -1;
+        long contentLength = -1;
+        var chunked = false;
 
         while (true)
         {
@@ -153,8 +212,11 @@ public static class LoopbackHttp
 
             // A server that keeps the connection open despite Connection: close still ends the
             // message with Content-Length; stop as soon as that many body bytes are in.
-            if (TryFindHeaderEnd(received, out var headerEnd, out var contentLength) && contentLength >= 0
-                && received.Length >= headerEnd + contentLength)
+            if (headerEnd < 0)
+                TryFindHeaderEnd(received, out headerEnd, out contentLength, out chunked);
+
+            if (headerEnd >= 0 && (contentLength >= 0 && received.Length - headerEnd >= contentLength
+                || chunked && TryDecodeChunked(received.GetBuffer().AsSpan(headerEnd, (int)received.Length - headerEnd), null)))
             {
                 break;
             }
@@ -163,9 +225,10 @@ public static class LoopbackHttp
         return received.ToArray();
     }
 
-    private static bool TryFindHeaderEnd(MemoryStream stream, out int headerEnd, out long contentLength)
+    private static bool TryFindHeaderEnd(MemoryStream stream, out int headerEnd, out long contentLength, out bool chunked)
     {
         contentLength = -1;
+        chunked = false;
         var span = new ReadOnlySpan<byte>(stream.GetBuffer(), 0, (int)stream.Length);
         var at = span.IndexOf(HeaderEnd);
 
@@ -180,12 +243,33 @@ public static class LoopbackHttp
 
         foreach (var line in headers.Split("\r\n"))
         {
-            if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)
-                && long.TryParse(line.AsSpan(15).Trim(), out var length))
+            if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
             {
+                // Digits only, and read the same way on every machine: the header is ASCII and
+                // has nothing to do with the culture the process happens to run under.
+                if (!long.TryParse(line.AsSpan(15).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var length)
+                    || length < 0 || contentLength >= 0 && contentLength != length)
+                    throw new MalformedResponseException("Invalid Content-Length.");
                 contentLength = length;
             }
+            if (line.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase))
+            {
+                var coding = line.AsSpan(18).Trim();
+
+                // 'identity' names the absence of a transfer coding, and a list ends with the one
+                // applied last. Read the way the body reader reads it, which looks for 'chunked'
+                // anywhere; the two disagreeing meant a legal header was refused here and framed
+                // there. Only the Editor's own replies come through without a proxy in between,
+                // and those always carry a Content-Length.
+                if (coding.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+                    chunked = true;
+                else if (!coding.Equals("identity", StringComparison.OrdinalIgnoreCase))
+                    throw new MalformedResponseException("Unsupported Transfer-Encoding.");
+            }
         }
+
+        if (chunked && contentLength >= 0)
+            throw new MalformedResponseException("Ambiguous HTTP response framing.");
 
         return true;
     }
@@ -211,11 +295,12 @@ public static class LoopbackHttp
 
         if (statusLine.Length < 2 || !int.TryParse(statusLine[1], out var status))
         {
-            throw new IOException($"Malformed status line: {lines[0]}");
+            throw new MalformedResponseException($"Malformed status line: {lines[0]}");
         }
 
         var body = span.Slice(headerEnd + HeaderEnd.Length);
         var chunked = false;
+        long contentLength = -1;
 
         foreach (var line in lines)
         {
@@ -224,6 +309,17 @@ public static class LoopbackHttp
             {
                 chunked = true;
             }
+            if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)
+                && long.TryParse(line.AsSpan(15).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var length)
+                && length >= 0)
+                contentLength = length;
+        }
+
+        if (!chunked && contentLength >= 0)
+        {
+            if (body.Length < contentLength)
+                throw new IOException("The server closed the connection before the response body ended.");
+            body = body[..(int)contentLength];
         }
 
         return (status, chunked ? DecodeChunked(body) : Encoding.UTF8.GetString(body));
@@ -231,7 +327,14 @@ public static class LoopbackHttp
 
     private static string DecodeChunked(ReadOnlySpan<byte> body)
     {
-        var output = new MemoryStream(body.Length);
+        using var output = new MemoryStream(body.Length);
+        if (!TryDecodeChunked(body, output))
+            throw new IOException("The server closed the connection before the chunked response ended.");
+        return Encoding.UTF8.GetString(output.GetBuffer(), 0, (int)output.Length);
+    }
+
+    private static bool TryDecodeChunked(ReadOnlySpan<byte> body, MemoryStream? output)
+    {
         var offset = 0;
 
         while (offset < body.Length)
@@ -240,23 +343,31 @@ public static class LoopbackHttp
 
             if (lineEnd < 0)
             {
-                break;
+                return false;
             }
 
             var sizeText = Encoding.ASCII.GetString(body.Slice(offset, lineEnd));
             var semicolon = sizeText.IndexOf(';');
-            var size = Convert.ToInt32(semicolon >= 0 ? sizeText[..semicolon] : sizeText, 16);
+            if (!int.TryParse(semicolon >= 0 ? sizeText[..semicolon] : sizeText,
+                    System.Globalization.NumberStyles.AllowHexSpecifier,
+                    System.Globalization.CultureInfo.InvariantCulture, out var size) || size < 0)
+                throw new MalformedResponseException("Invalid HTTP chunk size.");
             offset += lineEnd + 2;
 
             if (size == 0)
             {
-                break;
+                var trailer = body[offset..];
+                return trailer.StartsWith("\r\n"u8) || trailer.IndexOf(HeaderEnd) >= 0;
             }
 
-            output.Write(body.Slice(offset, Math.Min(size, body.Length - offset)));
+            if (body.Length - offset < 2 || size > body.Length - offset - 2)
+                return false;
+            if (!body.Slice(offset + size, 2).SequenceEqual("\r\n"u8))
+                throw new MalformedResponseException("Invalid HTTP chunk delimiter.");
+            output?.Write(body.Slice(offset, size));
             offset += size + 2;
         }
 
-        return Encoding.UTF8.GetString(output.GetBuffer(), 0, (int)output.Length);
+        return false;
     }
 }

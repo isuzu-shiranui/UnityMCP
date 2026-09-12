@@ -23,7 +23,8 @@ public sealed record ScriptedResponse(
 /// <summary>Loopback HTTP server that answers with scripted responses and records what it received.</summary>
 public sealed class FakeUnityServer : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly TcpListener _listener;
+    private readonly CancellationTokenSource _stop = new();
     private readonly Queue<ScriptedResponse> _scripted = new();
     private readonly object _gate = new();
     private readonly Task _loop;
@@ -35,9 +36,11 @@ public sealed class FakeUnityServer : IDisposable
 
     public FakeUnityServer(int? port = null)
     {
-        Port = port ?? FreePort();
-        _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
+        // TCP works in restricted Windows sessions where HTTP.sys cannot create a
+        // request queue. Binding port zero also removes the probe/bind port race.
+        _listener = new TcpListener(IPAddress.Loopback, port ?? 0);
         _listener.Start();
+        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _loop = Task.Run(ServeAsync);
     }
 
@@ -103,15 +106,15 @@ public sealed class FakeUnityServer : IDisposable
 
     private async Task ServeAsync()
     {
-        while (_listener.IsListening)
+        while (!_stop.IsCancellationRequested)
         {
-            HttpListenerContext context;
+            TcpClient client;
 
             try
             {
-                context = await _listener.GetContextAsync();
+                client = await _listener.AcceptTcpClientAsync(_stop.Token);
             }
-            catch (HttpListenerException)
+            catch (OperationCanceledException)
             {
                 return;
             }
@@ -120,62 +123,63 @@ public sealed class FakeUnityServer : IDisposable
                 return;
             }
 
-            string body;
-            using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
+            using (client)
             {
-                body = await reader.ReadToEndAsync();
+                var stream = client.GetStream();
+                var head = new StringBuilder();
+                var one = new byte[1];
+                while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+                {
+                    await stream.ReadExactlyAsync(one, _stop.Token);
+                    head.Append((char)one[0]);
+                }
+                var lines = head.ToString().Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
+                var request = lines[0].Split(' ', 3);
+                var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var line in lines.Skip(1))
+                {
+                    var colon = line.IndexOf(':');
+                    headers[line[..colon]] = line[(colon + 1)..].Trim();
+                }
+                var bodyBytes = new byte[headers.TryGetValue("Content-Length", out var size) ? int.Parse(size) : 0];
+                await stream.ReadExactlyAsync(bodyBytes, _stop.Token);
+                ScriptedResponse response;
+
+                lock (_gate)
+                {
+                    Requests.Add(new RecordedRequest(request[0], request[1], headers.GetValueOrDefault("Authorization"),
+                        Encoding.UTF8.GetString(bodyBytes), headers.GetValueOrDefault("Mcp-Session-Id")));
+
+                    response = _scripted.Count > 0 ? _scripted.Dequeue() : _fallback;
+                }
+
+                if (response.Drop)
+                {
+                    client.Client.LingerState = new LingerOption(true, 0);
+                    continue;
+                }
+
+                var bytes = Encoding.UTF8.GetBytes(response.Body);
+                var reply = new StringBuilder($"HTTP/1.1 {response.Status} Reply\r\nConnection: close\r\nContent-Length: {bytes.Length}\r\n");
+
+                foreach (var header in response.Headers)
+                    reply.Append(header.Key).Append(": ").Append(header.Value).Append("\r\n");
+
+                if (bytes.Length > 0)
+                    reply.Append("Content-Type: ").Append(response.ContentType).Append("\r\n");
+                reply.Append("\r\n");
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToString()), _stop.Token);
+                await stream.WriteAsync(bytes, _stop.Token);
             }
-
-            ScriptedResponse response;
-
-            lock (_gate)
-            {
-                Requests.Add(new RecordedRequest(
-                    context.Request.HttpMethod,
-                    context.Request.Url?.PathAndQuery ?? "",
-                    context.Request.Headers["Authorization"],
-                    body,
-                    context.Request.Headers["Mcp-Session-Id"]));
-
-                response = _scripted.Count > 0 ? _scripted.Dequeue() : _fallback;
-            }
-
-            if (response.Drop)
-            {
-                context.Response.Abort();
-                continue;
-            }
-
-            var bytes = Encoding.UTF8.GetBytes(response.Body);
-            context.Response.StatusCode = response.Status;
-
-            foreach (var header in response.Headers)
-            {
-                context.Response.Headers[header.Key] = header.Value;
-            }
-
-            if (bytes.Length > 0)
-            {
-                context.Response.ContentType = response.ContentType;
-            }
-
-            context.Response.ContentLength64 = bytes.Length;
-            await context.Response.OutputStream.WriteAsync(bytes);
-            context.Response.Close();
         }
     }
 
     public void Dispose()
     {
-        try
-        {
-            _listener.Stop();
-            _listener.Close();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-        _loop.Wait(TimeSpan.FromSeconds(2));
+        _stop.Cancel();
+        _listener.Stop();
+        try { _loop.GetAwaiter().GetResult(); }
+        catch (OperationCanceledException) { }
+        _stop.Dispose();
     }
 }

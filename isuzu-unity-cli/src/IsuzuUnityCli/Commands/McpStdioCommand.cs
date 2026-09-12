@@ -13,7 +13,8 @@ public static class McpStdioCommand
             context.In,
             context.Out,
             () => context.ResolveInstance(parsed),
-            parsed.Option("project"));
+            parsed.Option("project"),
+            groups: parsed.Option("group"));
 
         return await bridge.RunAsync(context.Cancellation);
     }

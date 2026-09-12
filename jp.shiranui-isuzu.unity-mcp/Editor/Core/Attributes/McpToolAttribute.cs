@@ -94,14 +94,13 @@ namespace UnityMCP.Editor.Core.Attributes
         public bool AlwaysLoad { get; set; }
 
         /// <summary>
-        /// What this tool asks the client to allow before it writes the result to a file rather
-        /// than passing it inline, in characters. Zero leaves the client's default in place.
+        /// The largest reply this tool sends over MCP, in characters. Zero means no limit.
         /// </summary>
         /// <remarks>
-        /// A hint, and nothing more: it is published as <c>anthropic/maxResultSizeChars</c> in the
-        /// tool's <c>_meta</c> and read by the client. Nothing on this side measures a response or
-        /// cuts one, so a tool can and does answer above its own stated number — what bounds a
-        /// reply is the tool's own paging and ceilings. It says nothing about an image result.
+        /// A reply past it is refused with <c>isError</c> rather than cut short, because a JSON reply
+        /// cut short reads as complete. The CLI's REST route is not held to it. It is also published
+        /// as <c>anthropic/maxResultSizeChars</c> in the tool's <c>_meta</c>, and says nothing about
+        /// an image result.
         /// </remarks>
         public int MaxResultSizeChars { get; set; }
 

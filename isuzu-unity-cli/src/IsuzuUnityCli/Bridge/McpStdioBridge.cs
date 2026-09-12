@@ -16,6 +16,7 @@ public sealed class McpStdioBridge : IDisposable
     // Tool calls run inside the Editor and a domain reload alone can take a minute, so the
     // transport must not be the thing that gives up on them.
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SessionShutdownTimeout = TimeSpan.FromSeconds(2);
 
     private const string SessionHeader = "Mcp-Session-Id";
 
@@ -31,18 +32,21 @@ public sealed class McpStdioBridge : IDisposable
     private InstanceDescriptor? _descriptor;
     private string? _lastKnownProject;
     private string? _sessionId;
+    private readonly string? _groups;
 
     public McpStdioBridge(
         TextReader input,
         TextWriter output,
         Func<InstanceDescriptor> resolve,
         string? projectOption = null,
-        HttpMessageHandler? handler = null)
+        HttpMessageHandler? handler = null,
+        string? groups = null)
     {
         _input = input;
         _output = output;
         _resolve = resolve;
         _projectOption = projectOption;
+        _groups = string.IsNullOrWhiteSpace(groups) ? null : groups;
         _ownsHttp = handler is null;
 
         // The target is always loopback, so a system proxy would only turn every call into a
@@ -107,8 +111,24 @@ public sealed class McpStdioBridge : IDisposable
         }
     }
 
+    /// <summary>The endpoint to post to, narrowed to the groups this bridge was started for.</summary>
+    /// <remarks>
+    /// The endpoint has always taken <c>?group=</c>; without it a client is handed every tool and
+    /// pays for their descriptions on every request of the conversation.
+    /// </remarks>
+    private string Target(InstanceDescriptor descriptor)
+    {
+        var url = descriptor.McpUrlOrDefault;
+
+        return _groups is null ? url : url + "?group=" + Uri.EscapeDataString(_groups);
+    }
+
     private async Task HandleAsync(string message, CancellationToken cancellation)
     {
+        // One request is answered once. A stream that breaks after a payload has gone out would
+        // otherwise put a second line under the same id, which is two replies to one request.
+        var answered = false;
+
         try
         {
             var descriptor = Descriptor();
@@ -116,7 +136,7 @@ public sealed class McpStdioBridge : IDisposable
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
             timeout.CancelAfter(RequestTimeout);
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, descriptor.McpUrlOrDefault);
+            using var request = new HttpRequestMessage(HttpMethod.Post, Target(descriptor));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", descriptor.Token);
             request.Headers.Accept.ParseAdd("application/json, text/event-stream");
 
@@ -132,7 +152,24 @@ public sealed class McpStdioBridge : IDisposable
             request.Content = content;
 
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+
+            // Read before the status is judged: a session the server issued is this session
+            // whether or not it accepted this particular request.
             CaptureSession(response);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // A refusal the server composed came from the right place. Only a status that
+                // says this is no longer that place sends the next message looking for it again.
+                if ((int)response.StatusCode is 401 or 404 or >= 500)
+                {
+                    Invalidate();
+                }
+
+                answered = true;
+                EmitError(message, $"Unity MCP HTTP request failed with status {(int)response.StatusCode} ({response.StatusCode}).");
+                return;
+            }
 
             if ((int)response.StatusCode == 202)
             {
@@ -146,6 +183,7 @@ public sealed class McpStdioBridge : IDisposable
                 await foreach (var payload in SseReader.ReadAsync(stream, timeout.Token))
                 {
                     Emit(payload);
+                    answered = true;
                 }
 
                 return;
@@ -156,26 +194,62 @@ public sealed class McpStdioBridge : IDisposable
             if (body.Trim().Length > 0)
             {
                 Emit(body.TrimEnd('\r', '\n'));
+                answered = true;
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
+        }
+        catch (JsonException e)
+        {
+            // The Editor answered; what it said was not a JSON-RPC message. The descriptor is
+            // sound, and calling this "not running" sends the reader somewhere else entirely.
+            if (!answered)
+            {
+                EmitError(message, "The Unity Editor answered with something that is not JSON: " + OneLine(e.Message));
+            }
         }
         catch (Exception)
         {
             // The Editor may have restarted on another port, so the next message resolves the
             // descriptor again instead of the client having to be restarted.
             Invalidate();
-            EmitTransportError(message);
+
+            if (!answered)
+            {
+                EmitTransportError(message);
+            }
         }
     }
 
+    private static string OneLine(string text) =>
+        text.Replace('\r', ' ').Replace('\n', ' ');
+
     private void Emit(string line)
     {
-        _outbound.Writer.TryWrite(line);
+        // HTTP JSON and SSE data may contain formatting newlines; stdio must carry
+        // exactly one complete JSON message per line. JsonDocument preserves number tokens.
+        // The depth is raised past the default 64 because the limit is ours, not the protocol's,
+        // and a payload that reaches it would come back as "the Editor is not running".
+        using var message = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 256 });
+        using var buffer = new MemoryStream();
+
+        // The default encoder escapes every character outside ASCII, which turns a Japanese
+        // console line into six bytes per character on its way to the client.
+        using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        }))
+            message.WriteTo(writer);
+        _outbound.Writer.TryWrite(Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length));
     }
 
     private void EmitTransportError(string message)
+    {
+        EmitError(message, $"Unity Editor for {ProjectLabel()} is not running");
+    }
+
+    private void EmitError(string message, string error)
     {
         var id = PeekId(message);
 
@@ -185,10 +259,10 @@ public sealed class McpStdioBridge : IDisposable
             return;
         }
 
-        var project = JsonEncodedText.Encode(ProjectLabel());
+        var encodedError = JsonEncodedText.Encode(error);
 
         Emit("{\"jsonrpc\":\"2.0\",\"id\":" + id
-            + ",\"error\":{\"code\":-32000,\"message\":\"Unity Editor for " + project + " is not running\"}}");
+            + ",\"error\":{\"code\":-32000,\"message\":\"" + encodedError + "\"}}");
     }
 
     /// <summary>
@@ -267,7 +341,8 @@ public sealed class McpStdioBridge : IDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", descriptor.Token);
             request.Headers.TryAddWithoutValidation(SessionHeader, session);
 
-            using var response = await _http.SendAsync(request, CancellationToken.None);
+            using var timeout = new CancellationTokenSource(SessionShutdownTimeout);
+            using var response = await _http.SendAsync(request, timeout.Token);
         }
         catch (Exception)
         {
@@ -294,6 +369,7 @@ public sealed class McpStdioBridge : IDisposable
         lock (_gate)
         {
             _descriptor = null;
+            _sessionId = null;
         }
     }
 

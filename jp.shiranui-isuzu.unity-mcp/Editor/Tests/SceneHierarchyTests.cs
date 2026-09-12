@@ -1,4 +1,6 @@
-using NUnit.Framework;
+﻿using NUnit.Framework;
+using System.Linq;
+
 using Newtonsoft.Json.Linq;
 
 using UnityEngine;
@@ -17,6 +19,43 @@ namespace UnityMCP.Editor.Tests
     internal sealed class SceneHierarchyTests
     {
         private const string NamePrefix = "SHTest";
+
+        [Test]
+        public void BatchedPathsMatchSinglePathsAcrossDuplicateNamesAndRoots()
+        {
+            var other = new GameObject(this.root.name);
+            var a = new GameObject("Duplicate");
+            a.transform.SetParent(this.root.transform);
+            var b = new GameObject("Duplicate");
+            b.transform.SetParent(this.root.transform);
+            b.SetActive(false);
+            try
+            {
+                var objects = this.root.GetComponentsInChildren<Transform>(true)
+                    .Select(t => t.gameObject).Concat(new[] { other }).ToArray();
+                var batch = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
+                foreach (var go in objects.Reverse())
+                    Assert.That(batch.PathOf(go), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(go)));
+
+                b.transform.SetSiblingIndex(0);
+                var nextRead = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
+                foreach (var go in objects)
+                    Assert.That(nextRead.PathOf(go), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(go)),
+                        "a new browse must observe reordered siblings");
+
+                var filtered = SceneHierarchy.Browse(ToolArgs.Of(("name", "Duplicate"), ("activeOnly", true)));
+                var node = FindByName(ChildrenOf(FindNode(filtered, this.root.name)), "Duplicate");
+                Assert.That(node, Is.Not.Null);
+                Assert.That(node["path"].ToString(), Is.EqualTo(UnityMCP.Editor.Tools.ObjectResolve.PathOf(a)),
+                    "inactive siblings excluded by the filter still determine path indices");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(a);
+                UnityEngine.Object.DestroyImmediate(b);
+                UnityEngine.Object.DestroyImmediate(other);
+            }
+        }
         private const string RootName = "SHTestRoot";
         private const string ChildAName = "SHTestChildA";
         private const string ChildBName = "SHTestChildB";
@@ -51,6 +90,45 @@ namespace UnityMCP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(this.root);
                 this.root = null;
+            }
+        }
+
+        [Test]
+        public void APreResetSnapshotCannotBecomeAnotherSnapshotsId()
+        {
+            var nodes = new[] { new JObject { ["instanceId"] = 1, ["name"] = "before" } };
+            var oldId = SceneHierarchyBaseline.Remember("same-walk", nodes);
+            SceneHierarchyBaseline.Reset();
+            var newId = SceneHierarchyBaseline.Remember("same-walk", nodes);
+
+            Assert.That(newId, Is.Not.EqualTo(oldId));
+            Assert.That(SceneHierarchyBaseline.WalkOf(oldId), Is.Null);
+            Assert.That(SceneHierarchyBaseline.CompareWith(oldId, "same-walk", nodes, out var replacementId), Is.Null);
+            Assert.That(replacementId, Is.Null);
+        }
+
+        /// <summary>
+        /// A layer nobody named is still the answer to "why is this not drawn", so it has to be
+        /// identifiable. Reported as the empty string it said only "not Default".
+        /// </summary>
+        [Test]
+        public void AnUnnamedLayerIsReportedByItsNumber()
+        {
+            var go = new GameObject("UnnamedLayerObject") { layer = 31 };
+
+            try
+            {
+                var browsed = SceneHierarchy.Browse(ToolArgs.Of(("name", "UnnamedLayerObject")));
+
+                var node = ((JArray)browsed["scenes"])
+                    .SelectMany(scene => (JArray)scene["gameObjects"])
+                    .First(n => n["name"].ToString() == "UnnamedLayerObject");
+
+                Assert.That(node["layer"].Value<int>(), Is.EqualTo(31));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
             }
         }
 
@@ -233,6 +311,32 @@ namespace UnityMCP.Editor.Tests
                 "without an id the caller has nothing to ask for a difference from");
         }
 
+        [TestCase(1, 0)]
+        [TestCase(0, 1)]
+        public void APartialSnapshotCannotReportUnseenExistingNodesAsAdded(int limit, int offset)
+        {
+            var page = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("limit", limit), ("offset", offset)));
+            var snapshot = SnapshotOf(page);
+            Assert.That(snapshot, Is.Not.Null.And.Not.Empty, "pages still identify their snapshot");
+            var result = Since(snapshot);
+            // The way out is named as well as the refusal: a scene too large to return whole is
+            // narrowed with a filter, which keeps the snapshot complete for what it selects.
+            Assert.That(result["error"]?.ToString(),
+                        Does.Contain("only a page").And.Contain("Take a full one").And.Contain("max_depth"));
+            Assert.That(result["added"], Is.Null);
+        }
+
+        [Test]
+        public void ALimitThatIncludesTheWholeWalkStillMakesAFullSnapshot()
+        {
+            var page = SceneHierarchy.Browse(ToolArgs.Of(("name", NamePrefix), ("limit", int.MaxValue)));
+            var result = Since(SnapshotOf(page));
+            Assert.That(result["error"], Is.Null);
+            Assert.That(Count(result, "added"), Is.Zero);
+            Assert.That(Count(result, "changed"), Is.Zero);
+        }
+
         [Test]
         public void AStillSceneDiffersFromItsOwnSnapshotInNothing()
         {
@@ -287,15 +391,6 @@ namespace UnityMCP.Editor.Tests
             {
                 UnityEngine.Object.DestroyImmediate(added);
             }
-        }
-
-        [Test]
-        public void ASnapshotTheEditorNoLongerHoldsIsAnErrorRatherThanAnEmptyDiff()
-        {
-            var result = Since("snap-does-not-exist");
-
-            Assert.That(result["error"], Is.Not.Null);
-            Assert.That(result["added"], Is.Null, "an empty diff would read as a still scene");
         }
 
         [Test]
@@ -462,6 +557,23 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void AnExpiredSnapshotIsAnsweredWithTheTreeRatherThanARoundTrip()
+        {
+            // A snapshot goes on every domain reload, and the walk that answers the diff has
+            // already run by the time the miss is known. An error here costs a round trip for a
+            // reply the caller has to be given anyway.
+            var result = SceneHierarchy.Browse(ToolArgs.Of(
+                ("name", NamePrefix), ("since", "snap-does-not-exist")));
+
+            Assert.That(result["error"], Is.Null);
+            Assert.That(result["scenes"], Is.Not.Null, "the tree stands in for the diff");
+            Assert.That(result["snapshotId"], Is.Not.Null, "and it can be diffed from next time");
+            Assert.That(result["sinceExpired"]?.ToString(), Is.EqualTo("snap-does-not-exist"),
+                "the reply has to say why it is a tree");
+            Assert.That(result["added"], Is.Null, "an empty diff would read as a still scene");
+        }
+
+        [Test]
         public void APagedDiffIsRefusedRatherThanAnsweredWrongly()
         {
             // The snapshot would hold one window and the next call another, so an object pushed
@@ -595,6 +707,93 @@ namespace UnityMCP.Editor.Tests
         private static JArray ChildrenOf(JObject node)
         {
             return node?["children"] as JArray;
+        }
+    /// <summary>
+        /// A filtered node says how many of its children the filter kept out.
+        /// </summary>
+        /// <remarks>
+        /// Filtering by a parent's name answered with the parent and nothing under it, which
+        /// reads as a leaf: a hands-on run took that for "the filter does not show children" and
+        /// fetched the whole scene instead of the three objects it was after.
+        /// </remarks>
+        [Test]
+        public void AMatchedParentSaysHowManyChildrenTheFilterLeftOut()
+        {
+            var parent = new GameObject("FilterParentProbe");
+
+            try
+            {
+                for (var i = 0; i < 3; i++)
+                {
+                    new GameObject("FilterChildProbe" + i).transform.SetParent(parent.transform);
+                }
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(("name", "FilterParentProbe")));
+                var node = FindNode(reply, "FilterParentProbe");
+
+                Assert.That(node, Is.Not.Null, "the filter has to match the parent itself");
+                Assert.That(node["children"], Is.Null, "its children do not match, so they are not here");
+                Assert.That(node["childrenNotShown"].Value<int>(), Is.EqualTo(3),
+                    "and the reply has to say that there are three of them");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        /// <summary>
+        /// One branch, rooted where the caller asked, and nothing from the rest of the scene.
+        /// </summary>
+        /// <remarks>
+        /// Without this the objects under a known object could only be reached by taking the
+        /// whole scene and finding them in it, which on a real scene is hundreds of thousands of
+        /// tokens for the sake of one subtree.
+        /// </remarks>
+        [Test]
+        public void ABranchCanBeReadOnItsOwn()
+        {
+            var reply = SceneHierarchy.Browse(ToolArgs.Of(("objectPath", "/" + RootName)));
+            var scenes = (JArray)reply["scenes"];
+            var roots = (JArray)((JObject)scenes[0])["gameObjects"];
+
+            Assert.That(scenes.Count, Is.EqualTo(1), "only the scene the object is in");
+            Assert.That(roots.Count, Is.EqualTo(1), "the object asked for is the only root");
+            Assert.That(((JObject)roots[0])["name"].Value<string>(), Is.EqualTo(RootName));
+
+            // The branch and nothing else: the fixture's root, its two children and the one
+            // grandchild, with none of whatever else the scene holds.
+            Assert.That(reply["total"].Value<int>(), Is.EqualTo(4));
+            Assert.That(reply.ToString(), Does.Contain(GrandchildName), "and what is under it");
+        }
+
+        /// <summary>A snapshot of one branch is not a snapshot of the scene.</summary>
+        [Test]
+        public void ABranchSnapshotIsNotComparedAgainstTheWholeScene()
+        {
+            var whole = SceneHierarchy.Browse(ToolArgs.Of());
+            var snapshot = whole["snapshotId"].Value<string>();
+
+            var refused = SceneHierarchy.Browse(ToolArgs.Of(
+                ("objectPath", "/" + RootName), ("since", snapshot)));
+
+            Assert.That(refused["error"]?.ToString(), Does.Contain("different arguments"));
+        }
+
+        private static JObject FindNode(JObject reply, string name)
+        {
+            foreach (var scene in (JArray)reply["scenes"])
+            {
+                foreach (JObject node in (JArray)scene["gameObjects"])
+                {
+                    if (node["name"].Value<string>() == name)
+                    {
+                        return node;
+                    }
+                }
+            }
+
+            return null;
         }
     }
 }

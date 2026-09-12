@@ -40,7 +40,7 @@ public sealed class ToolArgumentsTests
         var parsed = ArgParser.Parse(["call", "x", "--json", """{"limit":5,"type":"log"}""", "--limit", "20"]);
         var args = ToolArguments.Build("x", parsed);
 
-        Assert.Equal(20, args["limit"]!.GetValue<double>());
+        Assert.Equal(20, args["limit"]!.GetValue<long>());
         Assert.Equal("log", args["type"]!.GetValue<string>());
     }
 
@@ -74,5 +74,22 @@ public sealed class ToolArgumentsTests
 
         Assert.Equal("contents", args["code"]!.GetValue<string>());
         Assert.False(args.ContainsKey("code_base64"));
+    }
+
+    /// <summary>
+    /// A name given both as a value and bare keeps the values.
+    /// </summary>
+    /// <remarks>
+    /// A trailing '--type' has no word after it and reads as a flag, and the flags were applied
+    /// last: the list built from the values before it was replaced by true, and the tool answered
+    /// about an argument nobody typed.
+    /// </remarks>
+    [Fact]
+    public void ABareNameDoesNotReplaceTheValuesGivenForIt()
+    {
+        var parsed = ArgParser.Parse(["call", "x", "--type", "error", "--type", "log", "--type"]);
+        var args = ToolArguments.Build("x", parsed);
+
+        Assert.Equal("[\"error\",\"log\"]", args["type"]!.ToJsonString());
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 using Newtonsoft.Json.Linq;
@@ -22,6 +22,7 @@ namespace UnityMCP.Editor.Handlers
                 var activeOnly = parameters["activeOnly"]?.Value<bool>() ?? false;
                 var missingScriptsOnly = parameters["missingScripts"]?.Value<bool>() ?? false;
                 var sceneIndex = parameters["sceneIndex"]?.Value<int?>();
+                var objectPath = parameters["objectPath"]?.ToString();
 
                 // A limit of zero or less means every node, which is what an omitted limit
                 // becomes; offset skips that many nodes of the flattened traversal, and fields
@@ -43,12 +44,31 @@ namespace UnityMCP.Editor.Handlers
                 // them reports everything the narrower one leaves out as removed, which is a
                 // confident wrong answer about objects that are still in the scene.
                 var walk = WalkOf(nameFilter, componentFilter, tagFilter, maxDepth,
-                    activeOnly, missingScriptsOnly, sceneIndex, fieldsFilter);
+                    activeOnly, missingScriptsOnly, sceneIndex, objectPath, fieldsFilter);
+
+                string expired = null;
 
                 if (diffing)
                 {
                     var takenUnder = SceneHierarchyBaseline.WalkOf(since);
-                    if (takenUnder != null && !string.Equals(takenUnder, walk, StringComparison.Ordinal))
+
+                    if (takenUnder == null)
+                    {
+                        // The snapshot is gone, and a snapshot goes on every domain reload, which
+                        // is every compile and every play-mode transition. The walk about to
+                        // happen is the same one a fresh read would do, so refusing here would
+                        // spend a round trip to be asked for a reply already in hand.
+                        expired = since;
+                        diffing = false;
+                    }
+                    else if (SceneHierarchyBaseline.IsPartial(since))
+                    {
+                        return new JObject
+                        {
+                            ["error"] = $"snapshot '{since}' covers only a page. Take a full one by reading without since, limit and offset. A scene too large to return whole narrows with 'name', 'component', 'tag', 'max_depth' or 'fields' instead: those keep the snapshot complete for what they select, where limit and offset leave it a page."
+                        };
+                    }
+                    else if (!string.Equals(takenUnder, walk, StringComparison.Ordinal))
                     {
                         return new JObject
                         {
@@ -94,23 +114,40 @@ namespace UnityMCP.Editor.Handlers
                 var startIndex = sceneIndex ?? 0;
                 var endIndex = sceneIndex.HasValue ? sceneIndex.Value + 1 : sceneCount;
 
-                for (var si = startIndex; si < endIndex; si++)
+                void Walk(Transform root, int si)
                 {
-                    var scene = SceneManager.GetSceneAt(si);
-                    if (!scene.isLoaded) continue;
-
-                    var rootObjects = scene.GetRootGameObjects();
-                    foreach (var root in rootObjects)
+                    if (hasFilter)
                     {
-                        if (hasFilter)
+                        var tree = BuildTreeNode(root, 0, maxDepth);
+                        MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
+                        CollectFilteredFlat(tree, si, -1, flat);
+                    }
+                    else
+                    {
+                        CollectFlat(root, 0, maxDepth, si, -1, flat);
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(objectPath))
+                {
+                    // One branch rather than every root. Without this, the objects under a known
+                    // object could only be reached by taking the whole tree and finding them in
+                    // it, which on a real scene is the whole scene for the sake of one subtree.
+                    var start = UnityMCP.Editor.Tools.ObjectResolve.Object(
+                        objectPath, null, "object_path", null);
+
+                    Walk(start.transform, SceneIndexOf(start.scene));
+                }
+                else
+                {
+                    for (var si = startIndex; si < endIndex; si++)
+                    {
+                        var scene = SceneManager.GetSceneAt(si);
+                        if (!scene.isLoaded) continue;
+
+                        foreach (var root in scene.GetRootGameObjects())
                         {
-                            var tree = BuildTreeNode(root.transform, 0, maxDepth);
-                            MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
-                            CollectFilteredFlat(tree, si, -1, flat);
-                        }
-                        else
-                        {
-                            CollectFlat(root.transform, 0, maxDepth, si, -1, flat);
+                            Walk(root.transform, si);
                         }
                     }
                 }
@@ -120,13 +157,14 @@ namespace UnityMCP.Editor.Handlers
                 var effectiveLimit = limit <= 0 ? int.MaxValue : limit;
                 JObject page;
                 projecting = flat;
+                var paths = new UnityMCP.Editor.Tools.ObjectResolve.PathBatch();
                 try
                 {
                     page = ListResponseBuilder.Build(
                         flat,
                         offset,
                         effectiveLimit,
-                        ProjectFlatNode,
+                        node => ProjectFlatNode(node, paths),
                         fieldsFilter,
                         IdentityField
                     );
@@ -145,7 +183,8 @@ namespace UnityMCP.Editor.Handlers
                 // for the difference from it. Taken before the page is re-nested, because the
                 // rebuild moves the nodes into the tree, and before the two keys below are
                 // dropped, because a comparison has to see everything that can change.
-                var snapshotId = SceneHierarchyBaseline.Remember(walk, Peek(page));
+                var snapshotId = SceneHierarchyBaseline.Remember(walk, Peek(page),
+                    partial: offset > 0 || page["truncated"].Value<bool>());
 
                 // The tree says both of these already: `scenes` groups by scene and `children`
                 // names the parent. Carried per node they were 40% of the response.
@@ -166,6 +205,13 @@ namespace UnityMCP.Editor.Handlers
                     ["truncated"] = page["truncated"],
                     ["next"] = page["next"]
                 };
+
+                if (expired != null)
+                {
+                    // Why this is a tree when a difference was asked for. Without it the reply
+                    // reads as the caller having forgotten to pass 'since'.
+                    result["sinceExpired"] = expired;
+                }
 
                 return result;
             }
@@ -220,12 +266,27 @@ namespace UnityMCP.Editor.Handlers
         /// </summary>
         private static string WalkOf(
             string name, string component, string tag, int maxDepth,
-            bool activeOnly, bool missingScriptsOnly, int? sceneIndex, string[] fields)
+            bool activeOnly, bool missingScriptsOnly, int? sceneIndex, string objectPath,
+            string[] fields)
         {
             var joined = fields == null ? string.Empty : string.Join(",", fields);
             return $"name={name}|component={component}|tag={tag}|maxDepth={maxDepth}" +
                    $"|activeOnly={activeOnly}|missingScripts={missingScriptsOnly}" +
-                   $"|sceneIndex={sceneIndex}|fields={joined}";
+                   $"|sceneIndex={sceneIndex}|objectPath={objectPath}|fields={joined}";
+        }
+
+        /// <summary>Which open scene this one is, so a subtree reports the index its nodes carry.</summary>
+        private static int SceneIndexOf(Scene scene)
+        {
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                if (SceneManager.GetSceneAt(i) == scene)
+                {
+                    return i;
+                }
+            }
+
+            return 0;
         }
 
         /// <summary>
@@ -295,6 +356,14 @@ namespace UnityMCP.Editor.Handlers
             public GameObject Go;
             public int SceneIndex;
             public int ParentIndex; // index into the flat list, or -1 for roots.
+
+            /// <summary>Children a filter kept out of the reply.</summary>
+            /// <remarks>
+            /// A filter matching a parent returns it with no children at all, which reads as a
+            /// leaf: asking for "Platform" answered with Platforms and nothing under it, and the
+            /// caller fetched the whole scene rather than the three plates it was after.
+            /// </remarks>
+            public int ChildrenNotShown;
         }
 
         private static void CollectFlat(
@@ -332,15 +401,23 @@ namespace UnityMCP.Editor.Handlers
             if (!node.Matched && !node.AncestorOfMatch) return;
 
             var myIndex = flat.Count;
-            flat.Add(new FlatNode
+            var mine = new FlatNode
             {
                 Go = node.Go,
                 SceneIndex = sceneIndex,
                 ParentIndex = parentIndex
-            });
+            };
+
+            flat.Add(mine);
 
             foreach (var child in node.Children)
             {
+                if (!child.Matched && !child.AncestorOfMatch)
+                {
+                    mine.ChildrenNotShown++;
+                    continue;
+                }
+
                 CollectFilteredFlat(child, sceneIndex, myIndex, flat);
             }
         }
@@ -360,7 +437,7 @@ namespace UnityMCP.Editor.Handlers
         [ThreadStatic]
         private static List<FlatNode> projecting;
 
-        private static JObject ProjectFlatNode(FlatNode n)
+        private static JObject ProjectFlatNode(FlatNode n, UnityMCP.Editor.Tools.ObjectResolve.PathBatch paths)
         {
             // The nested structure is rebuilt in RebuildScenesFromPage, so we
             // emit only the node-level keys here. ListResponseBuilder applies
@@ -372,7 +449,7 @@ namespace UnityMCP.Editor.Handlers
                 // The identifier every authoring tool takes. Without it a caller who has just
                 // browsed the hierarchy has to guess at the path of the thing they are looking
                 // at, and guesses fail on any name that repeats among siblings.
-                ["path"] = UnityMCP.Editor.Tools.ObjectResolve.PathOf(go),
+                ["path"] = paths.PathOf(go),
                 ["instanceId"] = EntityIdCompat.WireIdOf(go),
                 // A path carries an index only where a sibling name repeats, so without this a
                 // reorder is invisible — and it decides draw order under a Canvas.
@@ -400,16 +477,28 @@ namespace UnityMCP.Editor.Handlers
                 node["tag"] = go.tag;
             }
 
+            // An unnamed layer has no name to give, and reporting the empty string tells the
+            // caller only that it is not Default — which is the moment they most need to know
+            // which one it is, because an object on an unnamed layer is usually one nothing draws.
             var layer = LayerMask.LayerToName(go.layer);
-            if (!string.Equals(layer, "Default", StringComparison.Ordinal))
+
+            if (string.IsNullOrEmpty(layer))
+            {
+                node["layer"] = go.layer;
+            }
+            else if (!string.Equals(layer, "Default", StringComparison.Ordinal))
             {
                 node["layer"] = layer;
             }
 
             // Never empty: every GameObject carries a Transform.
-            node["components"] = GetComponentNames(go);
+            node["components"] = GetComponentNames(go, out var missing);
 
-            var missing = MissingScriptCount(go);
+            if (n.ChildrenNotShown > 0)
+            {
+                node["childrenNotShown"] = n.ChildrenNotShown;
+            }
+
             if (missing > 0)
             {
                 node["missingScripts"] = missing;
@@ -616,9 +705,10 @@ namespace UnityMCP.Editor.Handlers
             }
         }
 
-        private static JArray GetComponentNames(GameObject go)
+        private static JArray GetComponentNames(GameObject go, out int missing)
         {
             var arr = new JArray();
+            missing = 0;
             foreach (var comp in go.GetComponents<Component>())
             {
                 // A component that reads as null is a MonoBehaviour whose script Unity cannot
@@ -626,6 +716,7 @@ namespace UnityMCP.Editor.Handlers
                 // Naming it is the difference between an agent explaining a broken avatar and
                 // reporting a null it cannot account for.
                 arr.Add(comp != null ? comp.GetType().Name : MissingScript);
+                if (comp == null) missing++;
             }
             return arr;
         }

@@ -1,4 +1,4 @@
-namespace IsuzuUnityCli.Cli;
+﻿namespace IsuzuUnityCli.Cli;
 
 public static class Usage
 {
@@ -10,12 +10,13 @@ public static class Usage
 
         COMMANDS
           projects                       List Editors that are currently running
-          tools                          List the tools the Editor publishes
+          tools [exact-name]             List tools, or print one tool's full schema as JSON
+                                         With a name the output is the same with or without --raw
           call <tool> [args]             Invoke a tool
           verify                         Recompile, optionally run the tests, read the console,
                                          and answer with one exit code
           health                         Show the Editor's server status
-          jobs [id]                      List background jobs, or show one
+          jobs [id]                      List background jobs, show one, or wait for one to end
           mcp-stdio                      Bridge stdio to the Editor's MCP endpoint (for MCP clients)
 
           setup                          Register with an MCP client and install the skill
@@ -25,7 +26,9 @@ public static class Usage
 
         CALL ARGUMENTS
           --json '<object>'              Arguments as one JSON object
-          --<name> <value>               Individual argument; repeatable
+          --<name> <value>               Individual argument. Naming one twice sends a list, which
+                                         is how an array is typed where quotes do not survive:
+                                         --paths one --paths two
           --file <path>                  For execute_code: read the snippet from a file and
                                          send it base64-encoded, so nothing can mangle it
 
@@ -40,9 +43,12 @@ public static class Usage
           --version                      Show the version
           -h, --help                     Show this help
 
-        TOOLS OPTIONS
-          --group <g>[,<g>]              Only list these groups: diagnostics, authoring,
-                                         rendering, timeline, build, code, input
+        TOOLS AND MCP-STDIO OPTIONS
+          --group <g>[,<g>]              Only these groups: diagnostics, authoring, rendering,
+                                         timeline, build, code, input. On mcp-stdio it narrows
+                                         what the client is offered, which it otherwise pays for
+                                         on every request: every tool together is about 40,000 tokens
+                                         and diagnostics alone is about 9,500
 
         VERIFY OPTIONS
           --no-compile                   Skip the compile step
@@ -55,9 +61,19 @@ public static class Usage
           --logs <n>                     How many console errors to report; defaults to 20
           --raw                          Print the JSON summary instead of the short report
 
-          Exit codes: 0 verified, 1 compile or tests failed, 3 no Editor or an ambiguous
-          one, 4 timed out. Console errors are reported but never fail the run, because
-          entries from earlier in the session linger.
+          Exit codes: 0 verified, 1 compile or tests failed, 2 an option is wrong, 3 no
+          Editor or an ambiguous one, 4 timed out. Console errors are reported but never
+          fail the run, because entries from earlier in the session linger.
+
+        JOBS OPTIONS
+          --wait                         Poll until the job ends and print only its last answer.
+                                         Needs an id. What holds the Editor up is reported on
+                                         stderr while the wait lasts
+          --timeout <seconds>            Give up waiting after this long; defaults to 300. The job
+                                         itself keeps running in the Editor
+
+          Exit codes: 0 the job completed, 1 it failed or was cancelled, 2 an option is wrong,
+          3 no Editor or an ambiguous one, 4 the wait timed out.
 
         ENVIRONMENT
           UNITY_MCP_STATE_DIR            Where the Editor writes its descriptors, when that is
@@ -94,12 +110,13 @@ public static class Usage
         DOCTOR OPTIONS
           --fix                          Reinstall stale skills and rewrite stale MCP entries
 
+        UPGRADE OPTIONS
+          --release <tag>                Install this release instead of the newest, e.g. v4.1.1.
+                                         The way back when a new one turns out to be broken.
+
         UNINSTALL OPTIONS
           --yes                          Actually remove, rather than listing what would be removed
           --no-skill                     Leave installed skills alone
-
-        UPGRADE OPTIONS
-          --version <tag>                Install a specific release, e.g. v4.0.0
 
         EXAMPLES
           isuzu-unity-cli setup
@@ -107,12 +124,14 @@ public static class Usage
           isuzu-unity-cli projects
           isuzu-unity-cli tools
           isuzu-unity-cli tools --group timeline,rendering
+          isuzu-unity-cli tools compile_status
           isuzu-unity-cli verify
           isuzu-unity-cli verify --test --assembly UnityMCP.Editor.Tests
           isuzu-unity-cli call play_mode_status
           isuzu-unity-cli call console_read_logs --type error --limit 20
           isuzu-unity-cli call scene_browse_hierarchy --json '{"name":"Player","limit":5}'
           isuzu-unity-cli call execute_code --file snippet.cs
+          isuzu-unity-cli jobs execute_code-3f2a-1 --wait
           isuzu-unity-cli doctor --fix
           isuzu-unity-cli uninstall --yes
         """;

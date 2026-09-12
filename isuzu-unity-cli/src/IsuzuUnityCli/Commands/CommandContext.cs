@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Http;
@@ -71,11 +71,38 @@ public sealed class CommandContext
             return 1;
         }
 
-        var written = InlineImage.Externalise(envelope.Result, CaptureDirectory);
-        JsonOutput.Print(Out, envelope.Result, Indented);
+        var result = WithPaging(envelope);
+        var written = InlineImage.Externalise(result, CaptureDirectory);
+        JsonOutput.Print(Out, result, Indented);
         ReportWritten(written);
         ReportRunning(envelope);
         return 0;
+    }
+
+    /// <summary>Puts the envelope's paging keys back on the result before it is printed.</summary>
+    /// <remarks>
+    /// The Editor hoists 'truncated' and 'next' out of the result and onto the envelope, and only
+    /// --raw prints the envelope. Without this a listing that stopped early prints exactly like a
+    /// complete one, and the caller never learns that there is more.
+    /// </remarks>
+    private static JsonNode? WithPaging(Envelope envelope)
+    {
+        if (envelope.Raw is not JsonObject raw || envelope.Result is not JsonObject result)
+        {
+            return envelope.Result;
+        }
+
+        foreach (var name in new[] { "truncated", "next" })
+        {
+            if (raw[name] is { } value && result[name] is null)
+            {
+                // DeepClone: a JsonNode already has the envelope as its parent, and assigning it
+                // a second one throws.
+                result[name] = value.DeepClone();
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Names the file a picture went to, on stderr so it stays out of the JSON.</summary>

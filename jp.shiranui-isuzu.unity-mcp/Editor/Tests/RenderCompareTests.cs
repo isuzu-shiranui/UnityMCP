@@ -25,6 +25,18 @@ namespace UnityMCP.Editor.Tests
     [TestFixture]
     internal sealed class RenderCompareTests
     {
+        [Test]
+        public void LockedInputDoesNotAllocateALeakedTexture()
+        {
+            var path = Path.Combine(this.directory, "locked.png");
+            File.WriteAllBytes(path, new byte[] { 1 });
+            var before = UnityEngine.Resources.FindObjectsOfTypeAll<Texture2D>().Length;
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                Assert.Throws<IOException>(() => RenderTools.Compare(path, path));
+            }
+            Assert.That(UnityEngine.Resources.FindObjectsOfTypeAll<Texture2D>().Length, Is.EqualTo(before));
+        }
         private string directory;
 
         [SetUp]

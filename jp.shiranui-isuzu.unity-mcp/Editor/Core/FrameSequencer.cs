@@ -71,6 +71,28 @@ namespace UnityMCP.Editor.Core
             return item;
         }
 
+        /// <summary>Whether a sequence started under <paramref name="label"/> is still waiting.</summary>
+        /// <remarks>
+        /// A caller that queued work for a later frame has no other way to ask whether it has run:
+        /// cancellation and a domain reload both empty this list, so an answer here cannot outlive
+        /// the sequence it describes.
+        /// </remarks>
+        public static bool IsRunning(string label)
+        {
+            lock (Gate)
+            {
+                foreach (var sequence in Active)
+                {
+                    if (string.Equals(sequence.Label, label, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         /// <summary>
         /// Fails every active sequence. Called when the server stops and before a domain
         /// reload, so a waiting request gets an answer instead of blocking for its full window

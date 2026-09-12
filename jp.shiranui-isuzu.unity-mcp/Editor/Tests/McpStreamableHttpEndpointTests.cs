@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -18,6 +18,33 @@ namespace UnityMCP.Editor.Tests
     [TestFixture]
     internal sealed class McpStreamableHttpEndpointTests
     {
+        [Test]
+        public void RequestBodyLimitRefusesDeclaredOversizeBeforeReading()
+        {
+            using var body = new System.IO.MemoryStream(new byte[1]);
+            var error = Assert.Throws<McpToolException>(() => McpHttpServer.ReadRequestBody(
+                body, System.Text.Encoding.UTF8, McpHttpServer.MaxRequestBodyBytes + 1L));
+            Assert.That(error.HttpStatus, Is.EqualTo(413));
+            Assert.That(body.Position, Is.Zero);
+        }
+
+        [Test]
+        public void RequestBodyLimitAlsoBoundsUnknownLengthStreams()
+        {
+            using var body = new System.IO.MemoryStream(new byte[McpHttpServer.MaxRequestBodyBytes + 100]);
+            var error = Assert.Throws<McpToolException>(() => McpHttpServer.ReadRequestBody(body, System.Text.Encoding.UTF8, -1));
+            Assert.That(error.Code, Is.EqualTo("request_too_large"));
+            Assert.That(body.Position, Is.EqualTo(McpHttpServer.MaxRequestBodyBytes + 1L));
+        }
+
+        [Test]
+        public void RequestBodyLimitAllowsExactBoundaryAndPreservesUtf8()
+        {
+            var text = "あ" + new string('x', McpHttpServer.MaxRequestBodyBytes - 3);
+            using var body = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
+            Assert.That(McpHttpServer.ReadRequestBody(body, System.Text.Encoding.UTF8, -1), Is.EqualTo(text));
+        }
+
         private static class Tools
         {
             [McpTool("ep_echo", "Echoes text.", Idempotency = McpIdempotency.Safe, MainThread = false)]
@@ -25,6 +52,14 @@ namespace UnityMCP.Editor.Tests
 
             [McpTool("ep_delete", "Deletes something.", Destructive = true, MainThread = false)]
             public static void Delete([McpArg("path", "Path")] string path) => _ = path;
+
+            [McpTool(
+                "ep_big",
+                "Answers with more than it declares.",
+                Idempotency = McpIdempotency.Safe,
+                MainThread = false,
+                MaxResultSizeChars = 64)]
+            public static JObject Big() => new JObject { ["text"] = new string('x', 500) };
 
             [McpTool("ep_shot", "Returns a capture.", Idempotency = McpIdempotency.Safe, MainThread = false)]
             public static JObject Shot() => new JObject
@@ -77,6 +112,85 @@ namespace UnityMCP.Editor.Tests
         }
 
         private ToolCatalog catalog;
+
+        [TestCase("jsonrpc", "[]", -32600)]
+        [TestCase("id", "{}", -32600)]
+        [TestCase("id", "true", -32600)]
+        [TestCase("id", "null", -32600)]
+        [TestCase("id", "1.5", -32600)]
+        [TestCase("params", "[]", -32602)]
+        [TestCase("params", "null", -32602)]
+        [TestCase("arguments", "[]", -32602)]
+        [TestCase("arguments", "null", -32602)]
+        [TestCase("arguments", "\"bad\"", -32602)]
+        public void MalformedTokensAreRejectedBeforeInvocation(string field, string value, int code)
+        {
+            var called = false;
+            var guarded = new McpStreamableHttpEndpoint(() => this.catalog, (_, __) =>
+            {
+                called = true;
+                throw new Exception("must not invoke malformed request");
+            }, () => "test");
+            var request = JObject.Parse(Request(1, "tools/call", new JObject { ["name"] = "ep_echo" }));
+            if (field == "arguments") ((JObject)request["params"])[field] = JToken.Parse(value);
+            else request[field] = JToken.Parse(value);
+            var response = guarded.Handle("POST", Headers(), request.ToString());
+            Assert.That(response.Body["error"]["code"].Value<int>(), Is.EqualTo(code));
+            Assert.That(called, Is.False);
+        }
+
+        [Test]
+        public void InvalidInitializeVersionIsAProtocolError()
+        {
+            var response = this.Post(Request(1, "initialize", new JObject { ["protocolVersion"] = new JArray() }));
+            Assert.That(response.Body["error"]["code"].Value<int>(), Is.EqualTo(-32602));
+        }
+
+        private static class MultipleImageTools
+        {
+            public static JObject LastResult;
+            [McpTool("ep_images", "Several captures.", MainThread = false)]
+            public static JObject Images() => LastResult = new JObject
+            {
+                ["captures"] = new JArray(Tools.Shot(), Tools.ShotNested()),
+                ["image"] = "ordinary text",
+            };
+        }
+
+        [Test]
+        public void EveryNestedImageTravelsAsImageContentWithoutMutatingTheResult()
+        {
+            var multiple = ToolCatalog.BuildFromTypes(new[] { typeof(MultipleImageTools) });
+            var runner = new ToolCallRunner(this.dispatcher, this.jobs, () => 250);
+            var endpoint = new McpStreamableHttpEndpoint(() => multiple, runner.Run, () => "test");
+            var response = endpoint.Handle("POST", Headers(), Request(1, "tools/call", new JObject { ["name"] = "ep_images" }));
+            var content = (JArray)response.Body["result"]["content"];
+            Assert.That(content.Count, Is.EqualTo(3));
+            Assert.That(content.Skip(1).All(c => c["type"].Value<string>() == "image"), Is.True);
+            Assert.That(content[0]["text"].Value<string>(), Does.Not.Contain("iVBORw0KGgpyZXN0"));
+            Assert.That(content[0]["text"].Value<string>(), Does.Contain("ordinary text"));
+            Assert.That(MultipleImageTools.LastResult["captures"][0]["image"], Is.Not.Null);
+        }
+
+        private static class GroupedTools
+        {
+            [McpTool("ep_code", "Code tool.", Group = "code", MainThread = false)]
+            public static int Code() => 1;
+            [McpTool("job_status", "Poll a job.", MainThread = false)]
+            public static int Job() => 1;
+            [McpTool("ep_diagnostic", "Another diagnostic.", Group = "diagnostics", MainThread = false)]
+            public static int Diagnostic() => 1;
+        }
+
+        [Test]
+        public void FilteredMcpCatalogKeepsOnlyTheJobPollingHelperFromDiagnostics()
+        {
+            var grouped = ToolCatalog.BuildFromTypes(new[] { typeof(GroupedTools) });
+            var mcp = JArray.Parse(System.Text.Encoding.UTF8.GetString(grouped.ToolsArrayUtf8(new[] { "code" }, true)));
+            Assert.That(mcp.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_code", "job_status" }));
+            Assert.That(grouped.Select(new[] { "code" }).Select(t => t.Name), Is.EquivalentTo(new[] { "ep_code" }),
+                "REST/CLI group selection does not need the MCP-only helper");
+        }
         private McpMainThreadDispatcher dispatcher;
         private McpJobRegistry jobs;
         private McpStreamableHttpEndpoint endpoint;
@@ -92,6 +206,12 @@ namespace UnityMCP.Editor.Tests
         }
 
         /// <summary>
+        /// <summary>The JSON a client reads back out of the text block.</summary>
+        private static JObject Answered(JToken result)
+        {
+            return JObject.Parse(result["content"][0]["text"].Value<string>());
+        }
+
         /// A capture's PNG has to travel as image content. Left in the JSON it is a wall of text
         /// a model cannot look at, and one small screenshot fills a reply on its own.
         /// </summary>
@@ -118,10 +238,10 @@ namespace UnityMCP.Editor.Tests
             Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
             Assert.That(content[1]["mimeType"].Value<string>(), Is.EqualTo("image/png"));
 
-            Assert.That(result["structuredContent"]["image"], Is.Null,
+            Assert.That(Answered(result)["image"], Is.Null,
                 "keeping it here sent the same picture twice, once priced by size and once by area");
-            Assert.That(result["structuredContent"]["width"], Is.Not.Null,
-                "everything else about the capture still belongs in the structured copy");
+            Assert.That(Answered(result)["width"], Is.Not.Null,
+                "everything else about the capture still travels with it");
         }
 
         /// <summary>
@@ -147,8 +267,8 @@ namespace UnityMCP.Editor.Tests
             Assert.That(content[1]["type"].Value<string>(), Is.EqualTo("image"));
             Assert.That(content[1]["data"].Value<string>(), Is.EqualTo("iVBORw0KGgpyZXN0"));
 
-            Assert.That(result["structuredContent"]["capture"]["image"], Is.Null);
-            Assert.That(result["structuredContent"]["capture"]["view"].Value<string>(),
+            Assert.That(Answered(result)["capture"]["image"], Is.Null);
+            Assert.That(Answered(result)["capture"]["view"].Value<string>(),
                 Is.EqualTo("game"));
         }
 
@@ -169,8 +289,8 @@ namespace UnityMCP.Editor.Tests
 
             Assert.That(result["content"][0]["text"].Value<string>(),
                 Does.Contain("No active scene view found"));
-            Assert.That(result["structuredContent"], Is.Null,
-                "a failure carries no structured result");
+            Assert.That(result["isError"].Value<bool>(), Is.True,
+                "a handler that refused is not a successful call");
         }
 
         /// <summary>
@@ -191,10 +311,12 @@ namespace UnityMCP.Editor.Tests
             var result = response.Body["result"];
 
             Assert.That(result["isError"], Is.Null, "fetching a failed job's detail succeeded");
-            Assert.That(result["structuredContent"], Is.Not.Null);
-            Assert.That(result["structuredContent"]["status"].Value<string>(), Is.EqualTo("failed"));
-            Assert.That(result["structuredContent"]["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
-            Assert.That(result["structuredContent"]["error"].Value<string>(), Is.EqualTo("the tool threw"));
+
+            var detail = Answered(result);
+
+            Assert.That(detail["status"].Value<string>(), Is.EqualTo("failed"));
+            Assert.That(detail["id"].Value<string>(), Is.EqualTo("ep_slow-1"));
+            Assert.That(detail["error"].Value<string>(), Is.EqualTo("the tool threw"));
         }
 
         /// <summary>
@@ -348,7 +470,7 @@ namespace UnityMCP.Editor.Tests
             var response = this.Post(Request(1, "tools/list"));
 
             var tools = ToolsOf(response);
-            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_shot", "ep_shot_nested", "ep_refused", "ep_job_detail", "ep_shot_job" }));
+            Assert.That(tools.Select(t => t["name"].Value<string>()), Is.EquivalentTo(new[] { "ep_echo", "ep_delete", "ep_big", "ep_shot", "ep_shot_nested", "ep_refused", "ep_job_detail", "ep_shot_job" }));
 
             var echo = tools.Single(t => t["name"].Value<string>() == "ep_echo");
             Assert.That(echo["annotations"]["readOnlyHint"].Value<bool>(), Is.True);
@@ -385,7 +507,7 @@ namespace UnityMCP.Editor.Tests
             Assert.That(result["isError"], Is.Null);
             Assert.That(result["content"][0]["type"].Value<string>(), Is.EqualTo("text"));
             Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain("\"hi\""));
-            Assert.That(result["structuredContent"]["result"].Value<string>(), Is.EqualTo("hi"));
+            Assert.That(Answered(result)["result"].Value<string>(), Is.EqualTo("hi"));
         }
 
         [Test]
@@ -404,6 +526,25 @@ namespace UnityMCP.Editor.Tests
             var result = response.Body["result"];
             Assert.That(result["isError"].Value<bool>(), Is.True);
             Assert.That(result["content"][0]["text"].Value<string>(), Does.StartWith("Error [confirmation_required]"));
+        }
+
+        /// <summary>
+        /// A reply refused for its size is an error, not the answer.
+        /// </summary>
+        /// <remarks>
+        /// Sent as an ordinary result, the explanation arrives where the data was expected and
+        /// the call reads as a success: a model takes the sentence about narrowing the query for
+        /// the query's output, and a client that checks isError sees nothing wrong.
+        /// </remarks>
+        [Test]
+        public void AResultRefusedForItsSizeIsAToolError()
+        {
+            var response = this.Post(Request(1, "tools/call", new JObject { ["name"] = "ep_big" }));
+
+            var result = response.Body["result"];
+
+            Assert.That(result["isError"].Value<bool>(), Is.True);
+            Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain("ep_big"));
         }
 
         [Test]
@@ -445,11 +586,14 @@ namespace UnityMCP.Editor.Tests
 
             var response = slowEndpoint.Handle("POST", Headers(), Request(1, "tools/call", new JObject { ["name"] = "ep_main" }));
 
-            var result = response.Body["result"];
-            var jobId = result["structuredContent"]["jobId"].Value<string>();
-            Assert.That(result["structuredContent"]["state"].Value<string>(), Is.EqualTo("running"));
-            Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain(jobId).And.Contain("job_status"));
-            Assert.That(this.jobs.TryGet(jobId, out _), Is.True);
+            var text = response.Body["result"]["content"][0]["text"].Value<string>();
+
+            Assert.That(text, Does.Contain("Still running").And.Contain("job_status"));
+
+            var named = System.Text.RegularExpressions.Regex.Match(text, "\"([^\"]+)\"");
+
+            Assert.That(named.Success, Is.True, "the text names the job to poll");
+            Assert.That(this.jobs.TryGet(named.Groups[1].Value, out _), Is.True);
         }
 
         [Test]
@@ -464,7 +608,6 @@ namespace UnityMCP.Editor.Tests
 
             var result = response.Body["result"];
             Assert.That(result["content"][0]["text"].Value<string>(), Does.EndWith(" The Editor is showing a dialog \"Probe\"."));
-            Assert.That(result["structuredContent"]["message"].Value<string>(), Is.EqualTo("The Editor is showing a dialog \"Probe\"."));
         }
 
         private static class MainThreadTools
