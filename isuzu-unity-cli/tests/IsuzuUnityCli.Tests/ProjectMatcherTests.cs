@@ -290,12 +290,18 @@ public sealed class ProjectMatcherTests
         Assert.StartsWith("No running Editor has", e.Message);
     }
 
+    /// <summary>
+    /// The working directory is compared the way .NET compares paths on the host: without case on
+    /// Windows and macOS, whose file systems ignore it by default, and with case on Linux.
+    /// </summary>
     [Fact]
-    public void CaseInsensitiveOnlyOnWindows()
+    public void TheWorkingDirectoryIgnoresCaseOnlyWhereTheHostDoes()
     {
         var root = Path.Combine(Path.GetTempPath(), "Game");
         var upper = Path.Combine(Path.GetTempPath(), "GAME", "Assets");
 
-        Assert.Equal(OperatingSystem.IsWindows(), ProjectMatcher.IsInside(upper, Path.Combine(root, "Assets")));
+        Assert.Equal(
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS(),
+            ProjectMatcher.IsInside(upper, Path.Combine(root, "Assets")));
     }
 }

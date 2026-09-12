@@ -45,8 +45,8 @@ public static class ProjectMatcher
             return false;
         }
 
-        // GetRelativePath compares case-insensitively on Windows and returns an absolute path
-        // when the two are on different drives.
+        // GetRelativePath compares case-insensitively on Windows and macOS, and returns an
+        // absolute path when the two are on different drives.
         var relative = Path.GetRelativePath(root, Path.GetFullPath(directory));
 
         return relative == "."
