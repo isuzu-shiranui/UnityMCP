@@ -114,11 +114,18 @@ namespace UnityMCP.Editor.Handlers
                 var startIndex = sceneIndex ?? 0;
                 var endIndex = sceneIndex.HasValue ? sceneIndex.Value + 1 : sceneCount;
 
+                // Counted across every root, matched or not. A filter drops the nodes it did not
+                // match, and with them the only record that the walk stopped above something: a
+                // reply naming nothing then reads as "it is not in the scene" rather than "the
+                // walk never went that deep".
+                var belowMaxDepth = 0;
+
                 void Walk(Transform root, int si)
                 {
                     if (hasFilter)
                     {
                         var tree = BuildTreeNode(root, 0, maxDepth);
+                        belowMaxDepth += BelowDepthIn(tree);
                         MarkMatches(tree, nameFilter, componentFilter, tagFilter, activeOnly, missingScriptsOnly);
                         CollectFilteredFlat(tree, si, -1, flat);
                     }
@@ -152,6 +159,16 @@ namespace UnityMCP.Editor.Handlers
                     }
                 }
 
+                // An unfiltered walk keeps the same number on the nodes themselves, where a
+                // filtered one cannot. Totalled here either way, so the key means one thing.
+                if (!hasFilter)
+                {
+                    foreach (var node in flat)
+                    {
+                        belowMaxDepth += node.ChildrenNotShown;
+                    }
+                }
+
                 // 2. Apply offset/limit and project to JObjects via ListResponseBuilder.
                 var total = flat.Count;
                 var effectiveLimit = limit <= 0 ? int.MaxValue : limit;
@@ -176,7 +193,7 @@ namespace UnityMCP.Editor.Handlers
 
                 if (diffing)
                 {
-                    return Changes(since, walk, page, total);
+                    return Changes(since, walk, page, total, belowMaxDepth);
                 }
 
                 // A snapshot of what is about to be described, named so the next call can ask
@@ -206,6 +223,11 @@ namespace UnityMCP.Editor.Handlers
                     ["next"] = page["next"]
                 };
 
+                if (belowMaxDepth > 0)
+                {
+                    result["belowMaxDepth"] = belowMaxDepth;
+                }
+
                 if (expired != null)
                 {
                     // Why this is a tree when a difference was asked for. Without it the reply
@@ -233,7 +255,7 @@ namespace UnityMCP.Editor.Handlers
         /// diff is a list of what moved, and nesting it would carry back the parents that did
         /// not move, which is the cost this mode exists to avoid.
         /// </summary>
-        private static JObject Changes(string since, string walk, JObject page, int total)
+        private static JObject Changes(string since, string walk, JObject page, int total, int belowMaxDepth)
         {
             var nodes = Detach(page);
             var diff = SceneHierarchyBaseline.CompareWith(since, walk, nodes, out var snapshotId);
@@ -246,7 +268,7 @@ namespace UnityMCP.Editor.Handlers
                 };
             }
 
-            return new JObject
+            var answer = new JObject
             {
                 ["snapshotId"] = snapshotId,
                 ["since"] = since,
@@ -258,6 +280,13 @@ namespace UnityMCP.Editor.Handlers
                 ["truncated"] = page["truncated"],
                 ["next"] = page["next"],
             };
+
+            if (belowMaxDepth > 0)
+            {
+                answer["belowMaxDepth"] = belowMaxDepth;
+            }
+
+            return answer;
         }
 
         /// <summary>
@@ -626,6 +655,19 @@ namespace UnityMCP.Editor.Handlers
             /// children that exist and so cannot tell a leaf from a walk that stopped.
             /// </remarks>
             public int ChildrenBelowDepth;
+        }
+
+        /// <summary>How many children the depth limit kept this tree from holding.</summary>
+        private static int BelowDepthIn(TreeNode node)
+        {
+            var total = node.ChildrenBelowDepth;
+
+            foreach (var child in node.Children)
+            {
+                total += BelowDepthIn(child);
+            }
+
+            return total;
         }
 
         private static TreeNode BuildTreeNode(Transform transform, int depth, int maxDepth)

@@ -830,6 +830,50 @@ namespace UnityMCP.Editor.Tests
         }
 
         /// <summary>
+        /// A filter that matched nothing says whether the walk looked everywhere.
+        /// </summary>
+        /// <remarks>
+        /// The filter drops the nodes it did not match, and with them every record that the walk
+        /// stopped above something. Without a count the reply is an empty set either way, and
+        /// "not in the scene" is the reading a caller takes from it — a confident wrong answer
+        /// about an object that is there.
+        /// </remarks>
+        [Test]
+        public void AFilterThatFoundNothingSaysHowMuchItNeverLookedAt()
+        {
+            var deep = new GameObject("DepthlessProbeRoot");
+            var at = deep.transform;
+
+            try
+            {
+                for (var d = 0; d < 6; d++)
+                {
+                    var step = new GameObject("DepthlessStep" + d);
+                    step.transform.SetParent(at);
+                    at = step.transform;
+                }
+
+                new GameObject("DepthlessTarget").transform.SetParent(at);
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(("name", "DepthlessTarget")));
+
+                Assert.That(reply["total"].Value<int>(), Is.Zero, "it sits below the default limit");
+                Assert.That(reply["belowMaxDepth"], Is.Not.Null,
+                    "so the reply has to say the walk stopped short rather than that nothing matched");
+                Assert.That(reply["belowMaxDepth"].Value<int>(), Is.GreaterThan(0));
+
+                var reached = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", "DepthlessTarget"), ("maxDepth", 12)));
+
+                Assert.That(reached["total"].Value<int>(), Is.GreaterThan(0), "and deeper finds it");
+            }
+            finally
+            {
+                Object.DestroyImmediate(deep);
+            }
+        }
+
+        /// <summary>
         /// One branch, rooted where the caller asked, and nothing from the rest of the scene.
         /// </summary>
         /// <remarks>
