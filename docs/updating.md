@@ -30,7 +30,7 @@ isuzu-unity-cli update       # 各プロジェクトのパッケージを揃え�
 
 - 応答がツールの上限を超えると、送らずに `isError` で断ります。
 - 応答から `structuredContent` が無くなりました。同じ JSON がテキストに入っています。
-- `capture_screenshot`、`reflect_read`、`gpu_readback` は読み取り専用の印を外しました。クライアントが自動承認や再試行をしなくなります。
+- `capture_screenshot`、`reflect_read`、`gpu_readback` から読み取り専用の注釈を外しました。名前に反して副作用があるためです。`reflect_read` は getter を実行するので、`Renderer.material` を読むと共有マテリアルの複製ができます。`capture_screenshot` はウィンドウを手前に出し、`gpu_readback` は転送が終わるまでメインスレッドを止めます。読み取り専用と宣言している間、クライアントはこれらを確認なしに実行し、勝手に再試行することがありました。
 - ツールが宣言していない引数は、無視せずに断ります。
 - `asset_export_package` の保存先が `file` から `destination` になりました。
 - `console_read_logs` は `stack_trace` を指定しない限りスタックトレースを返しません。

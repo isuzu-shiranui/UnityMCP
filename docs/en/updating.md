@@ -30,7 +30,7 @@ isuzu-unity-cli update       # every project's package
 
 - A reply larger than its tool's limit is refused with `isError` rather than sent.
 - Replies no longer carry `structuredContent`. The text content holds the same JSON.
-- `capture_screenshot`, `reflect_read` and `gpu_readback` are no longer marked read-only, so clients stop auto-approving and retrying them.
+- `capture_screenshot`, `reflect_read` and `gpu_readback` are no longer marked read-only, because they are not: `reflect_read` runs getters, and reading `Renderer.material` replaces the shared material with a copy; `capture_screenshot` raises a window over whatever the person at the Editor was looking at; `gpu_readback` holds the main thread until the transfer finishes. While they claimed to be read-only, clients ran them without asking and retried them on their own.
 - An argument a tool does not declare is refused instead of ignored.
 - `asset_export_package` names its destination `destination` rather than `file`.
 - `console_read_logs` leaves the stack trace out unless `stack_trace` asks for it.
