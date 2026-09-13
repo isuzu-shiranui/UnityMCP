@@ -48,6 +48,9 @@
 - `update` took the release check's cached answer, which stands for six hours, so for most of a day after a release it reported that release as the version already installed. It now asks GitHub, which also means a check that failed while the network was down no longer stands as "no release" for six hours.
 - `upgrade --release V4.3.1`, with an uppercase V, asked for a tag GitHub does not have and downloaded nothing.
 - `update` printed the `CLI` heading twice.
+- `upgrade` left the agent skill on disk at the version it replaced, because the check that rewrites it ran in the outgoing executable and found its own copy current. It now runs through the executable that was just installed.
+- A CLI installed as a dotnet tool was told a release was out without being told that nuget.org indexes one a few minutes later, so `dotnet tool update` could answer that the newest version was already installed.
+- The Settings window kept saying the CLI was not found after its own Install button installed one, until Preferences was closed and opened again. That row has a Refresh button now.
 
 ## [4.3.1] - 2026-09-12
 

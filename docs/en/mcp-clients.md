@@ -93,6 +93,8 @@ The installer asks for a project name. You can leave it empty when only one Unit
 
 The Product Name from Player Settings works as well, and `isuzu-unity-cli projects` prints these names. The Unity Editor must be open with the package installed while you use it.
 
+The bundle carries the CLI inside it, so a release does not reach it on its own and nothing in Claude Desktop says one is out. Download the new `isuzu-unity-cli.mcpb` and install it over the old one, which keeps the project name you entered.
+
 The name must match exactly. The extension stays bound to the first project it connects to; to switch, turn the extension off and on.
 
 The bundle carries the Windows, macOS (Apple Silicon and Intel) and Linux executables. It needs no other runtime. The manifest declares `win32`, `darwin` and `linux` as supported platforms. Three points are worth knowing.

@@ -25,9 +25,9 @@ public static class UpgradeCommand
 
             context.Out.WriteLine($"Installed {install.Description}; run: {install.UpdateCommand}");
 
-            if (install.Channel is CliChannel.Winget)
+            if (CliInstall.Delay(install.Channel) is { } delay)
             {
-                context.Out.WriteLine(CliInstall.WingetDelay);
+                context.Out.WriteLine(delay);
             }
 
             return 0;
@@ -74,10 +74,48 @@ public static class UpgradeCommand
 
             context.Out.WriteLine();
 
-            // The new binary is on disk but this process is still the old one, so the check below
-            // reports on what the freshly installed executable will find.
-            return DoctorCommand.Run(ArgParser.Parse(["doctor", "--fix"]), context);
+            // Run through the executable the installer just wrote rather than in this process,
+            // which is still the old one. What doctor --fix rewrites is decided by comparing the
+            // installed files with the copy embedded in the running binary, so the old process
+            // finds its own skill current and leaves the new release's on disk unwritten.
+            return await RunInstalled(context);
         }
+    }
+
+    /// <summary>The freshly installed executable's own <c>doctor --fix</c>.</summary>
+    /// <remarks>
+    /// Both installers write over the path this process was started from, so that path now holds
+    /// the new binary; on Windows the running one is renamed out of the way first.
+    /// </remarks>
+    private static async Task<int> RunInstalled(CommandContext context)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = context.ExecutablePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        info.ArgumentList.Add("doctor");
+        info.ArgumentList.Add("--fix");
+
+        using var process = Process.Start(info);
+
+        if (process is null)
+        {
+            context.Err.WriteLine($"Could not start {context.ExecutablePath} to check the installation.");
+            return 1;
+        }
+
+        var output = Relay(process.StandardOutput, context.Out, context.Cancellation);
+        var errors = Relay(process.StandardError, context.Err, context.Cancellation);
+
+        await process.WaitForExitAsync(context.Cancellation);
+        await Task.WhenAll(output, errors);
+
+        return process.ExitCode;
     }
 
     /// <summary>The tag a release is downloaded under, from what the caller typed.</summary>

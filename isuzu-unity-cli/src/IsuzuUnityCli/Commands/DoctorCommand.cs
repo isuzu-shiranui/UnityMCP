@@ -281,9 +281,9 @@ public static class DoctorCommand
         {
             context.Out.WriteLine($"  {tag} is out and this is {Program.Version()}. Update this CLI with: {cli.UpdateCommand}");
 
-            if (cli.Channel is CliChannel.Winget)
+            if (CliInstall.Delay(cli.Channel) is { } delay)
             {
-                context.Out.WriteLine("  " + CliInstall.WingetDelay);
+                context.Out.WriteLine("  " + delay);
             }
 
             context.Out.WriteLine("  Then 'isuzu-unity-cli update' updates the Unity package to match.");

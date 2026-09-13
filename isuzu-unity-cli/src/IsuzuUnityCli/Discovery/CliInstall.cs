@@ -35,6 +35,19 @@ public static class CliInstall
     public const string WingetDelay =
         "winget offers a release only after its manifest has been reviewed and merged into winget-pkgs.";
 
+    /// <summary>Said beside the dotnet command, for the same reason.</summary>
+    public const string DotnetToolDelay =
+        "nuget.org indexes a release a few minutes after it is published, so this can answer that "
+        + "the newest version is already installed until it does.";
+
+    /// <summary>What to say about a channel that reaches a release later than the notice does.</summary>
+    public static string? Delay(CliChannel channel) => channel switch
+    {
+        CliChannel.Winget => WingetDelay,
+        CliChannel.DotnetTool => DotnetToolDelay,
+        _ => null,
+    };
+
     /// <summary>How the executable was installed, and the command that updates it.</summary>
     public sealed record Install(CliChannel Channel, string UpdateCommand)
     {

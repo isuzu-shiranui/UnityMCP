@@ -136,9 +136,9 @@ public static class UpdateCommand
             context.Out.WriteLine(
                 $"  installed {install.Description}, so it is not updated here. Update it with: {install.UpdateCommand}");
 
-            if (install.Channel is CliChannel.Winget)
+            if (CliInstall.Delay(install.Channel) is { } delay)
             {
-                context.Out.WriteLine("  " + CliInstall.WingetDelay);
+                context.Out.WriteLine("  " + delay);
             }
 
             context.Out.WriteLine($"  Then run 'isuzu-unity-cli update' again to move the Unity projects to {tag}.");

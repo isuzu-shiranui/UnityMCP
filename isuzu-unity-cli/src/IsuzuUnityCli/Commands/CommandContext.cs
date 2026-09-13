@@ -211,9 +211,9 @@ public sealed class CommandContext
 
         Err.WriteLine($"{tag} is out and this is {Program.Version()}. Update this CLI with: {install.UpdateCommand}");
 
-        if (install.Channel is CliChannel.Winget)
+        if (CliInstall.Delay(install.Channel) is { } delay)
         {
-            Err.WriteLine(CliInstall.WingetDelay);
+            Err.WriteLine(delay);
         }
 
         Err.WriteLine("Then 'isuzu-unity-cli update' lines the Unity package up with it.");

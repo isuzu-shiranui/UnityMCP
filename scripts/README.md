@@ -150,6 +150,25 @@ Without `MCP_PRIVATE_KEY` the job says so as a warning and publishes nothing, so
 held back. Add the secret and re-run the workflow from `main` with workflow_dispatch; the job asks
 the registry first and does nothing when the version is already there.
 
+The key is the one that was used to publish by hand. `gh secret set` reads it without echoing it or
+leaving it in the shell history:
+
+```sh
+gh secret set MCP_PRIVATE_KEY -R isuzu-shiranui/UnityMCP          # prompts, or:
+gh secret set MCP_PRIVATE_KEY -R isuzu-shiranui/UnityMCP < key.hex
+```
+
+If it has been lost, a new pair replaces it, and the TXT record has to change with it or the
+registry refuses the signature:
+
+```sh
+openssl genpkey -algorithm Ed25519 -out key.pem
+# The half that goes in the TXT record of shiranui-isuzu.dev:
+echo "v=MCPv1; k=ed25519; p=$(openssl pkey -in key.pem -pubout -outform DER | tail -c 32 | base64)"
+# The half that goes in the secret, 64 hex characters:
+openssl pkey -in key.pem -noout -text | grep -A3 "priv:" | tail -n +2 | tr -d ' :\n'
+```
+
 ## Submitting to winget
 
 After the GitHub release is published, the `winget` job submits the Windows binary to
@@ -175,13 +194,17 @@ upgrade or uninstall it.
 The submission needs a token. Create it when the first manifest is submitted, so that it is in
 place for the first release after the merge:
 
-1. A personal access token (classic) with only the `public_repo` scope, and an expiry. wingetcreate
-   does not support fine-grained tokens. `public_repo` grants write access to every public
-   repository the account can push to, organisation repositories included, so a separate account
-   for this is worth considering.
+1. A personal access token (classic) with only the `public_repo` scope, and an expiry, from
+   <https://github.com/settings/tokens/new>. wingetcreate does not support fine-grained tokens.
+   `public_repo` grants write access to every public repository the account can push to,
+   organisation repositories included, so a separate account for this is worth considering.
 2. An environment named `winget` under Settings > Environments, with deployment branches limited to
    `main`. A required reviewer would hold each submission until someone approves it.
-3. A secret `WINGET_TOKEN` in that environment, holding the token.
+3. A secret `WINGET_TOKEN` in that environment, holding the token:
+
+   ```sh
+   gh secret set WINGET_TOKEN --env winget -R isuzu-shiranui/UnityMCP
+   ```
 
 The `winget` job checks the token before it uses it, and fails when the token is missing, expired,
 or not a classic token with `public_repo`. The job runs after the release, so the GitHub release and

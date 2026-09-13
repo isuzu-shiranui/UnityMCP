@@ -249,6 +249,14 @@ namespace UnityMCP.Editor.Settings
                 EditorGUIUtility.systemCopyBuffer = IsuzuCliLocator.InstallCommand();
             }
 
+            // The install runs in a terminal of its own, and nothing tells this window when it
+            // finishes. Without this the row keeps saying the CLI is missing until Preferences is
+            // closed and opened again, and pressing Install a second time installs it again.
+            if (GUILayout.Button(McpEditorText.Tr("Refresh"), GUILayout.Width(90)))
+            {
+                this.cliLooked = false;
+            }
+
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.HelpBox(
