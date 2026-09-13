@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.3.2] - Unreleased
+## [4.3.2] - 2026-09-13
 
 ### Changed
 - `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. Thanks to @wiiiii123 for the first fix in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
