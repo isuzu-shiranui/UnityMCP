@@ -3,7 +3,7 @@
 ## [4.3.2] - Unreleased
 
 ### Changed
-- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. The first fix came from @wiiiii123 in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
+- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. Thanks to @wiiiii123 for the first fix in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
 - A command run inside a Unity project folder that no running Editor has open stops with exit code 3, instead of going to whichever Editor happens to be open.
 - `mcp-stdio`, `setup --mcp` and `update --project` select a project by exact name or by path only.
 - `--project` given a path (`.`, `../Game`, or any value with a slash) resolves it against the working directory and selects only the project at that path.
@@ -16,6 +16,7 @@
 - `--project .` could select another project whose name contains a dot.
 - `doctor --fix` could write a token into a Claude Code entry for a folder that differs only in case.
 - `verify --raw` reported `ok: true` when a step stopped part-way, and printed no summary when the token kept being rejected.
+- `verify --test` could pass when failed or inconclusive tests fell beyond the Editor's 200-result limit, because skipped tests used up that limit. The verdict is now determined by the counts for the whole run, and `--raw` adds `tests.inconclusive` and `tests.truncated`. Thanks to @meiiie for the fix in [#41](https://github.com/isuzu-shiranui/UnityMCP/pull/41).
 - Under WSL, a descriptor that a crashed Windows Editor left behind was listed as running.
 - A state directory given with a trailing separator, or one descriptor reached twice, listed its Editor twice.
 - A prerelease such as `4.3.1-1` was read as newer than `4.3.1`, so `update` refused to move a project to the release.
