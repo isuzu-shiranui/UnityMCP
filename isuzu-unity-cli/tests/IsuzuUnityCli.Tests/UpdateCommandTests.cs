@@ -465,5 +465,37 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(2, Assert.Throws<IsuzuUnityCli.Cli.CliException>(() => UpgradeCommand.ReleaseTag(typed)).ExitCode);
     }
 
+    /// <summary>
+    /// A stream a process the installer left behind is holding open does not hold the command.
+    /// </summary>
+    /// <remarks>
+    /// Reading to the end of a child's output waits for every handle on the pipe, and a process
+    /// it spawned inherits those. Unity's asset database service outlives the Editor by minutes,
+    /// during which the command shows nothing and looks hung.
+    /// </remarks>
+    // Without the grace period this waits for a task that never completes, so it has to fail on a
+    // clock rather than hang the run.
+    [Fact(Timeout = 30000)]
+    public async Task OutputSomeoneElseStillHoldsOpenDoesNotHoldTheCommand()
+    {
+        var held = new TaskCompletionSource().Task;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        await UpgradeCommand.Drain(held, Task.CompletedTask, CancellationToken.None);
+
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"waited {clock.Elapsed}");
+    }
+
+    /// <summary>The grace period is not a way to ignore the caller pressing Ctrl+C.</summary>
+    [Fact]
+    public async Task ACancelledCommandStillReportsTheCancellation()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => UpgradeCommand.Drain(new TaskCompletionSource().Task, Task.CompletedTask, cancelled.Token));
+    }
+
     private static IsuzuUnityCli.Cli.ParsedArgs Args(params string[] argv) => IsuzuUnityCli.Cli.ArgParser.Parse(argv);
 }

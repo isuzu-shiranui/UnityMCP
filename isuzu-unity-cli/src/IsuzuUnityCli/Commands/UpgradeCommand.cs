@@ -113,7 +113,7 @@ public static class UpgradeCommand
         var errors = Relay(process.StandardError, context.Err, context.Cancellation);
 
         await process.WaitForExitAsync(context.Cancellation);
-        await Task.WhenAll(output, errors);
+        await Drain(output, errors, context.Cancellation);
 
         return process.ExitCode;
     }
@@ -189,7 +189,7 @@ public static class UpgradeCommand
         try
         {
             await process.WaitForExitAsync(context.Cancellation);
-            await Task.WhenAll(output, errors);
+            await Drain(output, errors, context.Cancellation);
         }
         catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
         {
@@ -205,11 +205,34 @@ public static class UpgradeCommand
             // Bounded: an installer that will not exit must not hold the process open for good.
             try { await process.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token); }
             catch (OperationCanceledException) { }
-            try { await Task.WhenAll(output, errors); }
+            try { await Drain(output, errors, CancellationToken.None); }
             catch (OperationCanceledException) { }
             throw;
         }
         return process.ExitCode;
+    }
+
+    /// <summary>What the child wrote, once it has exited.</summary>
+    /// <remarks>
+    /// Reading to the end of the stream waits for every handle on it to close, and a process the
+    /// child left behind inherits those handles and holds them for as long as it lives. Unity's
+    /// asset database service outlives the Editor that spawned it by minutes, so the wait is not
+    /// bounded by anything the caller can see: the command looks hung with nothing running.
+    /// The child's own lines are already through by the time it exits, so what is left is someone
+    /// else's pipe.
+    /// </remarks>
+    public static async Task Drain(Task output, Task errors, CancellationToken cancellation)
+    {
+        using var grace = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        grace.CancelAfter(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            await Task.WhenAll(output, errors).WaitAsync(grace.Token);
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+        }
     }
 
     private static async Task Relay(TextReader reader, TextWriter writer, CancellationToken cancellation)
