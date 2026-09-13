@@ -26,6 +26,10 @@ on what happens to be installed on one machine is not a gate. `-Unity` runs the 
 another Editor, with Timeline, Recorder and the test framework taken from that Editor's own
 bundled package set. The version actually used is recorded in the attestation.
 
+Runs outside the pinned generation are saved under
+`attested/additional/<Unity version>/<source hash>.json`, so they do not overwrite the
+pinned run required by CI. Each directory keeps its ten most recent records.
+
 Options: `-Unity <path>` to pick an Editor, `-ProjectPath <dir>` to put the scratch project
 elsewhere, `-KeepProject` to keep it after a first run.
 

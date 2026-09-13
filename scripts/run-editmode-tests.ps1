@@ -19,6 +19,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProjectPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ProjectPath)
+$processWindow = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { @{ WindowStyle = 'Hidden' } } else { @{} }
 $repo = Split-Path -Parent $PSScriptRoot
 $package = 'jp.shiranui-isuzu.unity-mcp'
 
@@ -107,7 +109,7 @@ if (-not (Test-Path (Join-Path $ProjectPath 'Packages'))) {
     Write-Host 'Creating the test project (first run only, takes a minute)...'
     if (Test-Path $ProjectPath) { Remove-ScratchProject }
 
-    $create = Start-Process -FilePath $unityExe -Wait -PassThru -ArgumentList @(
+    $create = Start-Process -FilePath $unityExe -Wait -PassThru @processWindow -ArgumentList @(
         '-batchmode', '-nographics', '-quit', '-createProject', "`"$ProjectPath`""
     )
 
@@ -235,7 +237,7 @@ $log = Join-Path $ProjectPath 'editmode.log'
 Remove-Item $results -ErrorAction SilentlyContinue
 
 Write-Host 'Running EditMode tests...'
-$run = Start-Process -FilePath $unityExe -Wait -PassThru -ArgumentList @(
+$run = Start-Process -FilePath $unityExe -Wait -PassThru @processWindow -ArgumentList @(
     '-batchmode', '-nographics',
     '-projectPath', "`"$ProjectPath`"",
     '-runTests', '-testPlatform', 'EditMode',
@@ -301,6 +303,11 @@ $attestation = [ordered]@{
 # touched Editor sources, and resolving that teaches nothing: the merged result has a hash
 # neither run covers, which the gate catches on its own a moment later.
 $directory = Join-Path $repo 'scripts\attested'
+# Other Editor generations are useful evidence, but must not replace the pinned run
+# that CI reads under this same source hash.
+if (-not $unityVersion.StartsWith($PinnedUnityVersion + '.', [StringComparison]::Ordinal)) {
+    $directory = Join-Path (Join-Path $directory 'additional') $unityVersion
+}
 New-Item -ItemType Directory -Force -Path $directory | Out-Null
 $path = Join-Path $directory "$hash.json"
 
