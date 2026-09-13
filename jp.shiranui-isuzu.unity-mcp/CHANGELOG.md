@@ -38,6 +38,8 @@
 - Over MCP, `job_status` returned a job's result at any size. It is now held to the size limit of the tool that ran the job.
 - `update` could install a newer CLI than the version it moved the projects to, when a release had come out since it last checked.
 - `update` treated a project whose `Packages/manifest.json` could not be read as one that does not use the package, and exited with 0.
+- A server stopped by hand started again on the next domain reload when "Auto-start on launch" was on.
+- The Register button in the Settings window froze the Editor until `setup --mcp` finished. It now runs in the background and reports a timeout or a failing exit code.
 
 ## [4.3.1] - 2026-09-12
 

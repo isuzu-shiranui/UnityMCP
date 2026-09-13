@@ -1,8 +1,9 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 using UnityEditor;
 using UnityEngine;
@@ -51,6 +52,7 @@ namespace UnityMCP.Editor.Settings
         private List<string> registeredIn;
         private bool registrationLooked;
         private string registerReport;
+        private static Task<string> registrationTask;
 
         // EditorStyles はドメインリロード直後の OnActivate では未初期化で NullReferenceException になり、
         // SettingsWindow が選択復元を無限再帰してエディタが固まる。GUI リソースは OnGUI 内で遅延初期化する。
@@ -91,6 +93,13 @@ namespace UnityMCP.Editor.Settings
 
         public override void OnGUI(string searchContext)
         {
+            if (registrationTask != null && registrationTask.IsCompleted)
+            {
+                this.registerReport = McpEditorText.Tr(registrationTask.GetAwaiter().GetResult());
+                registrationTask = null;
+                this.registrationLooked = false;
+            }
+
             // The server is recreated on every domain reload, so the reference is refreshed
             // rather than captured once in the constructor.
             McpServiceManager.Instance.TryGetService(out this.mcpServer);
@@ -258,6 +267,12 @@ namespace UnityMCP.Editor.Settings
         /// </remarks>
         private void DrawRegistrationRow()
         {
+            if (registrationTask != null)
+            {
+                EditorGUILayout.LabelField(McpEditorText.Tr("setup --mcp is running..."));
+                this.Repaint();
+                return;
+            }
             var url = this.mcpServer != null && this.mcpServer.IsRunning ? this.mcpServer.McpUrl : null;
 
             if (string.IsNullOrEmpty(url))
@@ -297,7 +312,9 @@ namespace UnityMCP.Editor.Settings
             if (this.DrawCheckRow(
                     false, McpEditorText.Tr("No MCP client points at this Editor"), McpEditorText.Tr("Register")))
             {
-                this.registerReport = RunSetup(this.cliPath, ProjectRoot());
+                if (registrationTask != null) return;
+                this.registerReport = McpEditorText.Tr("setup --mcp is running...");
+                registrationTask = RunSetup(this.cliPath, ProjectRoot());
                 this.registrationLooked = false;
             }
         }
@@ -316,7 +333,7 @@ namespace UnityMCP.Editor.Settings
         /// knows every client's format, where each configuration lives and how to leave the rest
         /// of the file alone, and two implementations of that would drift.
         /// </remarks>
-        private static string RunSetup(string cli, string projectRoot)
+        private static Task<string> RunSetup(string cli, string projectRoot)
         {
             try
             {
@@ -333,27 +350,43 @@ namespace UnityMCP.Editor.Settings
                 start.ArgumentList.Add("setup");
                 start.ArgumentList.Add("--mcp");
 
+                return RunSetupProcess(start);
+            }
+            catch (Exception e)
+            {
+                return Task.FromResult($"Could not run {cli}: {e.Message}");
+            }
+        }
+
+        internal static Task<string> RunSetupProcess(ProcessStartInfo start, int timeoutMs = 30000) => Task.Run(async () =>
+        {
+            try
+            {
+                var deadline = Task.Delay(timeoutMs);
                 using (var process = Process.Start(start))
                 {
-                    var output = process.StandardOutput.ReadToEnd();
-                    var error = process.StandardError.ReadToEnd();
-
-                    process.WaitForExit(30000);
-
-                    var said = (output + error).Trim();
-
-                    return said.Length > 0
-                        ? said
-                        : McpEditorText.Tr("setup --mcp finished without saying anything.");
+                    var output = process.StandardOutput.ReadToEndAsync();
+                    var error = process.StandardError.ReadToEndAsync();
+                    var exited = Task.Run(() => process.WaitForExit(timeoutMs));
+                    var complete = Task.WhenAll(output, error, exited);
+                    if (await Task.WhenAny(complete, deadline).ConfigureAwait(false) != complete
+                        || !await exited.ConfigureAwait(false))
+                    {
+                        try { process.Kill(); } catch (Exception) { }
+                        return "setup --mcp timed out. Registration may be incomplete; refresh before retrying.";
+                    }
+                    await complete.ConfigureAwait(false);
+                    var said = (output.Result + error.Result).Trim();
+                    return process.ExitCode != 0
+                        ? $"setup --mcp exited with code {process.ExitCode}.\n{said}"
+                        : said.Length > 0 ? said : "setup --mcp finished without saying anything.";
                 }
             }
             catch (Exception e)
             {
-                return string.Format(
-                    McpEditorText.Tr("Could not run {0}: {1}"), cli, e.Message);
+                return $"Could not run {start.FileName}: {e.Message}";
             }
-        }
-
+        });
         /// <summary>One checklist row. Returns true on the frame its button is pressed.</summary>
         private bool DrawCheckRow(bool done, string label, string button)
         {

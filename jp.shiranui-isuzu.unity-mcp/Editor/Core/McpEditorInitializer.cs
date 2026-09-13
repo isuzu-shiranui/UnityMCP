@@ -16,6 +16,7 @@ namespace UnityMCP.Editor.Core
     {
         private const string SessionKeyBoundPort = "UnityMCP.BoundPort";
         private const string SessionKeyWasRunning = "UnityMCP.WasRunning";
+        private const string SessionKeyHasReloadState = "UnityMCP.HasReloadState";
 
         static McpEditorInitializer()
         {
@@ -105,8 +106,9 @@ namespace UnityMCP.Editor.Core
             var server = new McpHttpServer();
             McpServiceManager.Instance.RegisterService(server);
 
-            // Start the server if it was running before reload or if auto-start is configured
-            if (wasRunning || settings.autoStartOnLaunch)
+            // Launch preferences apply only before a reload has recorded the user's running state.
+            if (ShouldStart(SessionState.GetBool(SessionKeyHasReloadState, false),
+                wasRunning, settings.autoStartOnLaunch))
             {
                 try
                 {
@@ -133,6 +135,7 @@ namespace UnityMCP.Editor.Core
             // Persist state so afterAssemblyReload can restore it (design §2.1)
             SessionState.SetInt(SessionKeyBoundPort, server.BoundPort);
             SessionState.SetBool(SessionKeyWasRunning, server.IsRunning);
+            SessionState.SetBool(SessionKeyHasReloadState, true);
 
             // A reload discards the sequencer's static state, so anything still advancing would
             // never settle and its request would block for the whole sync window.
@@ -155,6 +158,9 @@ namespace UnityMCP.Editor.Core
             server.Dispose(withdrawDescriptor: true);
             McpServiceManager.Instance.RemoveService<McpHttpServer>();
         }
+
+        internal static bool ShouldStart(bool hasReloadState, bool wasRunning, bool autoStartOnLaunch) =>
+            hasReloadState ? wasRunning : autoStartOnLaunch;
 
         private static void OnAfterAssemblyReload()
         {
