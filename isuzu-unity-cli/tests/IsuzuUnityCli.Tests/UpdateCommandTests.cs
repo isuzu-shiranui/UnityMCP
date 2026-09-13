@@ -252,9 +252,8 @@ public sealed class ReleaseNoticeTests : IDisposable
 /// The CLI half of update, and the version it moves each project to.
 /// </summary>
 /// <remarks>
-/// The release is read from a fresh cache, so the context can be cancelled before the run: should
-/// the channel be misread, upgrade's download of the real installer is refused at once and
-/// nothing on this machine is replaced.
+/// The release is read from a fresh cache, and a copy the install script manages is handed an
+/// upgrade that only answers, so no test downloads an installer or replaces an executable.
 /// </remarks>
 public sealed class UpdateCommandTests : IDisposable
 {
@@ -293,7 +292,7 @@ public sealed class UpdateCommandTests : IDisposable
             ReadDescriptors = () => running,
             ExecutablePath = executablePath,
             ReleaseCachePath = Cache,
-            Cancellation = new CancellationToken(canceled: true),
+            Cancellation = CancellationToken.None,
         }, output);
     }
 
@@ -364,9 +363,69 @@ public sealed class UpdateCommandTests : IDisposable
         var (context, _) = Context(
             Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Ahead", "98.0.0"), Project("Behind", "0.0.1"));
 
-        await Program.Run(["update", "--release", "v1.2.3"], context);
-
+        Assert.Equal(0, await UpdateCommand.Run(Args("update", "--release", "v1.2.3"), context, (_, _) => Task.FromResult(0)));
         Assert.Equal("1.2.3", Dependency("Ahead"));
         Assert.Equal("1.2.3", Dependency("Behind"));
     }
+
+    /// <summary>
+    /// The CLI is installed first, so a release whose CLI cannot be installed is never written into
+    /// a manifest, and the installer is asked for the release the check found rather than for
+    /// whatever is newest by the time it runs.
+    /// </summary>
+    [Theory]
+    [InlineData(null, "v99.0.0")]
+    [InlineData("1.2.3", "v1.2.3")]
+    public async Task AFailedUpgradeLeavesEveryManifestAndAsksForThePlannedRelease(string? release, string expected)
+    {
+        var (context, _) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "4.0.0"));
+        var asked = new List<string?>();
+
+        var exit = await UpdateCommand.Run(
+            Args(release is null ? new[] { "update" } : new[] { "update", "--release", release }),
+            context,
+            (args, _) =>
+            {
+                asked.Add(args.Option("release"));
+                return Task.FromResult(1);
+            });
+
+        Assert.Equal(1, exit);
+        Assert.Equal(expected, Assert.Single(asked));
+        Assert.Equal("4.0.0", Dependency("Game"));
+    }
+
+    [Fact]
+    public async Task ADryRunInstallsNothingAndLeavesTheManifest()
+    {
+        var (context, _) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "4.0.0"));
+
+        Assert.Equal(0, await UpdateCommand.Run(
+            Args("update", "--release", "v1.2.3", "--dry-run"),
+            context,
+            (_, _) => throw new InvalidOperationException("A dry run started the installer.")));
+        Assert.Equal("4.0.0", Dependency("Game"));
+    }
+
+    /// <summary>
+    /// A manifest that cannot be read is a failure to report. It is not a project that does not use
+    /// the package, which is passed over without one.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreadableManifestFailsWhereOneWithoutThePackageIsPassedOver()
+    {
+        var broken = Project("Broken", "4.0.0");
+        var absent = Project("Absent", "4.0.0");
+        File.WriteAllText(Path.Combine(root, "Broken", "Packages", "manifest.json"), "not json");
+        File.WriteAllText(
+            Path.Combine(root, "Absent", "Packages", "manifest.json"),
+            "{\"dependencies\":{\"com.unity.ide.rider\":\"3.0.28\"}}");
+        var (context, output) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), broken, absent);
+
+        Assert.Equal(1, await UpdateCommand.Run(Args("update", "--release", "v1.2.3"), context, (_, _) => Task.FromResult(0)));
+        Assert.Contains("Broken: could not be read", output.ToString());
+        Assert.DoesNotContain("Absent: could not be read", output.ToString());
+    }
+
+    private static IsuzuUnityCli.Cli.ParsedArgs Args(params string[] argv) => IsuzuUnityCli.Cli.ArgParser.Parse(argv);
 }

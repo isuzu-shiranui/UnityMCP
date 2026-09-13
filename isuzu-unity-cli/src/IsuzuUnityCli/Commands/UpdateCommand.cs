@@ -1,3 +1,4 @@
+using System.Text.Json;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Housekeeping;
@@ -21,8 +22,12 @@ namespace IsuzuUnityCli.Commands;
 /// </remarks>
 public static class UpdateCommand
 {
-    public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
+    public static async Task<int> Run(
+        ParsedArgs parsed, CommandContext context,
+        Func<ParsedArgs, CommandContext, Task<int>>? upgrade = null)
     {
+        context.Cancellation.ThrowIfCancellationRequested();
+        upgrade ??= UpgradeCommand.Run;
         var install = CliInstall.Read(context.ExecutablePath);
         var release = parsed.Option("release");
 
@@ -70,9 +75,20 @@ public static class UpdateCommand
         var projects = Projects(context, parsed);
         var failed = false;
 
-        // The package first. Upgrading the CLI replaces the running executable, and on Windows
-        // that leaves the old one behind under another name; anything this process still had to
-        // do would be running from a binary the next install is going to delete.
+        // Finish downloading and verifying the planned CLI before any project points at it.
+        // Keep the tag fixed even if GitHub latest changes after the cached release check.
+        if (moves && !held && !parsed.HasFlag("dry-run"))
+        {
+            context.Out.WriteLine("CLI");
+            context.Cancellation.ThrowIfCancellationRequested();
+            if (await upgrade(Reparse(tag), context) != 0)
+            {
+                context.Err.WriteLine("CLI upgrade did not finish successfully; project manifests were not changed.");
+                return 1;
+            }
+        }
+
+        context.Cancellation.ThrowIfCancellationRequested();
         context.Out.WriteLine("Unity projects");
 
         if (projects.Count == 0)
@@ -84,10 +100,20 @@ public static class UpdateCommand
             context.Out.WriteLine($"  moved to {current}, the version this CLI runs, until the CLI is updated.");
         }
 
-        foreach (var descriptor in projects)
+        try
         {
-            failed |= !UpdateProject(
-                context, descriptor, held ? current : version, parsed.HasFlag("dry-run"), backwards: release is not null);
+            foreach (var descriptor in projects)
+            {
+                context.Cancellation.ThrowIfCancellationRequested();
+                failed |= !UpdateProject(
+                    context, descriptor, held ? current : version, parsed.HasFlag("dry-run"), backwards: release is not null);
+            }
+            context.Cancellation.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
+        {
+            context.Err.WriteLine("Update interrupted; project changes reported above remain applied.");
+            throw;
         }
 
         context.Out.WriteLine();
@@ -119,9 +145,8 @@ public static class UpdateCommand
             return failed ? 1 : 0;
         }
 
-        var upgrade = await UpgradeCommand.Run(Reparse(release is null ? null : tag), context);
-
-        return upgrade != 0 || failed ? 1 : 0;
+        context.Out.WriteLine($"  installed {tag}.");
+        return failed ? 1 : 0;
     }
 
     /// <summary>Moves one project to <paramref name="version"/>, or says why it cannot.</summary>
@@ -147,6 +172,20 @@ public static class UpdateCommand
         try
         {
             install = PackageInstall.Read(root);
+            if (install.Channel is PackageChannel.Absent)
+            {
+                // Discovery treats unreadable manifests as absent. An update must distinguish
+                // that from a valid manifest which simply does not name this package.
+                using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "Packages", "manifest.json")));
+                if (manifest.RootElement.ValueKind != JsonValueKind.Object
+                    || (manifest.RootElement.TryGetProperty("dependencies", out var dependencies)
+                        && (dependencies.ValueKind != JsonValueKind.Object
+                            || (dependencies.TryGetProperty(PackageInstall.PackageId, out var dependency)
+                                && dependency.ValueKind != JsonValueKind.String))))
+                {
+                    throw new JsonException("manifest.json must contain an object with string package dependencies.");
+                }
+            }
         }
         catch (Exception e)
         {

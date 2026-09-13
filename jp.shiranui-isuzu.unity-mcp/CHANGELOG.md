@@ -10,6 +10,7 @@
 - `doctor --fix` leaves an entry whose URL matches a running Editor but whose token differs, because another project's Editor can hold that port, and suggests `setup --mcp` instead. The Regenerate dialog and the docs name it too.
 - On macOS and Linux, the Editor logs an error rather than a warning when it cannot restrict the token and descriptor files to their owner.
 - The EditMode test script refuses a `-ProjectPath` it did not create, and records the operating system it ran on.
+- `update` installs the CLI before it changes any project, so a release whose CLI cannot be installed is never written into a manifest.
 
 ### Fixed
 - After losing its Editor, `verify`, `jobs --wait` or `mcp-stdio` could carry on in another project that matched the original name.
@@ -35,6 +36,8 @@
 - `gameobject_set_transform` applied the position even when the rotation or scale in the same call was invalid.
 - A hierarchy path did not resolve back to an object whose name contains `/` or ends in `[n]`. Those characters are now escaped with a backslash. `ui_hit_test` and `asset_broken_references` now report paths in the same form, with an index where a sibling name repeats.
 - Over MCP, `job_status` returned a job's result at any size. It is now held to the size limit of the tool that ran the job.
+- `update` could install a newer CLI than the version it moved the projects to, when a release had come out since it last checked.
+- `update` treated a project whose `Packages/manifest.json` could not be read as one that does not use the package, and exited with 0.
 
 ## [4.3.1] - 2026-09-12
 
