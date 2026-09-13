@@ -249,7 +249,7 @@ public sealed class ReleaseNoticeTests : IDisposable
 }
 
 /// <summary>
-/// The CLI half of update, over a copy another tool installed.
+/// The CLI half of update, and the version it moves each project to.
 /// </summary>
 /// <remarks>
 /// The release is read from a fresh cache, so the context can be cancelled before the run: should
@@ -356,5 +356,17 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(0, await Program.Run(["update", "--dry-run"], context));
         Assert.Contains("dotnet tool update -g IsuzuUnityCli", output.ToString());
         Assert.DoesNotContain("would install", output.ToString());
+    }
+
+    [Fact]
+    public async Task ANamedReleaseIsWhereEveryProjectGoesAnOlderOneIncluded()
+    {
+        var (context, _) = Context(
+            Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Ahead", "98.0.0"), Project("Behind", "0.0.1"));
+
+        await Program.Run(["update", "--release", "v1.2.3"], context);
+
+        Assert.Equal("1.2.3", Dependency("Ahead"));
+        Assert.Equal("1.2.3", Dependency("Behind"));
     }
 }

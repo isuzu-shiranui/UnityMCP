@@ -28,6 +28,13 @@
 - The winget submission check took a pull request's title as proof that a version had been submitted.
 - `install.ps1` could leave the downloaded file open when the hash provider failed to start.
 - A job wait inside `verify` that recovered from a rejected token counted that rejection against the next one.
+- `--file` given a file that cannot be read ended the CLI with an unhandled exception. It now exits with code 2 and says why.
+- `verify` and `jobs --wait` accepted a `--timeout` of `NaN`, `Infinity` or a value too large for a timer, and then failed with an exception.
+- `update --release` moved projects to the newest release rather than the named one, and left a CLI already on the newest where it was. The named release is now the target for both, including an older one, and a value that is not a version is refused before any manifest is written.
+- A second `render_capture_ab` started while one was still running could leave renderers switched off. It is now refused until the first one finishes.
+- `gameobject_set_transform` applied the position even when the rotation or scale in the same call was invalid.
+- A hierarchy path did not resolve back to an object whose name contains `/` or ends in `[n]`. Those characters are now escaped with a backslash. `ui_hit_test` and `asset_broken_references` now report paths in the same form, with an index where a sibling name repeats.
+- Over MCP, `job_status` returned a job's result at any size. It is now held to the size limit of the tool that ran the job.
 
 ## [4.3.1] - 2026-09-12
 

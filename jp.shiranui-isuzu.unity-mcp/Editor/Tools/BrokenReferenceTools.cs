@@ -120,6 +120,7 @@ namespace UnityMCP.Editor.Tools
         private static int ScanScenes(JArray found, int limit, ref string stopped)
         {
             var scanned = 0;
+            var paths = new ObjectResolve.PathBatch();
 
             for (var i = 0; i < SceneManager.sceneCount; i++)
             {
@@ -135,7 +136,7 @@ namespace UnityMCP.Editor.Tools
                     foreach (var transform in root.GetComponentsInChildren<Transform>(true))
                     {
                         scanned++;
-                        Inspect(transform.gameObject, Path(transform), scene.path, found, limit, ref stopped);
+                        Inspect(transform.gameObject, paths.PathOf(transform.gameObject), scene.path, found, limit, ref stopped);
 
                         if (stopped != null)
                         {
@@ -313,7 +314,7 @@ namespace UnityMCP.Editor.Tools
             }
         }
 
-        /// <summary>The hierarchy path the other tools take.</summary>
+        /// <summary>An object's path inside a prefab asset, written after the asset's own path.</summary>
         private static string Path(Transform transform)
         {
             var parts = new List<string>();

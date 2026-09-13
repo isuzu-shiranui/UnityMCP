@@ -5,7 +5,8 @@ using IsuzuUnityCli.Housekeeping;
 namespace IsuzuUnityCli.Commands;
 
 /// <summary>
-/// Brings this machine to the newest release: the CLI, and every project's copy of the package.
+/// Brings this machine to the newest release, or the one --release names: the CLI, and every
+/// project's copy of the package.
 /// </summary>
 /// <remarks>
 /// <c>upgrade</c> replaces this executable and stops there, which leaves the half that matters
@@ -23,14 +24,23 @@ public static class UpdateCommand
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
         var install = CliInstall.Read(context.ExecutablePath);
+        var release = parsed.Option("release");
 
-        if (parsed.Option("release") is not null && !install.ReplacesItself)
+        if (release is not null && !install.ReplacesItself)
         {
             context.Err.WriteLine(UpgradeCommand.ReleaseRefusal(install));
             return 1;
         }
 
-        var tag = await Latest(context);
+        // Checked before anything is written, since every project's manifest would be pointed at it.
+        if (release is not null && !IsReleaseVersion(release))
+        {
+            throw new CliException($"--release expects a version such as v4.3.1, not '{release}'.", 2);
+        }
+
+        // A named release is the target for the packages and the CLI alike, an older one included:
+        // going back from a bad release is what naming one is for.
+        var tag = release is not null ? "v" + release.TrimStart('v', 'V') : await Latest(context);
 
         if (tag is null)
         {
@@ -42,15 +52,18 @@ public static class UpdateCommand
 
         var current = Program.Version();
         var version = tag.TrimStart('v', 'V');
-        var behind = ReleaseCheck.IsNewer(tag, current);
+        var moves = release is null
+            ? ReleaseCheck.IsNewer(tag, current)
+            : ReleaseCheck.IsNewer(tag, current) || ReleaseCheck.IsNewer(current, tag);
 
         // A copy another tool installed reaches the release only when that tool offers it, which
         // for winget is after review. A package moved ahead of it in the meantime would be talking
         // to an older CLI, so until then the packages go only as far as the version this CLI runs.
-        var held = behind && !install.ReplacesItself;
+        var held = moves && !install.ReplacesItself;
 
-        context.Out.WriteLine(behind
-            ? $"{tag} is out and this is {current}."
+        context.Out.WriteLine(
+            release is not null ? $"{tag} was named with --release and this is {current}."
+            : moves ? $"{tag} is out and this is {current}."
             : $"{tag} is the newest release and this is {current}.");
         context.Out.WriteLine();
 
@@ -73,13 +86,14 @@ public static class UpdateCommand
 
         foreach (var descriptor in projects)
         {
-            failed |= !UpdateProject(context, descriptor, held ? current : version, parsed.HasFlag("dry-run"));
+            failed |= !UpdateProject(
+                context, descriptor, held ? current : version, parsed.HasFlag("dry-run"), backwards: release is not null);
         }
 
         context.Out.WriteLine();
         context.Out.WriteLine("CLI");
 
-        if (!behind)
+        if (!moves)
         {
             context.Out.WriteLine($"  already {current}.");
             return failed ? 1 : 0;
@@ -105,14 +119,15 @@ public static class UpdateCommand
             return failed ? 1 : 0;
         }
 
-        var upgrade = await UpgradeCommand.Run(Reparse(parsed), context);
+        var upgrade = await UpgradeCommand.Run(Reparse(release is null ? null : tag), context);
 
         return upgrade != 0 || failed ? 1 : 0;
     }
 
     /// <summary>Moves one project to <paramref name="version"/>, or says why it cannot.</summary>
+    /// <param name="backwards">Whether a project already past <paramref name="version"/> goes back to it.</param>
     private static bool UpdateProject(
-        CommandContext context, InstanceDescriptor descriptor, string version, bool dryRun)
+        CommandContext context, InstanceDescriptor descriptor, string version, bool dryRun, bool backwards)
     {
         var name = descriptor.ProjectName.Length > 0 ? descriptor.ProjectName : descriptor.ProjectPath;
 
@@ -151,9 +166,10 @@ public static class UpdateCommand
             return true;
         }
 
-        // Moving a project back is never what update means. With a CLI another tool updates, the
-        // target is the version the CLI runs, and a project can already be past it.
-        if (install.Version is not null && ReleaseCheck.IsNewer(install.Version, version))
+        // Moving a project back is not what update means unless a release was named. With a CLI
+        // another tool updates, the target is the version the CLI runs, and a project can already
+        // be past it.
+        if (!backwards && install.Version is not null && ReleaseCheck.IsNewer(install.Version, version))
         {
             context.Out.WriteLine($"  {name}: already at {install.Version}, which is past {version}. Left as it is.");
             return true;
@@ -214,6 +230,21 @@ public static class UpdateCommand
         _ => "its install channel was not recognised.",
     };
 
+    /// <summary>Three numbers, with or without a 'v' in front, and an optional prerelease.</summary>
+    private static bool IsReleaseVersion(string text)
+    {
+        var version = text.StartsWith('v') || text.StartsWith('V') ? text[1..] : text;
+        var dash = version.IndexOf('-');
+        var core = (dash < 0 ? version : version[..dash]).Split('.');
+        var prerelease = dash < 0 ? null : version[(dash + 1)..];
+
+        return core.Length == 3
+               && core.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
+               && (prerelease is null
+                   || (prerelease.Length > 0
+                       && prerelease.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-')));
+    }
+
     private static async Task<string?> Latest(CommandContext context)
     {
         try
@@ -251,11 +282,11 @@ public static class UpdateCommand
     /// upgrade refuses an option it does not declare, and --dry-run and --project are this
     /// command's own.
     /// </remarks>
-    private static ParsedArgs Reparse(ParsedArgs parsed)
+    private static ParsedArgs Reparse(string? release)
     {
         var argv = new List<string> { "upgrade" };
 
-        if (parsed.Option("release") is { } release)
+        if (release is not null)
         {
             argv.Add("--release");
             argv.Add(release);

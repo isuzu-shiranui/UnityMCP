@@ -148,6 +148,7 @@ The CLI and the Unity package are released under one version, and the release re
 isuzu-unity-cli update --dry-run   # what would change
 isuzu-unity-cli update             # the CLI, then every running Editor's package
 isuzu-unity-cli update --project X # only that project's package
+isuzu-unity-cli update --release v4.3.1 # the CLI and every package to that version, an older one too
 ```
 
 Four of the six ways the package can be installed cannot be updated from here, and each is named with the step that does move it:

@@ -21,22 +21,8 @@ namespace UnityMCP.Editor.Ugui
         /// </summary>
         private const int MaxGraphicsScanned = 2000;
 
-        public static string PathOf(GameObject go)
-        {
-            if (go == null)
-            {
-                return null;
-            }
-
-            var parts = new List<string>();
-
-            for (var t = go.transform; t != null; t = t.parent)
-            {
-                parts.Insert(0, t.name);
-            }
-
-            return "/" + string.Join("/", parts);
-        }
+        /// <summary>The path the other tools resolve back to this object.</summary>
+        public static string PathOf(GameObject go) => Tools.ObjectResolve.PathOf(go);
 
         /// <summary>
         /// Why a Graphic under the point cannot be hit, in the order a reader should check them.
@@ -229,6 +215,10 @@ namespace UnityMCP.Editor.Ugui
 
             var listed = new JArray();
             var graphics = AllGraphics();
+
+            // Each parent's children indexed once for the whole listing. A path read alone scans
+            // its siblings again, and a canvas can hold thousands of graphics under one parent.
+            var paths = new Tools.ObjectResolve.PathBatch();
             scanned = 0;
             bounded = false;
 
@@ -256,7 +246,7 @@ namespace UnityMCP.Editor.Ugui
 
                 listed.Add(new JObject
                 {
-                    ["path"] = PathOf(graphic.gameObject),
+                    ["path"] = paths.PathOf(graphic.gameObject),
                     ["reasons"] = new JArray(reasons),
                 });
             }

@@ -411,39 +411,42 @@ namespace UnityMCP.Editor.Tools
             JObject scale,
             bool world = false)
         {
-            if (position != null)
-            {
-                var current = world ? transform.position : transform.localPosition;
-                var next = ReadVector(position, current, "position");
+            // All three are read before any is applied, so a bad axis in one leaves the transform as it was.
+            var nextPosition = position == null
+                ? (Vector3?)null
+                : ReadVector(position, world ? transform.position : transform.localPosition, "position");
+            var nextRotation = rotation == null
+                ? (Vector3?)null
+                : ReadVector(rotation, world ? transform.eulerAngles : transform.localEulerAngles, "rotation");
+            var nextScale = scale == null ? (Vector3?)null : ReadVector(scale, transform.localScale, "scale");
 
+            if (nextPosition.HasValue)
+            {
                 if (world)
                 {
-                    transform.position = next;
+                    transform.position = nextPosition.Value;
                 }
                 else
                 {
-                    transform.localPosition = next;
+                    transform.localPosition = nextPosition.Value;
                 }
             }
 
-            if (rotation != null)
+            if (nextRotation.HasValue)
             {
-                var current = world ? transform.eulerAngles : transform.localEulerAngles;
-                var next = ReadVector(rotation, current, "rotation");
-
                 if (world)
                 {
-                    transform.eulerAngles = next;
+                    transform.eulerAngles = nextRotation.Value;
                 }
                 else
                 {
-                    transform.localEulerAngles = next;
+                    transform.localEulerAngles = nextRotation.Value;
                 }
             }
 
-            if (scale != null)
+            if (nextScale.HasValue)
             {
-                transform.localScale = ReadVector(scale, transform.localScale, "scale");
+                transform.localScale = nextScale.Value;
             }
         }
 

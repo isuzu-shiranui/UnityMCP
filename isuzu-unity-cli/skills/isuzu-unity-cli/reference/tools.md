@@ -53,6 +53,7 @@ Two things to know before editing:
 
 - The `path` these tools take is the one `scene_browse_hierarchy` returns. It resolves
   inactive objects, and carries an index only when a sibling name repeats: `/Canvas/Button[1]/Text`.
+  A `/` in a name and the `[` of a name ending in `[n]` carry a backslash; a backslash in a name is doubled.
 - A scene edit during Play Mode succeeds and is reverted when Play Mode stops. The response
   carries `playModeWarning` in that case. Asset edits made during Play Mode do survive.
 

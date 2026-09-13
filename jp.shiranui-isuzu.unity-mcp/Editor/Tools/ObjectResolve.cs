@@ -30,6 +30,12 @@ namespace UnityMCP.Editor.Tools
     /// carries an index only where one is needed: <c>/Canvas/Button[1]/Text</c>. Paths written
     /// by hand without indices still resolve, to the first match.
     /// </para>
+    /// <para>
+    /// A name can contain the characters a path is written with. A '/' in a name, and the '[' of
+    /// a name that ends like an index, carry a backslash, and a backslash in a name is doubled.
+    /// A backslash before any other character is an ordinary character, so a path typed without
+    /// escapes resolves unless one of its names needs them.
+    /// </para>
     /// </remarks>
     internal static class ObjectResolve
     {
@@ -89,7 +95,7 @@ namespace UnityMCP.Editor.Tools
                         : $"Either '{argumentName}' or '{idArgumentName}' is required.");
             }
 
-            var segments = path.Split('/').Where(s => s.Length > 0).ToArray();
+            var segments = Segments(path).ToArray();
 
             if (segments.Length == 0)
             {
@@ -198,7 +204,7 @@ namespace UnityMCP.Editor.Tools
                 foreach (var (transform, name) in nodes)
                 {
                     seen.TryGetValue(name, out var index);
-                    this.segments[transform] = counts[name] > 1 ? $"{name}[{index}]" : name;
+                    this.segments[transform] = counts[name] > 1 ? $"{Escape(name)}[{index}]" : Escape(name);
                     seen[name] = index + 1;
                 }
             }
@@ -267,6 +273,44 @@ namespace UnityMCP.Editor.Tools
             }
         }
 
+        /// <summary>
+        /// A path's segments, split at the slashes that are not part of a name. Escapes are kept,
+        /// so a segment can still tell an index from a name that ends like one.
+        /// </summary>
+        internal static List<string> Segments(string path)
+        {
+            var segments = new List<string>();
+            var current = new StringBuilder();
+
+            for (var i = 0; i < path.Length; i++)
+            {
+                if (IsEscape(path, i))
+                {
+                    current.Append(path, i, 2);
+                    i++;
+                }
+                else if (path[i] == '/')
+                {
+                    if (current.Length > 0)
+                    {
+                        segments.Add(current.ToString());
+                        current.Clear();
+                    }
+                }
+                else
+                {
+                    current.Append(path[i]);
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                segments.Add(current.ToString());
+            }
+
+            return segments;
+        }
+
         private static IEnumerable<GameObject> Children(GameObject go)
         {
             foreach (Transform child in go.transform)
@@ -277,18 +321,8 @@ namespace UnityMCP.Editor.Tools
 
         private static GameObject MatchSegment(IEnumerable<GameObject> level, string segment)
         {
-            var name = segment;
-            var wanted = 0;
-
-            var bracket = segment.LastIndexOf('[');
-
-            if (bracket > 0 && segment.EndsWith("]") &&
-                int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out var parsed))
-            {
-                name = segment.Substring(0, bracket);
-                wanted = parsed;
-            }
-
+            var bracket = IndexBracket(segment, out var wanted);
+            var name = Unescape(bracket > 0 ? segment.Substring(0, bracket) : segment);
             var seen = 0;
 
             foreach (var candidate in level)
@@ -333,7 +367,103 @@ namespace UnityMCP.Editor.Tools
                 duplicates++;
             }
 
-            return duplicates > 1 ? $"{t.name}[{index}]" : t.name;
+            var name = Escape(t.name);
+
+            return duplicates > 1 ? $"{name}[{index}]" : name;
+        }
+
+        /// <summary>A name as a path segment writes it.</summary>
+        private static string Escape(string name)
+        {
+            if (name.IndexOf('\\') < 0 && name.IndexOf('/') < 0 && !name.EndsWith("]", StringComparison.Ordinal))
+            {
+                return name;
+            }
+
+            var builder = new StringBuilder(name.Length + 2);
+
+            foreach (var c in name)
+            {
+                if (c == '\\' || c == '/')
+                {
+                    builder.Append('\\');
+                }
+
+                builder.Append(c);
+            }
+
+            var escaped = builder.ToString();
+            var bracket = IndexBracket(escaped, out _);
+
+            return bracket > 0 ? escaped.Insert(bracket, "\\") : escaped;
+        }
+
+        private static string Unescape(string text)
+        {
+            if (text.IndexOf('\\') < 0)
+            {
+                return text;
+            }
+
+            var builder = new StringBuilder(text.Length);
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (IsEscape(text, i))
+                {
+                    i++;
+                }
+
+                builder.Append(text[i]);
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Where the '[n]' that picks among same-named siblings starts, or -1 when the segment
+        /// ends in no unescaped one.
+        /// </summary>
+        private static int IndexBracket(string segment, out int index)
+        {
+            index = 0;
+
+            if (!segment.EndsWith("]", StringComparison.Ordinal))
+            {
+                return -1;
+            }
+
+            var bracket = -1;
+
+            for (var i = 0; i < segment.Length; i++)
+            {
+                if (IsEscape(segment, i))
+                {
+                    i++;
+                }
+                else if (segment[i] == '[')
+                {
+                    bracket = i;
+                }
+            }
+
+            return bracket > 0
+                   && int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out index)
+                ? bracket
+                : -1;
+        }
+
+        /// <summary>Whether the character at <paramref name="i"/> is a backslash escaping the next one.</summary>
+        private static bool IsEscape(string text, int i)
+        {
+            if (text[i] != '\\' || i + 1 >= text.Length)
+            {
+                return false;
+            }
+
+            var next = text[i + 1];
+
+            return next == '\\' || next == '/' || next == '[';
         }
 
         private static IEnumerable<Transform> SceneRootsOf(Transform t)
@@ -356,7 +486,7 @@ namespace UnityMCP.Editor.Tools
 
         private static string NotFoundMessage(string path, string[] segments, int depth, IEnumerable<GameObject> level)
         {
-            var available = level.Select(g => g.name).Distinct().Take(12).ToArray();
+            var available = level.Select(g => Escape(g.name)).Distinct().Take(12).ToArray();
             var where = depth == 0
                 ? "among the scene roots"
                 : $"under '{string.Join("/", segments.Take(depth))}'";

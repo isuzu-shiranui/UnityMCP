@@ -234,6 +234,18 @@ namespace UnityMCP.Editor.Tools
                     + "so they always match and the noise reads as none whatever the scene is doing.");
             }
 
+            // Each run records whether a renderer was on before switching it off. A run overlapping
+            // another would record the other's "off" as the original state and leave it off.
+            if (FrameSequencer.IsRunning("render_capture_ab"))
+            {
+                throw new McpToolException(
+                    "conflict",
+                    "Another render_capture_ab is still running, and one started now would leave the "
+                    + "objects that one hid switched off. Call this again once it has answered; if it "
+                    + "answered with a job id, job_status says when it is done.",
+                    409);
+            }
+
             // Resolved before the sequence starts so an unknown path is refused in this reply
             // rather than a frame later, where it arrives as a failed job.
             var renderers = Hidden(hide);

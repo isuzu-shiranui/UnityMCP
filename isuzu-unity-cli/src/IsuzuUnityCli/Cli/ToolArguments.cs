@@ -75,7 +75,16 @@ public static class ToolArguments
         var file = parsed.Option("file");
         if (file is not null)
         {
-            var source = readFile(file);
+            string source;
+
+            try
+            {
+                source = readFile(file);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                throw new CliException($"--file could not be read: {e.Message}", 2);
+            }
 
             // Base64 keeps backslashes in C# string literals intact across the shell and JSON layers.
             if (tool == "execute_code")

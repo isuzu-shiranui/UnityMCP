@@ -256,7 +256,7 @@ namespace UnityMCP.Editor.Core
 
                     var answered = WithoutInlineImage(outcome.Result, out var picture);
                     var body = answered.ToString(Formatting.None);
-                    var refused = TooLarge(body, descriptor);
+                    var refused = TooLarge(body, this.SizedBy(descriptor, outcome.Result));
 
                     // A refusal is not an answer. Sent as an ordinary result it reads as the reply
                     // the caller asked for, and a model takes the explanation for the data.
@@ -299,6 +299,22 @@ namespace UnityMCP.Editor.Core
                         ["content"] = TextContent(text),
                     }));
             }
+        }
+
+        /// <summary>The tool whose declared limit a reply is held to.</summary>
+        /// <remarks>
+        /// job_status answers with another tool's result and declares no limit of its own. Held to
+        /// its own, a result its tool would have had refused inline goes out at any size once the
+        /// call runs long enough to become a job.
+        /// </remarks>
+        private McpToolDescriptor SizedBy(McpToolDescriptor descriptor, JObject result)
+        {
+            return descriptor.Name == "job_status"
+                   && result["label"] is JValue label
+                   && label.Type == JTokenType.String
+                   && this.catalog().TryGet(label.Value<string>(), out var original)
+                ? original
+                : descriptor;
         }
 
         private static JObject ToolError(string text)

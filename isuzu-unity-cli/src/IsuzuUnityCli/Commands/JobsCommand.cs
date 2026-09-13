@@ -191,9 +191,13 @@ public static class JobsCommand
             return fallback;
         }
 
-        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0)
+        // NaN and infinity parse, and a timer takes at most int.MaxValue milliseconds; past either
+        // the wait would throw instead of starting.
+        if (!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            || !double.IsFinite(parsed) || parsed <= 0 || parsed > int.MaxValue / 1000)
         {
-            throw new CliException($"--timeout expects a positive number of seconds, not '{value}'.", 2);
+            throw new CliException(
+                $"--timeout expects a positive number of seconds, at most {int.MaxValue / 1000}, not '{value}'.", 2);
         }
 
         return parsed;

@@ -104,6 +104,23 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void ANameWrittenLikePathSyntaxRoundTrips()
+        {
+            foreach (var name in new[] { "A/B", "A/B", "Twin[1]", "Ends\\[2]" })
+            {
+                new GameObject(name).transform.SetParent(this.root.transform);
+            }
+
+            foreach (Transform child in this.root.transform)
+            {
+                var path = ObjectResolve.PathOf(child.gameObject);
+
+                Assert.That(new ObjectResolve.PathBatch().PathOf(child.gameObject), Is.EqualTo(path));
+                Assert.That(ObjectResolve.Object(path, null), Is.SameAs(child.gameObject), path);
+            }
+        }
+
+        [Test]
         public void AnUnindexedPathTakesTheFirstMatch()
         {
             Assert.That(

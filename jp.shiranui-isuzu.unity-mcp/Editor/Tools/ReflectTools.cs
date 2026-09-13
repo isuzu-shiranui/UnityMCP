@@ -459,13 +459,9 @@ namespace UnityMCP.Editor.Tools
         {
             var result = new List<Segment>();
 
-            foreach (var raw in path.Split('/'))
+            // The hierarchy's splitter, so an '@scene:' root can name an object whose name has a '/'.
+            foreach (var raw in ObjectResolve.Segments(path))
             {
-                if (raw.Length == 0)
-                {
-                    continue;
-                }
-
                 var segment = new Segment { Raw = raw, Name = raw };
                 var open = raw.IndexOf('[');
 

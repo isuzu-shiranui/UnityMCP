@@ -148,6 +148,7 @@ CLI と Unity パッケージは 1 つのバージョンとして公開され、
 isuzu-unity-cli update --dry-run   # 何が変わるかだけ表示
 isuzu-unity-cli update             # CLI と、起動中の Editor のパッケージを揃える
 isuzu-unity-cli update --project X # そのプロジェクトのパッケージだけ
+isuzu-unity-cli update --release v4.3.1 # CLI とパッケージをそのバージョンに揃える（古いバージョンにも戻せる）
 ```
 
 パッケージの導入経路 6 通りのうち 4 通りはここからは更新できません。その場合は、動かす手順を名指しで示します。

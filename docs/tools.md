@@ -193,7 +193,7 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 
 ## 注意点
 
-- 編集系ツールが受け取る `object_path` は、`scene_browse_hierarchy` が返すものです。非アクティブなオブジェクトも解決できます。兄弟に同名がいるときだけ、`/Canvas/Button[1]/Text` と添字が付きます。
+- 編集系ツールが受け取る `object_path` は、`scene_browse_hierarchy` が返すものです。非アクティブなオブジェクトも解決できます。兄弟に同名がいるときだけ、`/Canvas/Button[1]/Text` と添字が付きます。名前の中の `/` と、`[数字]` で終わる名前の `[` には、前に `\` が付きます。名前の中の `\` は `\\` になります。
 
   Prefab を開いている間は例外です。`scene_browse_hierarchy` が返すのは、背後のシーンのパスのままです。`gameobject_` と `inspect_` のツールは Prefab の中身を見るので、そのパスを解決できません。
 - Play Mode 中のシーン編集は、成功したように見えて終了時に破棄されます。その状況では応答に `playModeWarning` が付きます。アセットの変更は残るので、そちらには付きません。
