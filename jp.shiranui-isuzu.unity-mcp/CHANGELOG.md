@@ -12,6 +12,7 @@
 - The EditMode test script refuses a `-ProjectPath` it did not create, and records the operating system it ran on.
 - `update` installs the CLI before it changes any project, so a release whose CLI cannot be installed is never written into a manifest.
 - `scene_browse_hierarchy`, `ui_hit_test` and `asset_broken_references` now build hierarchy paths with less overhead per object: each name is read from the Editor once, and names repeated among siblings are numbered without being looked up again.
+- The release publishes `server.json` to the MCP registry, which until now was done by hand after every release.
 
 ### Fixed
 - After losing its Editor, `verify`, `jobs --wait` or `mcp-stdio` could carry on in another project that matched the original name.
@@ -44,6 +45,9 @@
 - `prefab_create` wrote over a file at its path that Unity had not imported yet.
 - `gameobject_create`, `gameobject_set_transform` and `prefab_instantiate` accepted `NaN`, infinity and values outside the float range.
 - When two open projects' paths differed only in case, such as `Game` and `game`, a command run inside them went to whichever Editor was listed first. It now takes the project whose case matches the working directory, and stops with exit code 3 when neither or both do.
+- `update` took the release check's cached answer, which stands for six hours, so for most of a day after a release it reported that release as the version already installed. It now asks GitHub, which also means a check that failed while the network was down no longer stands as "no release" for six hours.
+- `upgrade --release V4.3.1`, with an uppercase V, asked for a tag GitHub does not have and downloaded nothing.
+- `update` printed the `CLI` heading twice.
 
 ## [4.3.1] - 2026-09-12
 

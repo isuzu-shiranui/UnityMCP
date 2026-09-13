@@ -292,6 +292,7 @@ public sealed class UpdateCommandTests : IDisposable
             ReadDescriptors = () => running,
             ExecutablePath = executablePath,
             ReleaseCachePath = Cache,
+            FetchRelease = _ => Task.FromResult("""{"tag_name":"v99.0.0"}"""),
             Cancellation = CancellationToken.None,
         }, output);
     }
@@ -425,6 +426,43 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Equal(1, await UpdateCommand.Run(Args("update", "--release", "v1.2.3"), context, (_, _) => Task.FromResult(0)));
         Assert.Contains("Broken: could not be read", output.ToString());
         Assert.DoesNotContain("Absent: could not be read", output.ToString());
+    }
+
+    /// <summary>
+    /// The release notice's cached answer stands for six hours. Taken here, this would report the
+    /// release it is being run to install as the one already installed, for most of a day.
+    /// </summary>
+    [Fact]
+    public async Task TheNewestReleaseIsAskedForRatherThanReadFromTheNoticesCache()
+    {
+        // The release that has just come out, against the answer the notice cached minutes before it.
+        File.WriteAllLines(Cache, new[] { "v0.0.1", DateTimeOffset.UtcNow.ToString("o") });
+        var (context, output) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "0.0.1"));
+
+        Assert.Equal(0, await UpdateCommand.Run(Args("update", "--dry-run"), context, (_, _) => Task.FromResult(0)));
+        Assert.Contains("v99.0.0", output.ToString());
+    }
+
+    /// <summary>
+    /// The install scripts take the value of --release as the tag. Only a lowercase 'v' counts as
+    /// one already being there, so an uppercase one is asked for as a tag GitHub does not have.
+    /// </summary>
+    [Theory]
+    [InlineData("v4.3.1")]
+    [InlineData("V4.3.1")]
+    [InlineData("4.3.1")]
+    public void AReleaseIsNamedByItsTagWhicheverWayItIsTyped(string typed)
+    {
+        Assert.Equal("v4.3.1", UpgradeCommand.ReleaseTag(typed));
+    }
+
+    [Theory]
+    [InlineData("latest")]
+    [InlineData("4.3")]
+    [InlineData("v4.3.1.2")]
+    public void AValueThatIsNotAVersionIsRefused(string typed)
+    {
+        Assert.Equal(2, Assert.Throws<IsuzuUnityCli.Cli.CliException>(() => UpgradeCommand.ReleaseTag(typed)).ExitCode);
     }
 
     private static IsuzuUnityCli.Cli.ParsedArgs Args(params string[] argv) => IsuzuUnityCli.Cli.ArgParser.Parse(argv);

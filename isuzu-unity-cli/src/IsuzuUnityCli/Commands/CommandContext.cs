@@ -51,6 +51,12 @@ public sealed class CommandContext
     public string? ReleaseCachePath { get; init; }
 
     /// <summary>
+    /// How the newest release is asked for. Substitutable so a test neither reaches GitHub nor is
+    /// answered by whichever release happens to be newest while it runs.
+    /// </summary>
+    public Func<CancellationToken, Task<string>> FetchRelease { get; init; } = ReleaseCheck.FromGitHub;
+
+    /// <summary>
     /// Whether an Editor answers /health with its own token, which only the Editor that published
     /// the token can do. Substitutable so a test decides without a server.
     /// </summary>

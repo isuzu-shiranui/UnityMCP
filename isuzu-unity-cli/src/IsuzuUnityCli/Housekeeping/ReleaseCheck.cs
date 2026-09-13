@@ -40,15 +40,20 @@ public static class ReleaseCheck
     /// reached, so a test that leaves this to the real path passes on a machine that has never
     /// run the tool and fails on one that has.
     /// </param>
+    /// <param name="standsFor">
+    /// How old a cached answer may be and still be taken. Zero asks every time, which is what a
+    /// command that is about to install the answer wants.
+    /// </param>
     public static async Task<string?> LatestTag(
         Func<CancellationToken, Task<string>> fetch,
         CancellationToken cancellation,
-        string? cachePath = null)
+        string? cachePath = null,
+        TimeSpan? standsFor = null)
     {
         var path = cachePath ?? CachePath;
         var cached = ReadCache(path);
 
-        if (cached is not null && DateTimeOffset.UtcNow - cached.CheckedAt < CacheFor)
+        if (cached is not null && DateTimeOffset.UtcNow - cached.CheckedAt < (standsFor ?? CacheFor))
         {
             return cached.Tag.Length > 0 ? cached.Tag : null;
         }

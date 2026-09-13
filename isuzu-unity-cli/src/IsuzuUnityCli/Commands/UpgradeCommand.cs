@@ -13,6 +13,7 @@ public static class UpgradeCommand
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
         var install = CliInstall.Read(context.ExecutablePath);
+        var release = parsed.Option("release") is { } named ? ReleaseTag(named) : null;
 
         if (!install.ReplacesItself)
         {
@@ -63,7 +64,7 @@ public static class UpgradeCommand
             // Not --version: that one is read before any command runs and prints this executable's
             // own version, so 'upgrade --version v4.0.0' printed 4.2.0 and exited 0 without
             // upgrading anything. The way back from a bad release has to be reachable.
-            var exit = await RunScript(script, parsed.Option("release"), windows, context);
+            var exit = await RunScript(script, release, windows, context);
 
             if (exit != 0)
             {
@@ -77,6 +78,33 @@ public static class UpgradeCommand
             // reports on what the freshly installed executable will find.
             return DoctorCommand.Run(ArgParser.Parse(["doctor", "--fix"]), context);
         }
+    }
+
+    /// <summary>The tag a release is downloaded under, from what the caller typed.</summary>
+    /// <remarks>
+    /// The install scripts take this value as the tag. Only a lowercase 'v' counts as one already
+    /// being there, so 'V4.3.1' is asked for as 'vV4.3.1' by one script and as 'V4.3.1' by the
+    /// other, and GitHub answers 404 for both.
+    /// </remarks>
+    public static string ReleaseTag(string release)
+    {
+        var version = release.TrimStart('v', 'V');
+        var dash = version.IndexOf('-');
+        var core = (dash < 0 ? version : version[..dash]).Split('.');
+        var prerelease = dash < 0 ? null : version[(dash + 1)..];
+
+        var shaped = core.Length == 3
+                     && core.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
+                     && (prerelease is null
+                         || (prerelease.Length > 0
+                             && prerelease.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-')));
+
+        if (!shaped)
+        {
+            throw new CliException($"--release expects a version such as v4.3.1, not '{release}'.", 2);
+        }
+
+        return "v" + version;
     }
 
     /// <summary>Why --release does nothing for a copy another tool installed.</summary>

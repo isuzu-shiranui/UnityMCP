@@ -37,15 +37,10 @@ public static class UpdateCommand
             return 1;
         }
 
-        // Checked before anything is written, since every project's manifest would be pointed at it.
-        if (release is not null && !IsReleaseVersion(release))
-        {
-            throw new CliException($"--release expects a version such as v4.3.1, not '{release}'.", 2);
-        }
-
         // A named release is the target for the packages and the CLI alike, an older one included:
-        // going back from a bad release is what naming one is for.
-        var tag = release is not null ? "v" + release.TrimStart('v', 'V') : await Latest(context);
+        // going back from a bad release is what naming one is for. Checked before anything is
+        // written, since every project's manifest would be pointed at it.
+        var tag = release is not null ? UpgradeCommand.ReleaseTag(release) : await Latest(context);
 
         if (tag is null)
         {
@@ -77,15 +72,21 @@ public static class UpdateCommand
 
         // Finish downloading and verifying the planned CLI before any project points at it.
         // Keep the tag fixed even if GitHub latest changes after the cached release check.
-        if (moves && !held && !parsed.HasFlag("dry-run"))
+        var installed = moves && !held && !parsed.HasFlag("dry-run");
+
+        if (installed)
         {
             context.Out.WriteLine("CLI");
             context.Cancellation.ThrowIfCancellationRequested();
+
             if (await upgrade(Reparse(tag), context) != 0)
             {
                 context.Err.WriteLine("CLI upgrade did not finish successfully; project manifests were not changed.");
                 return 1;
             }
+
+            context.Out.WriteLine($"  installed {tag}.");
+            context.Out.WriteLine();
         }
 
         context.Cancellation.ThrowIfCancellationRequested();
@@ -116,6 +117,11 @@ public static class UpdateCommand
             throw;
         }
 
+        if (installed)
+        {
+            return failed ? 1 : 0;
+        }
+
         context.Out.WriteLine();
         context.Out.WriteLine("CLI");
 
@@ -139,13 +145,7 @@ public static class UpdateCommand
             return failed ? 1 : 0;
         }
 
-        if (parsed.HasFlag("dry-run"))
-        {
-            context.Out.WriteLine($"  would install {tag}.");
-            return failed ? 1 : 0;
-        }
-
-        context.Out.WriteLine($"  installed {tag}.");
+        context.Out.WriteLine($"  would install {tag}.");
         return failed ? 1 : 0;
     }
 
@@ -269,27 +269,18 @@ public static class UpdateCommand
         _ => "its install channel was not recognised.",
     };
 
-    /// <summary>Three numbers, with or without a 'v' in front, and an optional prerelease.</summary>
-    private static bool IsReleaseVersion(string text)
-    {
-        var version = text.StartsWith('v') || text.StartsWith('V') ? text[1..] : text;
-        var dash = version.IndexOf('-');
-        var core = (dash < 0 ? version : version[..dash]).Split('.');
-        var prerelease = dash < 0 ? null : version[(dash + 1)..];
-
-        return core.Length == 3
-               && core.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
-               && (prerelease is null
-                   || (prerelease.Length > 0
-                       && prerelease.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-')));
-    }
-
+    /// <remarks>
+    /// Asked of GitHub rather than read from the cache the release notice uses. A cached answer
+    /// stands for six hours, which is most of a day in which this would report the release it is
+    /// being run to install as the one already installed, and a failed check is cached as no
+    /// release at all.
+    /// </remarks>
     private static async Task<string?> Latest(CommandContext context)
     {
         try
         {
             return await ReleaseCheck.LatestTag(
-                ReleaseCheck.FromGitHub, context.Cancellation, context.ReleaseCachePath);
+                context.FetchRelease, context.Cancellation, context.ReleaseCachePath, TimeSpan.Zero);
         }
         catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
         {

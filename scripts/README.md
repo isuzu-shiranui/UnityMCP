@@ -130,6 +130,26 @@ A policy on a private repository stays provisional for seven days and lapses if 
 published in that window; the window can be restarted from the same page. This repository is
 public, so the policy activates on the first successful publish.
 
+## Publishing to the MCP registry
+
+After the GitHub release and the NuGet push, the `registry` job publishes `server.json` to the
+[MCP registry](https://registry.modelcontextprotocol.io) with `mcp-publisher`. The registry resolves
+the entry against NuGet, so the job waits for nuget.org to serve the version before it publishes,
+for up to twenty minutes.
+
+Two things prove the entry belongs to this project, and both are already in place:
+
+- The TXT record `v=MCPv1; k=ed25519; p=<public key>` on `shiranui-isuzu.dev`, which is the half of
+  the key pair the registry checks the signature against. The private half is the repository secret
+  `MCP_PRIVATE_KEY`, 64 hex characters, and nothing else uses it.
+- The marker `<!-- mcp-name: dev.shiranui-isuzu/unity-mcp -->` in `README.en.md`, which the CLI's
+  NuGet package ships as its readme. The registry reads it there to confirm that whoever owns the
+  namespace also owns the package.
+
+Without `MCP_PRIVATE_KEY` the job says so as a warning and publishes nothing, so the release is not
+held back. Add the secret and re-run the workflow from `main` with workflow_dispatch; the job asks
+the registry first and does nothing when the version is already there.
+
 ## Submitting to winget
 
 After the GitHub release is published, the `winget` job submits the Windows binary to
