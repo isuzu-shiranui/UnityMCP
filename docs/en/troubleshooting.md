@@ -26,13 +26,23 @@ Descriptors live under `%LOCALAPPDATA%\UnityMCP\instances\` on Windows. On macOS
 
 The token lives in a file under `%LOCALAPPDATA%\UnityMCP\tokens\`. The CLI reads it for you. A curl call needs the `Authorization: Bearer <token>` header of its own.
 
-After regenerating a token, run `isuzu-unity-cli doctor --fix` to re-register the MCP clients.
+After regenerating a token, run `isuzu-unity-cli setup --mcp` in that project to register the MCP clients again. `doctor --fix` does not rewrite an entry it cannot tie to a project.
 
 ## The port looks different than expected
 
 The port is derived from the project path, so it is normally stable across restarts. If that port is already taken, the Editor scans for a free one instead.
 
 It then reports the mismatch as `portMismatch` in `/health` and in the descriptor, and as a warning in Preferences. Re-register any client with the actual port.
+
+## A command stops with "No running Editor has ... open"
+
+CLI commands and the MCP server reconnect only to the project path they first selected. When no Editor has that path open, they stop rather than connect to another project's Editor.
+
+- Open that project again.
+- To use another project, run the CLI command again with `--project`, or restart the MCP server. In Claude Desktop, turn the extension off and on.
+- If the project is open but still refused, check whether its path is written differently. A project opened through a junction or `subst`, or with different casing, is another path.
+
+The same stop happens when the working directory is inside a Unity project that no running Editor has open.
 
 ## A tool is missing
 

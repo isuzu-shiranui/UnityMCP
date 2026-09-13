@@ -48,8 +48,9 @@ namespace UnityMCP.Editor.Settings
 
             foreach (var entry in (environment("PATH") ?? string.Empty).Split(Path.PathSeparator))
             {
-                // Windows accepts an entry in double quotes.
-                var directory = entry.Trim().Trim('"');
+                // Windows accepts an entry in double quotes. On Unix the quotes and the spaces around
+                // an entry are part of the directory's name.
+                var directory = isWindows ? entry.Trim().Trim('"') : entry;
 
                 if (directory.Length == 0)
                 {

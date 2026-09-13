@@ -56,9 +56,8 @@ namespace UnityMCP.Editor.Core
 
             try
             {
-                Directory.CreateDirectory(DirectoryPath);
-                File.WriteAllText(path, token, new UTF8Encoding(false));
-                McpInstanceDescriptor.RestrictToOwner(path);
+                McpInstanceDescriptor.CreateStateDirectory(DirectoryPath);
+                McpInstanceDescriptor.WriteSecret(path, token);
             }
             catch (Exception e)
             {

@@ -13,6 +13,7 @@ public static class UpgradeCommand
     public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
     {
         var install = CliInstall.Read(context.ExecutablePath);
+        var release = parsed.Option("release") is { } named ? ReleaseTag(named) : null;
 
         if (!install.ReplacesItself)
         {
@@ -24,9 +25,9 @@ public static class UpgradeCommand
 
             context.Out.WriteLine($"Installed {install.Description}; run: {install.UpdateCommand}");
 
-            if (install.Channel is CliChannel.Winget)
+            if (CliInstall.Delay(install.Channel) is { } delay)
             {
-                context.Out.WriteLine(CliInstall.WingetDelay);
+                context.Out.WriteLine(delay);
             }
 
             return 0;
@@ -63,7 +64,7 @@ public static class UpgradeCommand
             // Not --version: that one is read before any command runs and prints this executable's
             // own version, so 'upgrade --version v4.0.0' printed 4.2.0 and exited 0 without
             // upgrading anything. The way back from a bad release has to be reachable.
-            var exit = await RunScript(script, parsed.Option("release"), windows, context);
+            var exit = await RunScript(script, release, windows, context);
 
             if (exit != 0)
             {
@@ -73,10 +74,75 @@ public static class UpgradeCommand
 
             context.Out.WriteLine();
 
-            // The new binary is on disk but this process is still the old one, so the check below
-            // reports on what the freshly installed executable will find.
-            return DoctorCommand.Run(ArgParser.Parse(["doctor", "--fix"]), context);
+            // Run through the executable the installer just wrote rather than in this process,
+            // which is still the old one. What doctor --fix rewrites is decided by comparing the
+            // installed files with the copy embedded in the running binary, so the old process
+            // finds its own skill current and leaves the new release's on disk unwritten.
+            return await RunInstalled(context);
         }
+    }
+
+    /// <summary>The freshly installed executable's own <c>doctor --fix</c>.</summary>
+    /// <remarks>
+    /// Both installers write over the path this process was started from, so that path now holds
+    /// the new binary; on Windows the running one is renamed out of the way first.
+    /// </remarks>
+    private static async Task<int> RunInstalled(CommandContext context)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = context.ExecutablePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        info.ArgumentList.Add("doctor");
+        info.ArgumentList.Add("--fix");
+
+        using var process = Process.Start(info);
+
+        if (process is null)
+        {
+            context.Err.WriteLine($"Could not start {context.ExecutablePath} to check the installation.");
+            return 1;
+        }
+
+        var output = Relay(process.StandardOutput, context.Out, context.Cancellation);
+        var errors = Relay(process.StandardError, context.Err, context.Cancellation);
+
+        await process.WaitForExitAsync(context.Cancellation);
+        await Task.WhenAll(output, errors);
+
+        return process.ExitCode;
+    }
+
+    /// <summary>The tag a release is downloaded under, from what the caller typed.</summary>
+    /// <remarks>
+    /// The install scripts take this value as the tag. Only a lowercase 'v' counts as one already
+    /// being there, so 'V4.3.1' is asked for as 'vV4.3.1' by one script and as 'V4.3.1' by the
+    /// other, and GitHub answers 404 for both.
+    /// </remarks>
+    public static string ReleaseTag(string release)
+    {
+        var version = release.TrimStart('v', 'V');
+        var dash = version.IndexOf('-');
+        var core = (dash < 0 ? version : version[..dash]).Split('.');
+        var prerelease = dash < 0 ? null : version[(dash + 1)..];
+
+        var shaped = core.Length == 3
+                     && core.All(part => part.Length > 0 && part.All(char.IsAsciiDigit))
+                     && (prerelease is null
+                         || (prerelease.Length > 0
+                             && prerelease.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-')));
+
+        if (!shaped)
+        {
+            throw new CliException($"--release expects a version such as v4.3.1, not '{release}'.", 2);
+        }
+
+        return "v" + version;
     }
 
     /// <summary>Why --release does nothing for a copy another tool installed.</summary>

@@ -2,9 +2,8 @@
 #
 # Sets the release version in every file that states one.
 #
-# Four fields in three files have to agree, and nothing derives one from another: the Unity
-# package manifest, the CLI's csproj, and server.json twice — once for the registry entry and
-# once for the NuGet package it names. A push to main whose package.json version changed is
+# Five fields in four files have to agree: the Unity package manifest, the CLI's csproj,
+# server.json twice, and the Editor's fallback version. A push to main whose package.json version changed is
 # what starts a release, so a field left behind here does not stop anything; it publishes a
 # registry entry pointing at a version that is not the one being released.
 #
@@ -28,10 +27,22 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MANIFEST="$ROOT/jp.shiranui-isuzu.unity-mcp/package.json"
 CSPROJ="$ROOT/isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj"
 SERVER="$ROOT/server.json"
+FALLBACK="$ROOT/jp.shiranui-isuzu.unity-mcp/Editor/Core/McpHttpServer.cs"
 
-for file in "$MANIFEST" "$CSPROJ" "$SERVER"; do
+for file in "$MANIFEST" "$CSPROJ" "$SERVER" "$FALLBACK"; do
   if [ ! -f "$file" ]; then
     echo "$file does not exist" >&2
+    exit 1
+  fi
+done
+
+# Check both text replacement targets before updating any file.
+for spec in "$CSPROJ|<Version>[^<]+</Version>" "$FALLBACK|FallbackVersion = \"[^\"]+\""; do
+  file=${spec%%|*}
+  pattern=${spec#*|}
+  count=$({ grep -Eo "$pattern" "$file" || true; } | wc -l)
+  if [ "$count" -ne 1 ]; then
+    echo "$file must contain exactly one version target (found $count). Nothing was changed." >&2
     exit 1
   fi
 done
@@ -46,6 +57,7 @@ jq --arg v "$VERSION" '.version = $v' "$MANIFEST" | tr -d '\r' >"$MANIFEST.tmp" 
 jq --arg v "$VERSION" '.version = $v | .packages = [.packages[] | .version = $v]' "$SERVER" | tr -d '\r' >"$SERVER.tmp" && mv "$SERVER.tmp" "$SERVER"
 
 perl -0pi -e "s{<Version>[^<]+</Version>}{<Version>$VERSION</Version>}" "$CSPROJ"
+perl -0pi -e "s{FallbackVersion = \"[^\"]+\"}{FallbackVersion = \"$VERSION\"}" "$FALLBACK"
 
 echo "package.json:  $(jq -r .version "$MANIFEST")"
 # sed rather than grep -oP: Git Bash ships a grep whose -P refuses to run outside a unibyte
@@ -53,6 +65,7 @@ echo "package.json:  $(jq -r .version "$MANIFEST")"
 echo "csproj:        $(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' "$CSPROJ")"
 echo "server.json:   $(jq -r .version "$SERVER")"
 echo "its nuget entry: $(jq -r '.packages[0].version' "$SERVER")"
+echo "fallback:      $(sed -n 's/.*FallbackVersion = "\([^"]*\)".*/\1/p' "$FALLBACK")"
 echo
 echo "Add the CHANGELOG section for $VERSION before this reaches main; the release takes its"
 echo "tag from package.json and does not read the changelog."

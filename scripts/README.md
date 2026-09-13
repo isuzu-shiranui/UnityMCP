@@ -26,6 +26,10 @@ on what happens to be installed on one machine is not a gate. `-Unity` runs the 
 another Editor, with Timeline, Recorder and the test framework taken from that Editor's own
 bundled package set. The version actually used is recorded in the attestation.
 
+Runs outside the pinned generation are saved under
+`attested/additional/<Unity version>/<source hash>.json`, so they do not overwrite the
+pinned run required by CI. Each directory keeps its ten most recent records.
+
 Options: `-Unity <path>` to pick an Editor, `-ProjectPath <dir>` to put the scratch project
 elsewhere, `-KeepProject` to keep it after a first run.
 
@@ -101,78 +105,11 @@ resolved dependency versions belong in the validation report for that run. Passi
 does not attest every supported Unity version or operating system. The hash is a stale-input
 check, not a cryptographic proof that tests were executed.
 
-## Publishing to NuGet
+## Releasing
 
-The release does not hold a NuGet API key. It asks nuget.org to trade this workflow's OpenID
-Connect token for a key that lasts an hour, which means there is no long-lived secret to leak or
-rotate. Two things have to exist for that trade to succeed.
-
-A trusted publishing policy on nuget.org, under the account name, at
-<https://www.nuget.org/account/trustedpublishing>:
-
-| Field | Value |
-|---|---|
-| Repository owner | `isuzu-shiranui` |
-| Repository | `UnityMCP` |
-| Workflow file | `auto-build-release.yml` (the file name only, without the directory) |
-| Environment | leave empty |
-| Scope | one that allows publishing a package that does not exist yet, for the first release |
-
-A repository secret `NUGET_USER` holding the nuget.org profile name that owns that policy, not an
-email address. The release checks for it before it tags anything and prints these instructions
-when it is missing.
-
-A policy on a private repository stays provisional for seven days and lapses if nothing is
-published in that window; the window can be restarted from the same page. This repository is
-public, so the policy activates on the first successful publish.
-
-## Submitting to winget
-
-After the GitHub release is published, the `winget` job submits the Windows binary to
-[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) as `IsuzuShiranui.IsuzuUnityCli`
-with wingetcreate. `winget-due.sh` decides whether a version is due:
-
-```sh
-GH_TOKEN=$(gh auth token) bash scripts/winget-due.sh 4.3.2
-```
-
-It prints `false` until winget-pkgs holds the package, because wingetcreate builds each manifest
-from the previous one and the first is submitted by hand. It also prints `false` for a prerelease,
-for a version already merged, and for a version with a pull request in any state, so a closed
-submission is not opened again on every push to main; such a version has to be submitted by hand.
-It exits 1 when GitHub does not give a usable answer, because a rate limit read as "not there"
-would submit the same version twice. `plan` reads that as "not due" so the release goes ahead, and
-the `winget` job asks again right before it submits.
-
-The first manifest has to be for 4.3.1 or later. An older CLI does not know it was installed with
-winget, so its `upgrade` and `update` replace the file winget installed, and winget then refuses to
-upgrade or uninstall it.
-
-The submission needs a token. Create it when the first manifest is submitted, so that it is in
-place for the first release after the merge:
-
-1. A personal access token (classic) with only the `public_repo` scope, and an expiry. wingetcreate
-   does not support fine-grained tokens. `public_repo` grants write access to every public
-   repository the account can push to, organisation repositories included, so a separate account
-   for this is worth considering.
-2. An environment named `winget` under Settings > Environments, with deployment branches limited to
-   `main`. A required reviewer would hold each submission until someone approves it.
-3. A secret `WINGET_TOKEN` in that environment, holding the token.
-
-The `winget` job checks the token before it uses it, and fails when the token is missing, expired,
-or not a classic token with `public_repo`. The job runs after the release, so the GitHub release and
-NuGet are not held back: replace the token and re-run the workflow from `main` with
-workflow_dispatch. The first pull request from an account to winget-pkgs is held until that account
-agrees to the Microsoft CLA.
-
-## Once 4.0.0 is on the registries
-
-One manual step, not automated because it happens exactly once. Nothing installs the npm package
-any more, so point the people who already have it at what replaced it:
-
-```sh
-npm deprecate @shiranui_isuzu/unity-mcp "v4 moved to isuzu-unity-cli: https://github.com/isuzu-shiranui/UnityMCP#installation"
-```
+Publishing to NuGet, to the MCP registry and to winget-pkgs each needs a credential that only the
+maintainer holds. Which ones, how they are created and how they are set are kept outside this
+repository, with the rest of the release notes for this project.
 
 ## `bench-cli-vs-mcp.ps1`
 

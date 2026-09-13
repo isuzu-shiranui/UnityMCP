@@ -99,9 +99,16 @@ public static class StatePaths
         AddRoot(roots, Path.Combine(baseDirectory!, "UnityMCP"));
     }
 
+    /// <remarks>
+    /// Compared without a trailing separator, and with the case kept: a directory can be
+    /// case-sensitive, so two spellings that differ only in case can be two directories. One
+    /// directory reached under two spellings yields the same files, which the store reads once.
+    /// </remarks>
     private static void AddRoot(List<string> roots, string root)
     {
-        if (!roots.Contains(root, StringComparer.Ordinal))
+        var trimmed = Path.TrimEndingDirectorySeparator(root);
+
+        if (!roots.Any(existing => string.Equals(Path.TrimEndingDirectorySeparator(existing), trimmed, StringComparison.Ordinal)))
         {
             roots.Add(root);
         }

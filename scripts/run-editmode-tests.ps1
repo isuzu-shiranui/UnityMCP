@@ -19,6 +19,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$ProjectPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ProjectPath)
+$processWindow = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { @{ WindowStyle = 'Hidden' } } else { @{} }
 $repo = Split-Path -Parent $PSScriptRoot
 $package = 'jp.shiranui-isuzu.unity-mcp'
 
@@ -59,6 +61,45 @@ function Resolve-Unity {
     throw "No Unity $PinnedUnityVersion.x Editor found. Install one, or pass -Unity with a path."
 }
 
+# The project is removed only through Remove-ScratchProject. It takes the two links away with
+# rmdir, which removes a link and never what it points to, before the folder goes, so removing
+# the project cannot reach the package and the docs in this repository.
+function Remove-Link([string] $path) {
+    cmd /c rmdir "`"$path`"" | Out-Null
+    if (Test-Path -LiteralPath $path) { throw "Could not remove the link at $path." }
+}
+
+function Test-Link([string] $path) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    return [bool]($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))
+}
+
+function Remove-ScratchProject {
+    foreach ($link in @((Join-Path $ProjectPath "Packages\$package"), (Join-Path $ProjectPath 'docs'))) {
+        if (Test-Link $link) { Remove-Link $link }
+    }
+    Remove-Item -LiteralPath $ProjectPath -Recurse -Force
+}
+
+# A folder this script created carries this file. Anything else at -ProjectPath is someone's work,
+# and is neither written to nor deleted, so this is decided before anything else happens.
+$marker = Join-Path $ProjectPath '.unity-mcp-editmode'
+
+if (Test-Path -LiteralPath $ProjectPath) {
+    # A test project made before the marker existed has both links, which a project of someone's
+    # own does not.
+    $earlier = (Test-Link (Join-Path $ProjectPath 'docs')) -and (Test-Link (Join-Path $ProjectPath "Packages\$package"))
+    $empty = -not (Get-ChildItem -LiteralPath $ProjectPath -Force | Select-Object -First 1)
+
+    if (-not (Test-Path -LiteralPath $marker) -and -not $earlier -and -not $empty) {
+        throw "'$ProjectPath' is not a test project this script created. Nothing was changed. Pass another -ProjectPath, or empty that folder."
+    }
+
+    if ($earlier -and -not (Test-Path -LiteralPath $marker)) {
+        [System.IO.File]::WriteAllText($marker, "Created by scripts/run-editmode-tests.ps1.`n")
+    }
+}
+
 $unityExe = Resolve-Unity
 Write-Host "Unity:   $unityExe"
 Write-Host "Project: $ProjectPath"
@@ -66,13 +107,15 @@ Write-Host "Project: $ProjectPath"
 # ── the scratch project ───────────────────────────────────────────────────────
 if (-not (Test-Path (Join-Path $ProjectPath 'Packages'))) {
     Write-Host 'Creating the test project (first run only, takes a minute)...'
-    if (Test-Path $ProjectPath) { Remove-Item -Recurse -Force $ProjectPath }
+    if (Test-Path $ProjectPath) { Remove-ScratchProject }
 
-    $create = Start-Process -FilePath $unityExe -Wait -PassThru -ArgumentList @(
+    $create = Start-Process -FilePath $unityExe -Wait -PassThru @processWindow -ArgumentList @(
         '-batchmode', '-nographics', '-quit', '-createProject', "`"$ProjectPath`""
     )
 
     if ($create.ExitCode -ne 0) { throw "createProject failed with exit code $($create.ExitCode)." }
+
+    [System.IO.File]::WriteAllText($marker, "Created by scripts/run-editmode-tests.ps1.`n")
 }
 
 $unityVersion = (Split-Path (Split-Path $unityExe -Parent) -Leaf)
@@ -151,20 +194,37 @@ $manifest = @"
     $manifest,
     (New-Object System.Text.UTF8Encoding($false)))
 
-$link = Join-Path $ProjectPath "Packages\$package"
-if (-not (Test-Path $link)) {
-    $source = Join-Path $repo $package
-    cmd /c mklink /J "`"$link`"" "`"$source`"" | Out-Null
-    if (-not (Test-Path $link)) { throw "Could not link the package into $link." }
+# Made again when it points anywhere but this checkout. A scratch project shared with another
+# worktree would otherwise compile that worktree's sources and record them under this one's hash.
+function Set-Link([string] $link, [string] $target) {
+    $item = Get-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+
+    if ($item) {
+        if (-not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            throw "'$link' is a folder, not a link to this repository. Nothing was deleted. Move it away and run again."
+        }
+
+        $current = [string](@($item.Target) | Select-Object -First 1)
+        if ($current.StartsWith('\??\')) { $current = $current.Substring(4) }
+
+        if ($current -and ([System.IO.Path]::GetFullPath($current).TrimEnd('\') -ieq [System.IO.Path]::GetFullPath($target).TrimEnd('\'))) {
+            return
+        }
+
+        Write-Host "Relinking $link (it pointed at '$current')"
+        Remove-Link $link
+    }
+
+    cmd /c mklink /J "`"$link`"" "`"$target`"" | Out-Null
+    if (-not (Test-Path -LiteralPath $link)) { throw "Could not link $target into $link." }
 }
+
+Set-Link (Join-Path $ProjectPath "Packages\$package") (Join-Path $repo $package)
 
 # The reference pages, linked the same way so the test that checks every tool has a row can
 # find them. Without this that test has nowhere to look and passes by skipping, which is the
 # one outcome a guard must not have.
-$docsLink = Join-Path $ProjectPath 'docs'
-if (-not (Test-Path $docsLink)) {
-    cmd /c mklink /J "`"$docsLink`"" "`"$(Join-Path $repo 'docs')`"" | Out-Null
-}
+Set-Link (Join-Path $ProjectPath 'docs') (Join-Path $repo 'docs')
 
 # ── run ───────────────────────────────────────────────────────────────────────
 # Taken before the Editor starts and compared with the one taken after. An edit landing while
@@ -177,7 +237,7 @@ $log = Join-Path $ProjectPath 'editmode.log'
 Remove-Item $results -ErrorAction SilentlyContinue
 
 Write-Host 'Running EditMode tests...'
-$run = Start-Process -FilePath $unityExe -Wait -PassThru -ArgumentList @(
+$run = Start-Process -FilePath $unityExe -Wait -PassThru @processWindow -ArgumentList @(
     '-batchmode', '-nographics',
     '-projectPath', "`"$ProjectPath`"",
     '-runTests', '-testPlatform', 'EditMode',
@@ -233,6 +293,10 @@ $attestation = [ordered]@{
     # From the executable, not the results file: the Unity version is not among the properties
     # NUnit writes, and reading it from there produced an empty object rather than an error.
     unityVersion = $unityVersion
+    # The Editor code branches on the operating system, so a run covers only the branch it took.
+    # The family is what that says; the build number of the machine it ran on says nothing more.
+    # Windows PowerShell defines neither $IsMacOS nor $IsLinux, and runs nowhere else.
+    os           = if ($IsMacOS) { 'macOS' } elseif ($IsLinux) { 'Linux' } else { 'Windows' }
     ranAt        = (Get-Date).ToUniversalTime().ToString('o')
 }
 
@@ -241,6 +305,11 @@ $attestation = [ordered]@{
 # touched Editor sources, and resolving that teaches nothing: the merged result has a hash
 # neither run covers, which the gate catches on its own a moment later.
 $directory = Join-Path $repo 'scripts\attested'
+# Other Editor generations are useful evidence, but must not replace the pinned run
+# that CI reads under this same source hash.
+if (-not $unityVersion.StartsWith($PinnedUnityVersion + '.', [StringComparison]::Ordinal)) {
+    $directory = Join-Path (Join-Path $directory 'additional') $unityVersion
+}
 New-Item -ItemType Directory -Force -Path $directory | Out-Null
 $path = Join-Path $directory "$hash.json"
 
@@ -267,5 +336,5 @@ Write-Host "  sourceHash $($hash.Substring(0, 16))..."
 Write-Host '  Commit it with the change it covers; the release checks it before publishing.'
 
 if (-not $KeepProject -and -not (Test-Path (Join-Path $ProjectPath 'Library'))) {
-    Remove-Item -Recurse -Force $ProjectPath -ErrorAction SilentlyContinue
+    try { Remove-ScratchProject } catch { Write-Warning "Could not remove ${ProjectPath}: $_" }
 }

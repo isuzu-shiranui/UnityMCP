@@ -67,6 +67,30 @@ namespace UnityMCP.Editor.Tests
             Assert.That(segments[1].Index, Is.Null);
         }
 
+        /// <summary>
+        /// A name ending in '/' is written with an escaped slash. An '@scene:' root written inline
+        /// keeps it, rather than resolving to another object whose name ends in a backslash.
+        /// </summary>
+        [Test]
+        public void AnInlineSceneRootKeepsAnEscapedSlashAtTheEndOfAName()
+        {
+            var prefix = "ReflectSlash_" + System.Guid.NewGuid().ToString("N");
+            var target = new GameObject(prefix + "/");
+            var other = new GameObject(prefix + "\\");
+
+            try
+            {
+                var inline = "@scene:" + ObjectResolve.PathOf(target).Substring(1);
+
+                Assert.That(ReflectTools.ResolvePath(inline, out _, out _), Is.SameAs(target));
+            }
+            finally
+            {
+                Object.DestroyImmediate(target);
+                Object.DestroyImmediate(other);
+            }
+        }
+
         [Test]
         public void ReadsAStaticField()
         {

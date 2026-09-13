@@ -47,6 +47,7 @@ public static class SetupCommand
             || (explicitAgents && chosen.Any(agent => !SkillCapableAgents.Contains(agent.Name, StringComparer.Ordinal)));
 
         InstanceDescriptor? descriptor = null;
+        CliException? unresolved = null;
         var failed = false;
         var registered = false;
 
@@ -54,13 +55,15 @@ public static class SetupCommand
         {
             try
             {
-                descriptor = context.ResolveInstance(parsed);
+                // The entry written stays pointed at this project for as long as the client keeps it.
+                descriptor = context.ResolveInstance(parsed, exactOnly: true);
             }
-            catch (CliException)
+            catch (CliException e)
             {
                 // Reported after the skills are installed, so a missing Editor does not cost
                 // the user the half of setup that never needed one.
                 descriptor = null;
+                unresolved = e;
             }
         }
 
@@ -111,6 +114,11 @@ public static class SetupCommand
 
         if (wantsMcp && descriptor is null)
         {
+            if (unresolved is not null)
+            {
+                context.Err.WriteLine(unresolved.Message);
+            }
+
             context.Err.WriteLine(
                 "setup --mcp needs a running Editor for the project: its URL and token come from the descriptor.");
             return 3;

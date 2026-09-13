@@ -249,12 +249,11 @@ public sealed class ReleaseNoticeTests : IDisposable
 }
 
 /// <summary>
-/// The CLI half of update, over a copy another tool installed.
+/// The CLI half of update, and the version it moves each project to.
 /// </summary>
 /// <remarks>
-/// The release is read from a fresh cache, so the context can be cancelled before the run: should
-/// the channel be misread, upgrade's download of the real installer is refused at once and
-/// nothing on this machine is replaced.
+/// The release is read from a fresh cache, and a copy the install script manages is handed an
+/// upgrade that only answers, so no test downloads an installer or replaces an executable.
 /// </remarks>
 public sealed class UpdateCommandTests : IDisposable
 {
@@ -293,7 +292,8 @@ public sealed class UpdateCommandTests : IDisposable
             ReadDescriptors = () => running,
             ExecutablePath = executablePath,
             ReleaseCachePath = Cache,
-            Cancellation = new CancellationToken(canceled: true),
+            FetchRelease = _ => Task.FromResult("""{"tag_name":"v99.0.0"}"""),
+            Cancellation = CancellationToken.None,
         }, output);
     }
 
@@ -357,4 +357,113 @@ public sealed class UpdateCommandTests : IDisposable
         Assert.Contains("dotnet tool update -g IsuzuUnityCli", output.ToString());
         Assert.DoesNotContain("would install", output.ToString());
     }
+
+    [Fact]
+    public async Task ANamedReleaseIsWhereEveryProjectGoesAnOlderOneIncluded()
+    {
+        var (context, _) = Context(
+            Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Ahead", "98.0.0"), Project("Behind", "0.0.1"));
+
+        Assert.Equal(0, await UpdateCommand.Run(Args("update", "--release", "v1.2.3"), context, (_, _) => Task.FromResult(0)));
+        Assert.Equal("1.2.3", Dependency("Ahead"));
+        Assert.Equal("1.2.3", Dependency("Behind"));
+    }
+
+    /// <summary>
+    /// The CLI is installed first, so a release whose CLI cannot be installed is never written into
+    /// a manifest, and the installer is asked for the release the check found rather than for
+    /// whatever is newest by the time it runs.
+    /// </summary>
+    [Theory]
+    [InlineData(null, "v99.0.0")]
+    [InlineData("1.2.3", "v1.2.3")]
+    public async Task AFailedUpgradeLeavesEveryManifestAndAsksForThePlannedRelease(string? release, string expected)
+    {
+        var (context, _) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "4.0.0"));
+        var asked = new List<string?>();
+
+        var exit = await UpdateCommand.Run(
+            Args(release is null ? new[] { "update" } : new[] { "update", "--release", release }),
+            context,
+            (args, _) =>
+            {
+                asked.Add(args.Option("release"));
+                return Task.FromResult(1);
+            });
+
+        Assert.Equal(1, exit);
+        Assert.Equal(expected, Assert.Single(asked));
+        Assert.Equal("4.0.0", Dependency("Game"));
+    }
+
+    [Fact]
+    public async Task ADryRunInstallsNothingAndLeavesTheManifest()
+    {
+        var (context, _) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "4.0.0"));
+
+        Assert.Equal(0, await UpdateCommand.Run(
+            Args("update", "--release", "v1.2.3", "--dry-run"),
+            context,
+            (_, _) => throw new InvalidOperationException("A dry run started the installer.")));
+        Assert.Equal("4.0.0", Dependency("Game"));
+    }
+
+    /// <summary>
+    /// A manifest that cannot be read is a failure to report. It is not a project that does not use
+    /// the package, which is passed over without one.
+    /// </summary>
+    [Fact]
+    public async Task AnUnreadableManifestFailsWhereOneWithoutThePackageIsPassedOver()
+    {
+        var broken = Project("Broken", "4.0.0");
+        var absent = Project("Absent", "4.0.0");
+        File.WriteAllText(Path.Combine(root, "Broken", "Packages", "manifest.json"), "not json");
+        File.WriteAllText(
+            Path.Combine(root, "Absent", "Packages", "manifest.json"),
+            "{\"dependencies\":{\"com.unity.ide.rider\":\"3.0.28\"}}");
+        var (context, output) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), broken, absent);
+
+        Assert.Equal(1, await UpdateCommand.Run(Args("update", "--release", "v1.2.3"), context, (_, _) => Task.FromResult(0)));
+        Assert.Contains("Broken: could not be read", output.ToString());
+        Assert.DoesNotContain("Absent: could not be read", output.ToString());
+    }
+
+    /// <summary>
+    /// The release notice's cached answer stands for six hours. Taken here, this would report the
+    /// release it is being run to install as the one already installed, for most of a day.
+    /// </summary>
+    [Fact]
+    public async Task TheNewestReleaseIsAskedForRatherThanReadFromTheNoticesCache()
+    {
+        // The release that has just come out, against the answer the notice cached minutes before it.
+        File.WriteAllLines(Cache, new[] { "v0.0.1", DateTimeOffset.UtcNow.ToString("o") });
+        var (context, output) = Context(Path.Combine(root, "bin", "isuzu-unity-cli.exe"), Project("Game", "0.0.1"));
+
+        Assert.Equal(0, await UpdateCommand.Run(Args("update", "--dry-run"), context, (_, _) => Task.FromResult(0)));
+        Assert.Contains("v99.0.0", output.ToString());
+    }
+
+    /// <summary>
+    /// The install scripts take the value of --release as the tag. Only a lowercase 'v' counts as
+    /// one already being there, so an uppercase one is asked for as a tag GitHub does not have.
+    /// </summary>
+    [Theory]
+    [InlineData("v4.3.1")]
+    [InlineData("V4.3.1")]
+    [InlineData("4.3.1")]
+    public void AReleaseIsNamedByItsTagWhicheverWayItIsTyped(string typed)
+    {
+        Assert.Equal("v4.3.1", UpgradeCommand.ReleaseTag(typed));
+    }
+
+    [Theory]
+    [InlineData("latest")]
+    [InlineData("4.3")]
+    [InlineData("v4.3.1.2")]
+    public void AValueThatIsNotAVersionIsRefused(string typed)
+    {
+        Assert.Equal(2, Assert.Throws<IsuzuUnityCli.Cli.CliException>(() => UpgradeCommand.ReleaseTag(typed)).ExitCode);
+    }
+
+    private static IsuzuUnityCli.Cli.ParsedArgs Args(params string[] argv) => IsuzuUnityCli.Cli.ArgParser.Parse(argv);
 }

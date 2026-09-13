@@ -119,11 +119,14 @@ public static extern IntPtr SendMessageTimeout(
                 continue
             }
 
-            $sha = New-Object System.Security.Cryptography.SHA256CryptoServiceProvider
             try {
-                return ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
+                $sha = New-Object System.Security.Cryptography.SHA256CryptoServiceProvider
+                try {
+                    return ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '')
+                } finally {
+                    $sha.Dispose()
+                }
             } finally {
-                $sha.Dispose()
                 $stream.Dispose()
             }
         }

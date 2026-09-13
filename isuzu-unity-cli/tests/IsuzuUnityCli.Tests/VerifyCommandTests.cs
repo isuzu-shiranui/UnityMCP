@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Commands;
 using IsuzuUnityCli.Discovery;
@@ -303,6 +304,47 @@ public sealed class VerifyCommandTests
         Assert.Contains("compile: ok", output.ToString());
         Assert.Equal("Bearer stale-token", server.Requests[2].Authorization);
         Assert.Equal("Bearer fresh-token", server.Requests[3].Authorization);
+    }
+
+    [Fact]
+    public async Task ATokenThatStaysRejectedStopsWithTheReason()
+    {
+        using var server = new FakeUnityServer()
+            .Default(401, """{"status":"error","error":{"code":"unauthorized","message":"bad token"}}""");
+        var (context, output, error) = Context(server);
+
+        var code = await VerifyCommand.Run(ArgParser.Parse(["verify", "--raw"]), context, Fast with { UnauthorizedGraceMs = 50 });
+
+        Assert.Equal(3, code);
+        Assert.Contains("kept rejecting the token", error.ToString());
+        Assert.False(JsonNode.Parse(output.ToString())!["ok"]!.GetValue<bool>());
+        Assert.All(server.Requests, request => Assert.Equal("/tools/compile_status", request.Path));
+    }
+
+    [Fact]
+    public async Task AProjectThatDoesNotComeBackTimesOutWithTheReason()
+    {
+        var gone = FakeUnityServer.DescriptorFor(FakeUnityServer.FreePort(), "Gone");
+        var reads = 0;
+        var error = new StringWriter();
+        var context = new CommandContext
+        {
+            Out = new StringWriter(),
+            Err = error,
+            ReadDescriptors = () => ++reads == 1 ? [gone] : [],
+            WorkingDirectory = Path.GetTempPath(),
+            Client = new UnityHttpClient(new RetryOptions
+            {
+                InitialBackoffMs = 5,
+                MaxBackoffMs = 10,
+                BudgetMs = 50,
+                PerAttemptTimeoutMs = 500,
+            }),
+        };
+
+        Assert.Equal(4, await Verify(context, "--timeout", "1"));
+        Assert.Contains("verify timed out after 1s", error.ToString());
+        Assert.Contains($"No running Editor has {Path.Combine(Path.GetTempPath(), "Gone")} open.", error.ToString());
     }
 
     [Fact]

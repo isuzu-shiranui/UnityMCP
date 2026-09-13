@@ -134,7 +134,6 @@ public sealed class McpStdioBridgeTests
         Assert.Equal(-32000, error["error"]!["code"]!.GetValue<int>());
         Assert.Equal("Unity Editor for Game is not running", error["error"]!["message"]!.GetValue<string>());
     }
-
     [Fact]
     public async Task ANotificationThatCannotBeDeliveredIsNotAnsweredAtAll()
     {

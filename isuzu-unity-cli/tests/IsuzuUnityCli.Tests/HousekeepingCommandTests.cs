@@ -242,6 +242,32 @@ public sealed class HousekeepingCommandTests
         Assert.Equal("Bearer " + rotated.Token, entry!["headers"]!["Authorization"]!.GetValue<string>());
     }
 
+    /// <summary>
+    /// A port is not a project. Once another project's Editor holds the port an entry names, its
+    /// token written into that entry would hand the entry to the other project.
+    /// </summary>
+    [Fact]
+    public async Task DoctorLeavesAnEntryItCanTieToAnEditorOnlyByUrl()
+    {
+        using var home = new TempHome();
+        var codex = home.MakeDirectory(".codex");
+        var game = home.MakeDirectory("Game");
+        var other = home.MakeDirectory("Other");
+
+        var (setup, _, _) = Context(home, Descriptor(game));
+        Assert.Equal(0, await Program.Run(["setup", "--agent", "codex", "--mcp"], setup));
+
+        var (fix, report, _) = Context(home, Descriptor(other, token: new string('1', 64)));
+        Assert.Equal(0, await Program.Run(["doctor", "--fix"], fix));
+
+        var entry = TomlConfigEditor.Read(File.ReadAllText(Path.Combine(codex, "config.toml"), Encoding.UTF8), "mcp_servers.isuzu-unity")!;
+
+        Assert.Contains("setup --mcp --agent codex", report.ToString());
+        Assert.DoesNotContain("rewritten from the running Editor", report.ToString());
+        Assert.Contains(Token, entry.Authorization);
+    }
+
+
     [Fact]
     public async Task DoctorReinstallsAStaleSkillOnlyWhenAskedTo()
     {

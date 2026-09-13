@@ -88,7 +88,6 @@ public sealed class JobsCommandTests
 
         Assert.Equal(1, await Jobs(context, "j1", "--wait"));
     }
-
     [Fact]
     public async Task AJobThatWasCancelledReachesTheShellAsAFailure()
     {

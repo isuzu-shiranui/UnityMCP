@@ -630,6 +630,104 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Publishes server.json to the MCP registry, which is where a client that searches for this
+  # server reads its name, its NuGet id and the arguments it is started with. The registry resolves
+  # the package against NuGet and refuses a version NuGet does not serve yet, so this waits for the
+  # push above to be indexed. Running after the release, a refusal here fails this job alone.
+  registry:
+    needs: [plan, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      SERVER: dev.shiranui-isuzu/unity-mcp
+      # Ownership is proved by signing with the key whose public half is the _mcp TXT record of this
+      # domain, and by the mcp-name marker in the README the NuGet package ships.
+      DOMAIN: shiranui-isuzu.dev
+      # The key passes through mcp-publisher, so the executable is pinned by its hash as well as its
+      # version.
+      PUBLISHER_VERSION: v1.8.1
+      PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Anything to publish?
+        id: due
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
+        run: |
+          PUBLISHED=$(curl -s --connect-timeout 20 --max-time 60 -G \
+            --data-urlencode "search=$SERVER" \
+            https://registry.modelcontextprotocol.io/v0/servers \
+            | jq -r --arg name "$SERVER" --arg v "$VERSION" \
+              '[.servers[]? | .server // . | select(.name == $name and .version == $v)] | length')
+
+          if [ "$PUBLISHED" != "0" ]; then
+            echo "$SERVER $VERSION is already on the registry."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Announced rather than failed: the release itself is finished, and a key that is missing
+          # or expired is answered by adding it and re-running this workflow.
+          if [ -z "$MCP_PRIVATE_KEY" ]; then
+            echo "::warning::MCP_PRIVATE_KEY is not set, so $SERVER $VERSION was not published to the registry."
+            echo "- MCP registry: not published; MCP_PRIVATE_KEY is not set" >> "$GITHUB_STEP_SUMMARY"
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for NuGet to serve the version
+        if: steps.due.outputs.needed == 'true'
+        run: |
+          # Indexing runs behind the push and takes minutes. The registry reads the same flat
+          # container, so what it can see is what this asks about.
+          for _ in $(seq 1 40); do
+            if curl -sf https://api.nuget.org/v3-flatcontainer/isuzuunitycli/index.json \
+               | jq -e --arg v "$VERSION" '.versions | index($v)' >/dev/null; then
+              echo "NuGet serves IsuzuUnityCli $VERSION."
+              exit 0
+            fi
+
+            sleep 30
+          done
+
+          echo "NuGet still does not serve IsuzuUnityCli $VERSION after 20 minutes."
+          exit 1
+
+      - name: Download mcp-publisher
+        if: steps.due.outputs.needed == 'true'
+        run: |
+          curl -sSL -o publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz"
+
+          ACTUAL=$(sha256sum publisher.tar.gz | cut -d' ' -f1)
+
+          if [ "$ACTUAL" != "$PUBLISHER_SHA256" ]; then
+            echo "mcp-publisher hashes to $ACTUAL, not the pinned $PUBLISHER_SHA256."
+            exit 1
+          fi
+
+          tar xzf publisher.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Publish server.json
+        if: steps.due.outputs.needed == 'true'
+        env:
+          MCP_PRIVATE_KEY: ${{ secrets.MCP_PRIVATE_KEY }}
+        run: |
+          ./mcp-publisher login dns -algorithm ed25519 -domain "$DOMAIN" -private-key "$MCP_PRIVATE_KEY"
+          ./mcp-publisher publish
+          echo "- MCP registry: published $VERSION" >> "$GITHUB_STEP_SUMMARY"
+
   # Submits the published Windows binary. wingetcreate builds the manifest from the one winget-pkgs
   # already holds and writes this release's URL, hash and version into it. Running after the
   # release, a token that has expired fails this job alone, and a re-run with workflow_dispatch
@@ -684,7 +782,7 @@ jobs:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
           if [ -z "$WINGET_TOKEN" ]; then
-            echo "WINGET_TOKEN is not set in the winget environment. scripts/README.md says how to create it."
+            echo "WINGET_TOKEN is not set in the winget environment."
             exit 1
           fi
 

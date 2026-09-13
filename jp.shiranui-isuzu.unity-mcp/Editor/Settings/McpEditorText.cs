@@ -52,6 +52,8 @@ namespace UnityMCP.Editor.Settings
             ["Registered in {0} client configuration(s)"] = "{0} 個のクライアント設定に登録済み",
             ["No MCP client points at this Editor"] = "この Editor を指している MCP クライアントがありません",
             ["setup --mcp finished without saying anything."] = "setup --mcp は何も出力せずに終了しました。",
+            ["setup --mcp is running..."] = "setup --mcp を実行中です...",
+            ["setup --mcp timed out. Registration may be incomplete; refresh before retrying."] = "setup --mcp がタイムアウトしました。登録が未完了の可能性があります。再試行する前に再確認してください。",
             ["Could not run {0}: {1}"] = "{0} を実行できませんでした: {1}",
             ["Refresh"] = "再確認",
             ["Copy command"] = "コマンドをコピー",
@@ -77,8 +79,8 @@ namespace UnityMCP.Editor.Settings
             ["The descriptor and token files under {0} are credentials. Anything that can read them can run code in this Editor."] =
                 "{0} の descriptor ファイルとトークンファイルは資格情報です。これらを読めるものは、この Editor 内でコードを実行できます。",
             ["Regenerate token"] = "トークンを再発行",
-            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"] =
-                "今のトークンで登録済みの MCP クライアントは、isuzu-unity-cli doctor --fix で登録し直すまで動かなくなります。続けますか？",
+            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli setup --mcp. Continue?"] =
+                "今のトークンで登録済みの MCP クライアントは、isuzu-unity-cli setup --mcp で登録し直すまで動かなくなります。続けますか？",
             ["Cancel"] = "キャンセル",
 
             // Settings
@@ -131,6 +133,8 @@ namespace UnityMCP.Editor.Settings
             ["Registered in {0} client configuration(s)"] = "Đã đăng ký trong {0} cấu hình ứng dụng khách",
             ["No MCP client points at this Editor"] = "Chưa có ứng dụng khách MCP nào trỏ tới Editor này",
             ["setup --mcp finished without saying anything."] = "setup --mcp đã kết thúc mà không xuất thông báo nào.",
+            ["setup --mcp is running..."] = "Đang chạy setup --mcp...",
+            ["setup --mcp timed out. Registration may be incomplete; refresh before retrying."] = "setup --mcp đã hết thời gian chờ. Đăng ký có thể chưa hoàn tất; hãy kiểm tra lại trước khi thử lại.",
             ["Could not run {0}: {1}"] = "Không thể chạy {0}: {1}",
             ["Refresh"] = "Kiểm tra lại",
             ["Copy command"] = "Sao chép lệnh",
@@ -154,8 +158,8 @@ namespace UnityMCP.Editor.Settings
             ["The descriptor and token files under {0} are credentials. Anything that can read them can run code in this Editor."] =
                 "Các tệp mô tả kết nối và tệp token trong {0} chứa thông tin xác thực. Bất kỳ ai hoặc chương trình nào đọc được chúng đều có thể chạy mã trong Editor này.",
             ["Regenerate token"] = "Tạo lại token",
-            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli doctor --fix. Continue?"] =
-                "Mọi ứng dụng khách MCP đã đăng ký bằng token hiện tại sẽ ngừng hoạt động cho đến khi được đăng ký lại bằng isuzu-unity-cli doctor --fix. Tiếp tục?",
+            ["Every MCP client registered with the current token stops working until it is registered again with isuzu-unity-cli setup --mcp. Continue?"] =
+                "Mọi ứng dụng khách MCP đã đăng ký bằng token hiện tại sẽ ngừng hoạt động cho đến khi được đăng ký lại bằng isuzu-unity-cli setup --mcp. Tiếp tục?",
             ["Cancel"] = "Hủy",
 
             // Settings

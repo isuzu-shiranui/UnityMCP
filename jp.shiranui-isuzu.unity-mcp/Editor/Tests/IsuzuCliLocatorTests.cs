@@ -15,6 +15,37 @@ namespace UnityMCP.Editor.Tests
     [TestFixture]
     internal sealed class IsuzuCliLocatorTests
     {
+        /// <summary>
+        /// Register reads the CLI's two output streams together. Read one after the other, a CLI
+        /// that fills the second while the first is still open waits for the Editor, and the Editor
+        /// waits for it.
+        /// </summary>
+        [Test]
+        public void SetupReadsBothStreamsAndReportsAFailingExit()
+        {
+            if (Path.DirectorySeparatorChar != '\\')
+            {
+                Assert.Ignore("The fixture process is PowerShell.");
+            }
+
+            var start = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            start.ArgumentList.Add("-NoProfile");
+            start.ArgumentList.Add("-Command");
+            start.ArgumentList.Add("[Console]::Error.Write(('e' * 100000)); [Console]::Out.Write('finished'); exit 7");
+
+            var report = McpSettingsProvider.RunSetupProcess(start, 10000);
+
+            Assert.That(report.Wait(15000), Is.True, "The setup run never settled.");
+            Assert.That(report.Result, Does.Contain("exited with code 7").And.Contain("finished"));
+        }
+
         private static readonly string Root = Path.GetTempPath();
 
         private static Func<string, string> Variables(Dictionary<string, string> values)

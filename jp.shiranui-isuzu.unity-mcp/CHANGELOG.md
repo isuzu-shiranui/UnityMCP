@@ -1,5 +1,57 @@
 # Changelog
 
+## [4.3.2] - 2026-09-13
+
+### Changed
+- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. Thanks to @wiiiii123 for the first fix in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
+- A command run inside a Unity project folder that no running Editor has open stops with exit code 3, instead of going to whichever Editor happens to be open.
+- `mcp-stdio`, `setup --mcp` and `update --project` select a project by exact name or by path only.
+- `--project` given a path (`.`, `../Game`, or any value with a slash) resolves it against the working directory and selects only the project at that path.
+- `doctor --fix` leaves an entry whose URL matches a running Editor but whose token differs, because another project's Editor can hold that port, and suggests `setup --mcp` instead. The Regenerate dialog and the docs name it too.
+- On macOS and Linux, the Editor logs an error rather than a warning when it cannot restrict the token and descriptor files to their owner.
+- The EditMode test script refuses a `-ProjectPath` it did not create, and records the operating system it ran on.
+- `update` installs the CLI before it changes any project, so a release whose CLI cannot be installed is never written into a manifest.
+- `scene_browse_hierarchy`, `ui_hit_test` and `asset_broken_references` now build hierarchy paths with less overhead per object: each name is read from the Editor once, and names repeated among siblings are numbered without being looked up again.
+- The release publishes `server.json` to the MCP registry, which until now was done by hand after every release.
+
+### Fixed
+- After losing its Editor, `verify`, `jobs --wait` or `mcp-stdio` could carry on in another project that matched the original name.
+- `--project .` could select another project whose name contains a dot.
+- `doctor --fix` could write a token into a Claude Code entry for a folder that differs only in case.
+- `verify --raw` reported `ok: true` when a step stopped part-way, and printed no summary when the token kept being rejected.
+- `verify --test` could pass when failed or inconclusive tests fell beyond the Editor's 200-result limit, because skipped tests used up that limit. The verdict is now determined by the counts for the whole run, and `--raw` adds `tests.inconclusive` and `tests.truncated`. Thanks to @meiiie for the fix in [#41](https://github.com/isuzu-shiranui/UnityMCP/pull/41).
+- Under WSL, a descriptor that a crashed Windows Editor left behind was listed as running.
+- A state directory given with a trailing separator, or one descriptor reached twice, listed its Editor twice.
+- A prerelease such as `4.3.1-1` was read as newer than `4.3.1`, so `update` refused to move a project to the release.
+- `scene_create` replaced the open scenes before it found that the folder was missing or that the path was a folder, and wrote over a scene already at the path. A path that is not a `.unity` file under `Assets/` or `Packages/` is now refused before anything changes, too.
+- The MCP registry entry started the package without `mcp-stdio`, so a client that followed it got the help text.
+- On macOS and Linux, the token and descriptor files were readable under the default permissions until chmod ran after they were written.
+- The Settings window trimmed spaces and quotes from PATH entries on macOS and Linux, where they are part of the directory name.
+- `setup --mcp` said only that a running Editor was needed when `--project` matched nothing.
+- The winget submission check took a pull request's title as proof that a version had been submitted.
+- `install.ps1` could leave the downloaded file open when the hash provider failed to start.
+- A job wait inside `verify` that recovered from a rejected token counted that rejection against the next one.
+- `--file` given a file that cannot be read ended the CLI with an unhandled exception. It now exits with code 2 and says why.
+- `verify` and `jobs --wait` accepted a `--timeout` of `NaN`, `Infinity` or a value too large for a timer, and then failed with an exception.
+- `update --release` moved projects to the newest release rather than the named one, and left a CLI already on the newest where it was. The named release is now the target for both, including an older one, and a value that is not a version is refused before any manifest is written.
+- A second `render_capture_ab` started while one was still running could leave renderers switched off. It is now refused until the first one finishes.
+- `gameobject_set_transform` applied the position even when the rotation or scale in the same call was invalid.
+- A hierarchy path did not resolve back to an object whose name contains `/` or ends in `[n]`. Those characters are now escaped with a backslash. `ui_hit_test` and `asset_broken_references` now report paths in the same form, with an index where a sibling name repeats.
+- Over MCP, `job_status` returned a job's result at any size. It is now held to the size limit of the tool that ran the job.
+- `update` could install a newer CLI than the version it moved the projects to, when a release had come out since it last checked.
+- `update` treated a project whose `Packages/manifest.json` could not be read as one that does not use the package, and exited with 0.
+- A server stopped by hand started again on the next domain reload when "Auto-start on launch" was on.
+- The Register button in the Settings window froze the Editor until `setup --mcp` finished. It now runs in the background and reports a timeout or a failing exit code.
+- `prefab_create` wrote over a file at its path that Unity had not imported yet.
+- `gameobject_create`, `gameobject_set_transform` and `prefab_instantiate` accepted `NaN`, infinity and values outside the float range.
+- When two open projects' paths differed only in case, such as `Game` and `game`, a command run inside them went to whichever Editor was listed first. It now takes the project whose case matches the working directory, and stops with exit code 3 when neither or both do.
+- `update` took the release check's cached answer, which stands for six hours, so for most of a day after a release it reported that release as the version already installed. It now asks GitHub, which also means a check that failed while the network was down no longer stands as "no release" for six hours.
+- `upgrade --release V4.3.1`, with an uppercase V, asked for a tag GitHub does not have and downloaded nothing.
+- `update` printed the `CLI` heading twice.
+- `upgrade` left the agent skill on disk at the version it replaced, because the check that rewrites it ran in the outgoing executable and found its own copy current. It now runs through the executable that was just installed.
+- A CLI installed as a dotnet tool was told a release was out without being told that nuget.org indexes one a few minutes later, so `dotnet tool update` could answer that the newest version was already installed.
+- The Settings window kept saying the CLI was not found after its own Install button installed one, until Preferences was closed and opened again. That row has a Refresh button now.
+
 ## [4.3.1] - 2026-09-12
 
 ### Changed
@@ -599,8 +651,7 @@ unchanged from 4.0.0.
   documentation, the changelog and the licence. Installing by git URL brings only this directory,
   so the licence has to travel with it.
 - The release publishes to NuGet through trusted publishing: nuget.org trades the workflow's
-  OpenID Connect token for a key that lasts an hour, so no API key is stored anywhere. Setting it
-  up is described in `scripts/README.md`.
+  OpenID Connect token for a key that lasts an hour, so no API key is stored anywhere.
 - Blocking dialogs are reported instead of looking like a hang. `/health` carries `mainThread`
   (`stalledMs`, the visible dialog's title, message and buttons on Windows), and a call that is
   still running because a dialog is up says so in its job envelope, in `job_status` and over MCP.

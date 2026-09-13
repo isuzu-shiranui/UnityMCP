@@ -547,6 +547,36 @@ namespace UnityMCP.Editor.Tests
             Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain("ep_big"));
         }
 
+        private static class JobStatusTools
+        {
+            [McpTool("job_status", "A finished job's detail.", Idempotency = McpIdempotency.Safe, MainThread = false)]
+            public static JObject Status() => new JObject
+            {
+                ["id"] = "ep_big-1",
+                ["label"] = "ep_big",
+                ["status"] = "completed",
+                ["result"] = Tools.Big(),
+            };
+        }
+
+        /// <summary>
+        /// A call that ran long enough to become a job is answered through job_status, which
+        /// declares no limit, so the limit is the one the tool that ran it declares.
+        /// </summary>
+        [Test]
+        public void AJobsResultIsHeldToTheLimitOfTheToolThatRanIt()
+        {
+            var polled = ToolCatalog.BuildFromTypes(new[] { typeof(Tools), typeof(JobStatusTools) });
+            var runner = new ToolCallRunner(this.dispatcher, this.jobs, () => 250);
+            var endpoint = new McpStreamableHttpEndpoint(() => polled, runner.Run, () => "test");
+
+            var result = endpoint.Handle(
+                "POST", Headers(), Request(1, "tools/call", new JObject { ["name"] = "job_status" })).Body["result"];
+
+            Assert.That(result["isError"].Value<bool>(), Is.True);
+            Assert.That(result["content"][0]["text"].Value<string>(), Does.Contain("'ep_big'"));
+        }
+
         [Test]
         public void UnknownToolIsAToolErrorThatSuggestsReconnecting()
         {

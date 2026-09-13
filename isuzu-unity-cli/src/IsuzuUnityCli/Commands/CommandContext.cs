@@ -50,9 +50,34 @@ public sealed class CommandContext
     /// </summary>
     public string? ReleaseCachePath { get; init; }
 
-    public InstanceDescriptor ResolveInstance(ParsedArgs parsed)
+    /// <summary>
+    /// How the newest release is asked for. Substitutable so a test neither reaches GitHub nor is
+    /// answered by whichever release happens to be newest while it runs.
+    /// </summary>
+    public Func<CancellationToken, Task<string>> FetchRelease { get; init; } = ReleaseCheck.FromGitHub;
+
+    /// <summary>
+    /// Whether an Editor answers /health with its own token, which only the Editor that published
+    /// the token can do. Substitutable so a test decides without a server.
+    /// </summary>
+    public Func<InstanceDescriptor, CancellationToken, bool> AnswersHealth { get; init; } =
+        (descriptor, cancellation) => HealthProbe.Answers(descriptor, TimeSpan.FromSeconds(2), cancellation);
+
+    /// <param name="exactOnly">Leaves out the substring match, for a selection a whole session is bound to.</param>
+    public InstanceDescriptor ResolveInstance(ParsedArgs parsed, bool exactOnly = false)
     {
-        return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory);
+        return InstanceResolver.Resolve(ReadDescriptors(), parsed.Option("project"), WorkingDirectory, exactOnly);
+    }
+
+    public InstanceDescriptor RefreshInstance(
+        InstanceDescriptor selected,
+        string howToSwitch = InstanceResolver.SwitchByCommand,
+        CancellationToken cancellation = default)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(Cancellation, cancellation);
+        var token = linked.Token;
+
+        return InstanceResolver.Refresh(ReadDescriptors(), selected, howToSwitch, descriptor => AnswersHealth(descriptor, token));
     }
 
     /// <summary>
@@ -186,9 +211,9 @@ public sealed class CommandContext
 
         Err.WriteLine($"{tag} is out and this is {Program.Version()}. Update this CLI with: {install.UpdateCommand}");
 
-        if (install.Channel is CliChannel.Winget)
+        if (CliInstall.Delay(install.Channel) is { } delay)
         {
-            Err.WriteLine(CliInstall.WingetDelay);
+            Err.WriteLine(delay);
         }
 
         Err.WriteLine("Then 'isuzu-unity-cli update' lines the Unity package up with it.");

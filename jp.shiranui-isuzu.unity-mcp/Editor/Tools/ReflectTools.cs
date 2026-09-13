@@ -376,7 +376,9 @@ namespace UnityMCP.Editor.Tools
 
         private static object ResolveSceneObject(List<Segment> segments, string rest, ref int consumed, ref string walked)
         {
-            var scenePath = rest.Trim('/');
+            // SplitPath already removed separator slashes. A slash left in this segment is
+            // escaped name content; trimming it can select a different object ending in '\\'.
+            var scenePath = rest;
             GameObject found = null;
 
             if (scenePath.Length > 0)
@@ -459,13 +461,9 @@ namespace UnityMCP.Editor.Tools
         {
             var result = new List<Segment>();
 
-            foreach (var raw in path.Split('/'))
+            // The hierarchy's splitter, so an '@scene:' root can name an object whose name has a '/'.
+            foreach (var raw in ObjectResolve.Segments(path))
             {
-                if (raw.Length == 0)
-                {
-                    continue;
-                }
-
                 var segment = new Segment { Raw = raw, Name = raw };
                 var open = raw.IndexOf('[');
 

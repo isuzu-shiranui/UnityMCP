@@ -6,9 +6,9 @@
 #
 # Not due: a prerelease; a package winget-pkgs does not have yet, because wingetcreate builds each
 # manifest from the previous one and the first is submitted by hand; a version already merged; and
-# a version with a pull request in any state. Counting only open pull requests would submit a
-# closed one again on every push to main, so a version whose pull request was closed is left to be
-# submitted by hand.
+# a version with a pull request in any state that changes its manifest folder. Counting only open
+# pull requests would submit a closed one again on every push to main, so a version whose pull
+# request was closed is left to be submitted by hand.
 set -euo pipefail
 
 VERSION="${1:?usage: winget-due.sh <version>}"
@@ -52,18 +52,39 @@ exists() {
   esac
 }
 
-# Reads a JSON array of pull requests and prints the first whose title names this package and
-# version. Each word of a title is compared without case and without a leading v or trailing dots,
-# so "IsuzuShiranui.IsuzuUnityCli v4.3.2" counts and a title naming 4.3.20 does not.
-submitted() {
+# Reads a JSON array of pull requests and prints "number url (state)" for each whose title names
+# this package and version. Each word of a title is compared without case and without a leading v
+# or trailing dots, so "IsuzuShiranui.IsuzuUnityCli v4.3.2" counts and a title naming 4.3.20 does not.
+titled() {
   jq -r --arg package "$PACKAGE" --arg version "$VERSION" '
     def words: ascii_downcase | [splits("[^a-z0-9.]+")] | map(sub("^v(?=[0-9])"; "") | sub("[.]+$"; ""));
     ($package | ascii_downcase) as $p
-    | [.[]
-       | (.title | words) as $w
-       | select(any($w[]; . == $p) and any($w[]; . == $version))
-       | "\(.html_url) (\(.state))"]
-    | first // empty'
+    | .[]
+    | (.title | words) as $w
+    | select(any($w[]; . == $p) and any($w[]; . == $version))
+    | "\(.number) \(.html_url) (\(.state))"'
+}
+
+# Reads those lines and prints the first whose pull request changes this version's manifest folder.
+# A title is only a claim: a pull request that names the version without submitting it must not
+# stop the submission.
+submitted() {
+  local number rest status
+
+  while read -r number rest; do
+    [ -n "$number" ] || continue
+    status=$(get "$REPOSITORY/pulls/$number/files?per_page=100")
+
+    if [ "$status" != "200" ]; then
+      echo "GitHub answered '$status' for the files of pull request $number." >&2
+      exit 1
+    fi
+
+    if jq -e --arg dir "$MANIFESTS/$VERSION/" 'any(.[]; .filename | startswith($dir))' "$BODY" > /dev/null; then
+      echo "$rest"
+      return
+    fi
+  done
 }
 
 if ! exists "$MANIFESTS"; then
@@ -87,7 +108,9 @@ if [ "$STATUS" != "200" ] || [ "$(jq -r .incomplete_results "$BODY")" != "false"
   exit 1
 fi
 
-SUBMITTED=$(jq '.items' "$BODY" | submitted)
+# Read in full first: checking a candidate's files overwrites the response it came from.
+TITLED=$(jq '.items' "$BODY" | titled)
+SUBMITTED=$(printf '%s\n' "$TITLED" | submitted)
 
 # Search results can trail a pull request opened moments ago, which is when a second run asks, so
 # the newest hundred are read from the pull request list as well.
@@ -99,7 +122,8 @@ if [ -z "$SUBMITTED" ]; then
     exit 1
   fi
 
-  SUBMITTED=$(submitted < "$BODY")
+  TITLED=$(titled < "$BODY")
+  SUBMITTED=$(printf '%s\n' "$TITLED" | submitted)
 fi
 
 if [ -n "$SUBMITTED" ]; then

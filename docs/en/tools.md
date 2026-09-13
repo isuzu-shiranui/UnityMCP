@@ -193,7 +193,7 @@ See [Synthesizing, recording and replaying Editor input](input-tools.md) for det
 
 ## Things to know before editing
 
-- The `object_path` an editing tool takes is the one `scene_browse_hierarchy` returns. It resolves inactive objects, and it carries an index only where a sibling name repeats, as in `/Canvas/Button[1]/Text`.
+- The `object_path` an editing tool takes is the one `scene_browse_hierarchy` returns. It resolves inactive objects, and it carries an index only where a sibling name repeats, as in `/Canvas/Button[1]/Text`. A `/` in a name, and the `[` of a name that ends in `[n]`, carry a backslash in front, and a backslash in a name is doubled.
 
   A prefab open for editing is the exception. `scene_browse_hierarchy` still reports the scene behind it. The `gameobject_` and `inspect_` tools address the prefab contents, so they cannot resolve those paths.
 - A scene edit made during Play Mode looks like it worked and is reverted when Play Mode stops. Those responses carry a `playModeWarning`. Asset edits made during Play Mode survive, so they carry no warning.

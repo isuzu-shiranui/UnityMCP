@@ -30,6 +30,12 @@ namespace UnityMCP.Editor.Tools
     /// carries an index only where one is needed: <c>/Canvas/Button[1]/Text</c>. Paths written
     /// by hand without indices still resolve, to the first match.
     /// </para>
+    /// <para>
+    /// A name can contain the characters a path is written with. A '/' in a name, and the '[' of
+    /// a name that ends like an index, carry a backslash, and a backslash in a name is doubled.
+    /// A backslash before any other character is an ordinary character, so a path typed without
+    /// escapes resolves unless one of its names needs them.
+    /// </para>
     /// </remarks>
     internal static class ObjectResolve
     {
@@ -89,7 +95,7 @@ namespace UnityMCP.Editor.Tools
                         : $"Either '{argumentName}' or '{idArgumentName}' is required.");
             }
 
-            var segments = path.Split('/').Where(s => s.Length > 0).ToArray();
+            var segments = Segments(path).ToArray();
 
             if (segments.Length == 0)
             {
@@ -151,6 +157,9 @@ namespace UnityMCP.Editor.Tools
         /// <summary>Path construction shared only within one synchronous hierarchy read.</summary>
         internal sealed class PathBatch
         {
+            /// <summary>Groups up to this size compare every pair of names instead of counting them in a dictionary.</summary>
+            private const int PairwiseLimit = 8;
+
             private readonly Dictionary<Transform, string> segments = new();
             private readonly Dictionary<Transform, string> paths = new();
             private readonly HashSet<Transform> parents = new();
@@ -169,11 +178,11 @@ namespace UnityMCP.Editor.Tools
                 if (parent == null && !this.rootsRead)
                 {
                     this.rootsRead = true;
-                    this.Index(SceneRoots().Select(root => root.transform));
+                    this.Index(SceneRoots().Select(root => root.transform).ToArray());
                 }
                 else if (parent != null && this.parents.Add(parent))
                 {
-                    this.Index(parent.Cast<Transform>());
+                    this.Index(ChildrenOf(parent));
                 }
 
                 // Preserve SceneRoots' PrefabStage behavior even for an object outside that set.
@@ -183,24 +192,90 @@ namespace UnityMCP.Editor.Tools
                 return path;
             }
 
-            private void Index(IEnumerable<Transform> siblings)
+            /// <remarks>
+            /// Each name is read once, because Object.name is a native call that returns a new
+            /// string. Hashing strings is the largest cost left on the Editor's Mono, so a large
+            /// group keeps each name's tally and numbers a sibling through it instead of looking the
+            /// name up again.
+            /// </remarks>
+            private void Index(Transform[] siblings)
             {
-                var nodes = new List<(Transform Transform, string Name)>();
-                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-                foreach (var sibling in siblings)
+                var names = new string[siblings.Length];
+
+                for (var i = 0; i < siblings.Length; i++)
                 {
-                    var name = sibling.name;
-                    nodes.Add((sibling, name));
-                    counts.TryGetValue(name, out var count);
-                    counts[name] = count + 1;
+                    names[i] = siblings[i].name;
                 }
-                var seen = new Dictionary<string, int>(StringComparer.Ordinal);
-                foreach (var (transform, name) in nodes)
+
+                if (siblings.Length <= PairwiseLimit)
                 {
-                    seen.TryGetValue(name, out var index);
-                    this.segments[transform] = counts[name] > 1 ? $"{name}[{index}]" : name;
-                    seen[name] = index + 1;
+                    for (var i = 0; i < siblings.Length; i++)
+                    {
+                        var before = 0;
+                        var repeats = false;
+
+                        for (var j = 0; j < siblings.Length; j++)
+                        {
+                            if (j != i && string.Equals(names[j], names[i]))
+                            {
+                                repeats = true;
+
+                                if (j < i)
+                                {
+                                    before++;
+                                }
+                            }
+                        }
+
+                        this.segments[siblings[i]] = repeats ? Escape(names[i]) + Suffix(before) : Escape(names[i]);
+                    }
+
+                    return;
                 }
+
+                var tallies = new Tally[siblings.Length];
+                var byName = new Dictionary<string, Tally>(siblings.Length, StringComparer.Ordinal);
+
+                for (var i = 0; i < siblings.Length; i++)
+                {
+                    if (!byName.TryGetValue(names[i], out var tally))
+                    {
+                        tally = new Tally();
+                        byName.Add(names[i], tally);
+                    }
+
+                    tally.Count++;
+                    tallies[i] = tally;
+                }
+
+                for (var i = 0; i < siblings.Length; i++)
+                {
+                    var escaped = Escape(names[i]);
+                    this.segments[siblings[i]] = tallies[i].Count == 1 ? escaped : escaped + Suffix(tallies[i].Next++);
+                }
+            }
+
+            /// <summary>
+            /// The children read by index. Enumerating a Transform allocates an enumerator that
+            /// makes two native calls for every child.
+            /// </summary>
+            private static Transform[] ChildrenOf(Transform parent)
+            {
+                var children = new Transform[parent.childCount];
+
+                for (var i = 0; i < children.Length; i++)
+                {
+                    children[i] = parent.GetChild(i);
+                }
+
+                return children;
+            }
+
+            /// <summary>How many siblings share a name, and the index the next of them takes.</summary>
+            private sealed class Tally
+            {
+                public int Count;
+                public int Next;
             }
         }
 
@@ -267,6 +342,44 @@ namespace UnityMCP.Editor.Tools
             }
         }
 
+        /// <summary>
+        /// A path's segments, split at the slashes that are not part of a name. Escapes are kept,
+        /// so a segment can still tell an index from a name that ends like one.
+        /// </summary>
+        internal static List<string> Segments(string path)
+        {
+            var segments = new List<string>();
+            var current = new StringBuilder();
+
+            for (var i = 0; i < path.Length; i++)
+            {
+                if (IsEscape(path, i))
+                {
+                    current.Append(path, i, 2);
+                    i++;
+                }
+                else if (path[i] == '/')
+                {
+                    if (current.Length > 0)
+                    {
+                        segments.Add(current.ToString());
+                        current.Clear();
+                    }
+                }
+                else
+                {
+                    current.Append(path[i]);
+                }
+            }
+
+            if (current.Length > 0)
+            {
+                segments.Add(current.ToString());
+            }
+
+            return segments;
+        }
+
         private static IEnumerable<GameObject> Children(GameObject go)
         {
             foreach (Transform child in go.transform)
@@ -277,18 +390,8 @@ namespace UnityMCP.Editor.Tools
 
         private static GameObject MatchSegment(IEnumerable<GameObject> level, string segment)
         {
-            var name = segment;
-            var wanted = 0;
-
-            var bracket = segment.LastIndexOf('[');
-
-            if (bracket > 0 && segment.EndsWith("]") &&
-                int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out var parsed))
-            {
-                name = segment.Substring(0, bracket);
-                wanted = parsed;
-            }
-
+            var bracket = IndexBracket(segment, out var wanted);
+            var name = Unescape(bracket > 0 ? segment.Substring(0, bracket) : segment);
             var seen = 0;
 
             foreach (var candidate in level)
@@ -333,7 +436,123 @@ namespace UnityMCP.Editor.Tools
                 duplicates++;
             }
 
-            return duplicates > 1 ? $"{t.name}[{index}]" : t.name;
+            var name = Escape(t.name);
+
+            return duplicates > 1 ? $"{name}[{index}]" : name;
+        }
+
+        private static readonly char[] PathSyntax = { '\\', '/' };
+
+        /// <summary>A name as a path segment writes it.</summary>
+        /// <remarks>
+        /// Few names end in ']', so the last character is checked first, and then one scan looks for
+        /// both characters. The Editor's Mono does not vectorize IndexOf, so a separate scan for each
+        /// character costs it close to three times as much.
+        /// </remarks>
+        private static string Escape(string name)
+        {
+            if ((name.Length == 0 || name[name.Length - 1] != ']') && name.IndexOfAny(PathSyntax) < 0)
+            {
+                return name;
+            }
+
+            var builder = new StringBuilder(name.Length + 2);
+
+            foreach (var c in name)
+            {
+                if (c == '\\' || c == '/')
+                {
+                    builder.Append('\\');
+                }
+
+                builder.Append(c);
+            }
+
+            var escaped = builder.ToString();
+            var bracket = IndexBracket(escaped, out _);
+
+            return bracket > 0 ? escaped.Insert(bracket, "\\") : escaped;
+        }
+
+        private static readonly string[] Suffixes = new string[256];
+
+        /// <summary>The '[n]' after a repeated name. Hierarchy reads run on the main thread, so the cache takes no lock.</summary>
+        private static string Suffix(int index)
+        {
+            if (index >= Suffixes.Length)
+            {
+                return "[" + index + "]";
+            }
+
+            return Suffixes[index] ??= "[" + index + "]";
+        }
+
+        private static string Unescape(string text)
+        {
+            if (text.IndexOf('\\') < 0)
+            {
+                return text;
+            }
+
+            var builder = new StringBuilder(text.Length);
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                if (IsEscape(text, i))
+                {
+                    i++;
+                }
+
+                builder.Append(text[i]);
+            }
+
+            return builder.ToString();
+        }
+
+        /// <summary>
+        /// Where the '[n]' that picks among same-named siblings starts, or -1 when the segment
+        /// ends in no unescaped one.
+        /// </summary>
+        private static int IndexBracket(string segment, out int index)
+        {
+            index = 0;
+
+            if (!segment.EndsWith("]", StringComparison.Ordinal))
+            {
+                return -1;
+            }
+
+            var bracket = -1;
+
+            for (var i = 0; i < segment.Length; i++)
+            {
+                if (IsEscape(segment, i))
+                {
+                    i++;
+                }
+                else if (segment[i] == '[')
+                {
+                    bracket = i;
+                }
+            }
+
+            return bracket > 0
+                   && int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out index)
+                ? bracket
+                : -1;
+        }
+
+        /// <summary>Whether the character at <paramref name="i"/> is a backslash escaping the next one.</summary>
+        private static bool IsEscape(string text, int i)
+        {
+            if (text[i] != '\\' || i + 1 >= text.Length)
+            {
+                return false;
+            }
+
+            var next = text[i + 1];
+
+            return next == '\\' || next == '/' || next == '[';
         }
 
         private static IEnumerable<Transform> SceneRootsOf(Transform t)
@@ -356,7 +575,7 @@ namespace UnityMCP.Editor.Tools
 
         private static string NotFoundMessage(string path, string[] segments, int depth, IEnumerable<GameObject> level)
         {
-            var available = level.Select(g => g.name).Distinct().Take(12).ToArray();
+            var available = level.Select(g => Escape(g.name)).Distinct().Take(12).ToArray();
             var where = depth == 0
                 ? "among the scene roots"
                 : $"under '{string.Join("/", segments.Take(depth))}'";

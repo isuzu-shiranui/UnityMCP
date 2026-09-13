@@ -1,3 +1,4 @@
+using System.Text.Json;
 using IsuzuUnityCli.Cli;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Housekeeping;
@@ -5,7 +6,8 @@ using IsuzuUnityCli.Housekeeping;
 namespace IsuzuUnityCli.Commands;
 
 /// <summary>
-/// Brings this machine to the newest release: the CLI, and every project's copy of the package.
+/// Brings this machine to the newest release, or the one --release names: the CLI, and every
+/// project's copy of the package.
 /// </summary>
 /// <remarks>
 /// <c>upgrade</c> replaces this executable and stops there, which leaves the half that matters
@@ -20,17 +22,25 @@ namespace IsuzuUnityCli.Commands;
 /// </remarks>
 public static class UpdateCommand
 {
-    public static async Task<int> Run(ParsedArgs parsed, CommandContext context)
+    public static async Task<int> Run(
+        ParsedArgs parsed, CommandContext context,
+        Func<ParsedArgs, CommandContext, Task<int>>? upgrade = null)
     {
+        context.Cancellation.ThrowIfCancellationRequested();
+        upgrade ??= UpgradeCommand.Run;
         var install = CliInstall.Read(context.ExecutablePath);
+        var release = parsed.Option("release");
 
-        if (parsed.Option("release") is not null && !install.ReplacesItself)
+        if (release is not null && !install.ReplacesItself)
         {
             context.Err.WriteLine(UpgradeCommand.ReleaseRefusal(install));
             return 1;
         }
 
-        var tag = await Latest(context);
+        // A named release is the target for the packages and the CLI alike, an older one included:
+        // going back from a bad release is what naming one is for. Checked before anything is
+        // written, since every project's manifest would be pointed at it.
+        var tag = release is not null ? UpgradeCommand.ReleaseTag(release) : await Latest(context);
 
         if (tag is null)
         {
@@ -42,24 +52,44 @@ public static class UpdateCommand
 
         var current = Program.Version();
         var version = tag.TrimStart('v', 'V');
-        var behind = ReleaseCheck.IsNewer(tag, current);
+        var moves = release is null
+            ? ReleaseCheck.IsNewer(tag, current)
+            : ReleaseCheck.IsNewer(tag, current) || ReleaseCheck.IsNewer(current, tag);
 
         // A copy another tool installed reaches the release only when that tool offers it, which
         // for winget is after review. A package moved ahead of it in the meantime would be talking
         // to an older CLI, so until then the packages go only as far as the version this CLI runs.
-        var held = behind && !install.ReplacesItself;
+        var held = moves && !install.ReplacesItself;
 
-        context.Out.WriteLine(behind
-            ? $"{tag} is out and this is {current}."
+        context.Out.WriteLine(
+            release is not null ? $"{tag} was named with --release and this is {current}."
+            : moves ? $"{tag} is out and this is {current}."
             : $"{tag} is the newest release and this is {current}.");
         context.Out.WriteLine();
 
         var projects = Projects(context, parsed);
         var failed = false;
 
-        // The package first. Upgrading the CLI replaces the running executable, and on Windows
-        // that leaves the old one behind under another name; anything this process still had to
-        // do would be running from a binary the next install is going to delete.
+        // Finish downloading and verifying the planned CLI before any project points at it.
+        // Keep the tag fixed even if GitHub latest changes after the cached release check.
+        var installed = moves && !held && !parsed.HasFlag("dry-run");
+
+        if (installed)
+        {
+            context.Out.WriteLine("CLI");
+            context.Cancellation.ThrowIfCancellationRequested();
+
+            if (await upgrade(Reparse(tag), context) != 0)
+            {
+                context.Err.WriteLine("CLI upgrade did not finish successfully; project manifests were not changed.");
+                return 1;
+            }
+
+            context.Out.WriteLine($"  installed {tag}.");
+            context.Out.WriteLine();
+        }
+
+        context.Cancellation.ThrowIfCancellationRequested();
         context.Out.WriteLine("Unity projects");
 
         if (projects.Count == 0)
@@ -71,15 +101,31 @@ public static class UpdateCommand
             context.Out.WriteLine($"  moved to {current}, the version this CLI runs, until the CLI is updated.");
         }
 
-        foreach (var descriptor in projects)
+        try
         {
-            failed |= !UpdateProject(context, descriptor, held ? current : version, parsed.HasFlag("dry-run"));
+            foreach (var descriptor in projects)
+            {
+                context.Cancellation.ThrowIfCancellationRequested();
+                failed |= !UpdateProject(
+                    context, descriptor, held ? current : version, parsed.HasFlag("dry-run"), backwards: release is not null);
+            }
+            context.Cancellation.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
+        {
+            context.Err.WriteLine("Update interrupted; project changes reported above remain applied.");
+            throw;
+        }
+
+        if (installed)
+        {
+            return failed ? 1 : 0;
         }
 
         context.Out.WriteLine();
         context.Out.WriteLine("CLI");
 
-        if (!behind)
+        if (!moves)
         {
             context.Out.WriteLine($"  already {current}.");
             return failed ? 1 : 0;
@@ -90,29 +136,23 @@ public static class UpdateCommand
             context.Out.WriteLine(
                 $"  installed {install.Description}, so it is not updated here. Update it with: {install.UpdateCommand}");
 
-            if (install.Channel is CliChannel.Winget)
+            if (CliInstall.Delay(install.Channel) is { } delay)
             {
-                context.Out.WriteLine("  " + CliInstall.WingetDelay);
+                context.Out.WriteLine("  " + delay);
             }
 
             context.Out.WriteLine($"  Then run 'isuzu-unity-cli update' again to move the Unity projects to {tag}.");
             return failed ? 1 : 0;
         }
 
-        if (parsed.HasFlag("dry-run"))
-        {
-            context.Out.WriteLine($"  would install {tag}.");
-            return failed ? 1 : 0;
-        }
-
-        var upgrade = await UpgradeCommand.Run(Reparse(parsed), context);
-
-        return upgrade != 0 || failed ? 1 : 0;
+        context.Out.WriteLine($"  would install {tag}.");
+        return failed ? 1 : 0;
     }
 
     /// <summary>Moves one project to <paramref name="version"/>, or says why it cannot.</summary>
+    /// <param name="backwards">Whether a project already past <paramref name="version"/> goes back to it.</param>
     private static bool UpdateProject(
-        CommandContext context, InstanceDescriptor descriptor, string version, bool dryRun)
+        CommandContext context, InstanceDescriptor descriptor, string version, bool dryRun, bool backwards)
     {
         var name = descriptor.ProjectName.Length > 0 ? descriptor.ProjectName : descriptor.ProjectPath;
 
@@ -132,6 +172,20 @@ public static class UpdateCommand
         try
         {
             install = PackageInstall.Read(root);
+            if (install.Channel is PackageChannel.Absent)
+            {
+                // Discovery treats unreadable manifests as absent. An update must distinguish
+                // that from a valid manifest which simply does not name this package.
+                using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "Packages", "manifest.json")));
+                if (manifest.RootElement.ValueKind != JsonValueKind.Object
+                    || (manifest.RootElement.TryGetProperty("dependencies", out var dependencies)
+                        && (dependencies.ValueKind != JsonValueKind.Object
+                            || (dependencies.TryGetProperty(PackageInstall.PackageId, out var dependency)
+                                && dependency.ValueKind != JsonValueKind.String))))
+                {
+                    throw new JsonException("manifest.json must contain an object with string package dependencies.");
+                }
+            }
         }
         catch (Exception e)
         {
@@ -151,9 +205,10 @@ public static class UpdateCommand
             return true;
         }
 
-        // Moving a project back is never what update means. With a CLI another tool updates, the
-        // target is the version the CLI runs, and a project can already be past it.
-        if (install.Version is not null && ReleaseCheck.IsNewer(install.Version, version))
+        // Moving a project back is not what update means unless a release was named. With a CLI
+        // another tool updates, the target is the version the CLI runs, and a project can already
+        // be past it.
+        if (!backwards && install.Version is not null && ReleaseCheck.IsNewer(install.Version, version))
         {
             context.Out.WriteLine($"  {name}: already at {install.Version}, which is past {version}. Left as it is.");
             return true;
@@ -214,12 +269,18 @@ public static class UpdateCommand
         _ => "its install channel was not recognised.",
     };
 
+    /// <remarks>
+    /// Asked of GitHub rather than read from the cache the release notice uses. A cached answer
+    /// stands for six hours, which is most of a day in which this would report the release it is
+    /// being run to install as the one already installed, and a failed check is cached as no
+    /// release at all.
+    /// </remarks>
     private static async Task<string?> Latest(CommandContext context)
     {
         try
         {
             return await ReleaseCheck.LatestTag(
-                ReleaseCheck.FromGitHub, context.Cancellation, context.ReleaseCachePath);
+                context.FetchRelease, context.Cancellation, context.ReleaseCachePath, TimeSpan.Zero);
         }
         catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
         {
@@ -236,7 +297,9 @@ public static class UpdateCommand
     {
         if (parsed.Option("project") is not null)
         {
-            return new List<InstanceDescriptor> { context.ResolveInstance(parsed) };
+            // The manifest of the project this names is rewritten, so a name that is only part of
+            // another open project's must not pick that one.
+            return new List<InstanceDescriptor> { context.ResolveInstance(parsed, exactOnly: true) };
         }
 
         return context.ReadDescriptors().ToList();
@@ -249,11 +312,11 @@ public static class UpdateCommand
     /// upgrade refuses an option it does not declare, and --dry-run and --project are this
     /// command's own.
     /// </remarks>
-    private static ParsedArgs Reparse(ParsedArgs parsed)
+    private static ParsedArgs Reparse(string? release)
     {
         var argv = new List<string> { "upgrade" };
 
-        if (parsed.Option("release") is { } release)
+        if (release is not null)
         {
             argv.Add("--release");
             argv.Add(release);

@@ -95,9 +95,10 @@ public sealed class CliInstallTests : IDisposable
         {
             File.CreateSymbolicLink(link, target);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e) when (OperatingSystem.IsWindows() && e is IOException or UnauthorizedAccessException)
         {
             // Windows creates a symbolic link only with Developer Mode on or from an elevated process.
+            // Anywhere else a failure here is a failure of the test.
             return;
         }
 
