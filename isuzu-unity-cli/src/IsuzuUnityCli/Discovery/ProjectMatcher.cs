@@ -56,26 +56,31 @@ public static class ProjectMatcher
     /// <summary>Deepest root wins when projects nest, since that is the one the caller is working in.</summary>
     public static T? ByWorkingDirectory<T>(IReadOnlyList<T> candidates, string directory) where T : class, IProjectLike
     {
-        T? deepest = null;
-        var deepestLength = -1;
-
-        foreach (var candidate in candidates)
+        var matches = candidates.Where(candidate => IsInside(directory, candidate.ProjectPath)).ToList();
+        if (matches.Count == 0)
         {
-            if (!IsInside(directory, candidate.ProjectPath))
-            {
-                continue;
-            }
-
-            var length = ProjectRootOf(candidate.ProjectPath).Length;
-
-            if (length > deepestLength)
-            {
-                deepest = candidate;
-                deepestLength = length;
-            }
+            return null;
         }
-
-        return deepest;
+        var length = matches.Max(candidate => ProjectRootOf(candidate.ProjectPath).Length);
+        matches = matches.Where(candidate => ProjectRootOf(candidate.ProjectPath).Length == length).ToList();
+        var cwd = ProjectKey.Of(Path.GetFullPath(directory));
+        var exact = matches.Where(candidate =>
+        {
+            var root = ProjectKey.Of(candidate.ProjectPath);
+            return root is not null && cwd is not null
+                && (cwd == root || cwd.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal));
+        }).ToList();
+        // Among equally deep roots, prefer the spelling the Editor published. Retain the host's case-insensitive
+        // fallback when no exact spelling matches, but never settle a tie by descriptor order.
+        if (exact.Count > 0)
+        {
+            matches = exact;
+        }
+        if (matches.Count != 1)
+        {
+            throw new CliException($"Several Editors contain the working directory: {Names(matches)}. Pass --project <path>.", 3);
+        }
+        return matches[0];
     }
 
     /// <summary>

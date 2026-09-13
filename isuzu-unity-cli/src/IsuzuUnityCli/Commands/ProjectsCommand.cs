@@ -29,7 +29,18 @@ public static class ProjectsCommand
             return 3;
         }
 
-        var here = ProjectMatcher.ByWorkingDirectory(descriptors, context.WorkingDirectory);
+        // A tie for the working directory is what this listing is read to sort out, so it marks
+        // no row rather than failing the command.
+        InstanceDescriptor? here;
+
+        try
+        {
+            here = ProjectMatcher.ByWorkingDirectory(descriptors, context.WorkingDirectory);
+        }
+        catch (CliException)
+        {
+            here = null;
+        }
 
         var rows = descriptors.Select(d => new ProjectRow
         {

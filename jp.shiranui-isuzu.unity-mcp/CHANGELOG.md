@@ -42,6 +42,7 @@
 - The Register button in the Settings window froze the Editor until `setup --mcp` finished. It now runs in the background and reports a timeout or a failing exit code.
 - `prefab_create` wrote over a file at its path that Unity had not imported yet.
 - `gameobject_create`, `gameobject_set_transform` and `prefab_instantiate` accepted `NaN`, infinity and values outside the float range.
+- When two open projects' paths differed only in case, such as `Game` and `game`, a command run inside them went to whichever Editor was listed first. It now takes the project whose case matches the working directory, and stops with exit code 3 when neither or both do.
 
 ## [4.3.1] - 2026-09-12
 

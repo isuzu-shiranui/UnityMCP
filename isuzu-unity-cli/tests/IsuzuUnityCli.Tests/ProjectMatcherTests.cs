@@ -286,4 +286,21 @@ public sealed class ProjectMatcherTests
             OperatingSystem.IsWindows() || OperatingSystem.IsMacOS(),
             ProjectMatcher.IsInside(upper, Path.Combine(root, "Assets")));
     }
+
+    /// <summary>
+    /// Two Editors whose projects hold the working directory equally deep are refused, rather than
+    /// settled by the order their descriptors happened to be read in.
+    /// </summary>
+    [Fact]
+    public void TwoEditorsEquallyDeepAroundTheWorkingDirectoryAreRefused()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "Game", "Assets");
+        var first = new InstanceDescriptor { ProjectName = "First", ProjectPath = path };
+        var second = new InstanceDescriptor { ProjectName = "Second", ProjectPath = path };
+
+        var e = Assert.Throws<IsuzuUnityCli.Cli.CliException>(
+            () => ProjectMatcher.ByWorkingDirectory(new[] { first, second }, Path.GetDirectoryName(path)!));
+
+        Assert.Equal(3, e.ExitCode);
+    }
 }
