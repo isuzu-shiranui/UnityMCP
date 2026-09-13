@@ -677,7 +677,7 @@ jobs:
           # Announced rather than failed: the release itself is finished, and a key that is missing
           # or expired is answered by adding it and re-running this workflow.
           if [ -z "$MCP_PRIVATE_KEY" ]; then
-            echo "::warning::MCP_PRIVATE_KEY is not set, so $SERVER $VERSION was not published to the registry. scripts/README.md says how to set it."
+            echo "::warning::MCP_PRIVATE_KEY is not set, so $SERVER $VERSION was not published to the registry."
             echo "- MCP registry: not published; MCP_PRIVATE_KEY is not set" >> "$GITHUB_STEP_SUMMARY"
             echo "needed=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -782,7 +782,7 @@ jobs:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
         run: |
           if [ -z "$WINGET_TOKEN" ]; then
-            echo "WINGET_TOKEN is not set in the winget environment. scripts/README.md says how to create it."
+            echo "WINGET_TOKEN is not set in the winget environment."
             exit 1
           fi
 

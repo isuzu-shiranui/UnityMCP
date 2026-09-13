@@ -294,7 +294,9 @@ $attestation = [ordered]@{
     # NUnit writes, and reading it from there produced an empty object rather than an error.
     unityVersion = $unityVersion
     # The Editor code branches on the operating system, so a run covers only the branch it took.
-    os           = [System.Environment]::OSVersion.VersionString
+    # The family is what that says; the build number of the machine it ran on says nothing more.
+    # Windows PowerShell defines neither $IsMacOS nor $IsLinux, and runs nowhere else.
+    os           = if ($IsMacOS) { 'macOS' } elseif ($IsLinux) { 'Linux' } else { 'Windows' }
     ranAt        = (Get-Date).ToUniversalTime().ToString('o')
 }
 
