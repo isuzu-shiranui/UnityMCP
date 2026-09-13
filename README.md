@@ -118,6 +118,7 @@ C# を書かずに、JSON ファイルでツールを追加することもでき
 - [アーキテクチャ](docs/architecture.md): 経路図、Editor 側のクラス、設定、テスト
 - [トラブルシューティング](docs/troubleshooting.md)
 - [セキュリティ](docs/security.md)
+- [更新の手順](docs/updating.md): 版ごとの上げ方と、途中の版で変わったもの
 - [v3 からの移行](docs/migration-v3.md)
 - [CHANGELOG](jp.shiranui-isuzu.unity-mcp/CHANGELOG.md)
 

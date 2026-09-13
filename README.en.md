@@ -120,6 +120,7 @@ You can also add a tool from a JSON file without writing C#. See [Defined tools]
 - [Architecture](docs/en/architecture.md): the diagram, Editor-side classes, settings, tests
 - [Troubleshooting](docs/en/troubleshooting.md)
 - [Security](docs/en/security.md)
+- [Updating](docs/en/updating.md): what to run for each version you might be on
 - [Migrating from v3](docs/en/migration-v3.md)
 - [CHANGELOG](jp.shiranui-isuzu.unity-mcp/CHANGELOG.md)
 

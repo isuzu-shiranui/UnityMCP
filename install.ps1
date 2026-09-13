@@ -156,12 +156,23 @@ public static extern IntPtr SendMessageTimeout(
     }
     if (-not $baseUrl.EndsWith("/")) { $baseUrl = "$baseUrl/" }
 
-    # Only x64 builds are published; RuntimeInformation catches an x86 process
-    # running under WOW64 on an ARM64 host that PROCESSOR_ARCHITECTURE alone would miss.
+    # Only x64 builds are published. PROCESSOR_ARCHITECTURE is the shell's own architecture, which
+    # is x86 for a 32-bit shell under WOW64; PROCESSOR_ARCHITEW6432 carries the machine's in that
+    # case, so the pair answers this without loading a type.
+    #
+    # RuntimeInformation is read last and defensively. A session where that name resolves to an
+    # assembly carrying no implementation answers the static property with nothing rather than
+    # failing, and calling ToString() on it ends the install with "You cannot call a method on a
+    # null-valued expression" before anything is downloaded.
     $procArch = $env:PROCESSOR_ARCHITECTURE
-    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-    if ($procArch -ne "AMD64" -and $osArch -ne "X64") {
-        throw "isuzu-unity-cli only ships x64 builds for Windows. Detected architecture: $osArch. No compatible asset is available."
+    $nativeArch = $env:PROCESSOR_ARCHITEW6432
+    $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    $osArch = if ($null -eq $osArch) { "" } else { $osArch.ToString() }
+
+    if ($procArch -ne "AMD64" -and $nativeArch -ne "AMD64" -and $osArch -ne "X64") {
+        $detected = @($osArch, $nativeArch, $procArch) | Where-Object { $_ } | Select-Object -First 1
+        if (-not $detected) { $detected = "unknown" }
+        throw "isuzu-unity-cli only ships x64 builds for Windows. Detected architecture: $detected. No compatible asset is available."
     }
 
     $assetName = "isuzu-unity-cli-win-x64.exe"

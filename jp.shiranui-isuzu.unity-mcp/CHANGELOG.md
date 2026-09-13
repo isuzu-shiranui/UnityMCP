@@ -1,9 +1,14 @@
 # Changelog
 
+## [4.3.3] - Unreleased
+
+### Fixed
+- `install.ps1` ended with "You cannot call a method on a null-valued expression" before it downloaded anything, in the Windows PowerShell console that the README's one-liner is meant to be pasted into. It read the machine's architecture from `RuntimeInformation`, a name that resolves inside PSReadLine's own assembly there; the property it wanted does not exist on that one, and reading a static property that is not there yields nothing rather than failing. The architecture comes from the environment now, and that property is read only as a cross-check. It has been this way since 4.0.0, for anyone whose console loaded the PSReadLine that Windows ships.
+
 ## [4.3.2] - 2026-09-13
 
 ### Changed
-- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. Thanks to @wiiiii123 for the first fix in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
+- `verify`, `jobs --wait` and `mcp-stdio` reconnect only to the project path they selected. When not exactly one Editor has that path open, they stop with the reason and the way to switch. Thanks to @meiiie for the first fix in [#42](https://github.com/isuzu-shiranui/UnityMCP/pull/42).
 - A command run inside a Unity project folder that no running Editor has open stops with exit code 3, instead of going to whichever Editor happens to be open.
 - `mcp-stdio`, `setup --mcp` and `update --project` select a project by exact name or by path only.
 - `--project` given a path (`.`, `../Game`, or any value with a slash) resolves it against the working directory and selects only the project at that path.
