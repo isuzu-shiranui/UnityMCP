@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.3.3] - Unreleased
+## [4.3.3] - 2026-09-14
 
 ### Changed
 - `scene_browse_hierarchy` marks a node whose children `max_depth` stopped it above with `childrenNotShown`, the count a filter already put there. `max_depth` carries a default, so an unfiltered read of a deep scene used to end on nodes that are not leaves without the caller having asked for anything, and nothing in the reply told them apart from leaves. A `fields` allowlist keeps the key for the same reason it keeps `instanceId`: how much a reply leaves out is not a field of the object, and a walk narrowed for size is the one whose nodes would otherwise read as complete.
