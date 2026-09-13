@@ -376,7 +376,9 @@ namespace UnityMCP.Editor.Tools
 
         private static object ResolveSceneObject(List<Segment> segments, string rest, ref int consumed, ref string walked)
         {
-            var scenePath = rest.Trim('/');
+            // SplitPath already removed separator slashes. A slash left in this segment is
+            // escaped name content; trimming it can select a different object ending in '\\'.
+            var scenePath = rest;
             GameObject found = null;
 
             if (scenePath.Length > 0)
