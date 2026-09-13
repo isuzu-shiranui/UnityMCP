@@ -743,6 +743,51 @@ namespace UnityMCP.Editor.Tests
         }
 
         /// <summary>
+        /// A node the depth limit stopped above says how many children it has, filter or no filter.
+        /// </summary>
+        /// <remarks>
+        /// 'max_depth' carries a default, so an unfiltered read of a deep scene ends on nodes
+        /// that are not leaves without the caller having asked for anything. The two walks reach
+        /// the count differently: the filtered one never builds the children, so it cannot count
+        /// them where the reply is assembled.
+        /// </remarks>
+        [Test]
+        [TestCase(null, TestName = "DepthCutoffIsCounted_Unfiltered")]
+        [TestCase("DepthProbe", TestName = "DepthCutoffIsCounted_Filtered")]
+        public void ANodeTheDepthLimitStoppedAtSaysHowManyChildrenItHas(string nameFilter)
+        {
+            var parent = new GameObject("DepthProbeParent");
+
+            try
+            {
+                var child = new GameObject("DepthProbeChild");
+                child.transform.SetParent(parent.transform);
+
+                for (var i = 0; i < 2; i++)
+                {
+                    new GameObject("DepthProbeGrandchild" + i).transform.SetParent(child.transform);
+                }
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", nameFilter),
+                    ("maxDepth", 1)));
+
+                var parentNode = FindNode(reply, "DepthProbeParent");
+                var node = FindByName(ChildrenOf(parentNode), "DepthProbeChild");
+
+                Assert.That(parentNode, Is.Not.Null, "the parent is a root, so it is reported");
+                Assert.That(node, Is.Not.Null, "the depth limit still reaches this one");
+                Assert.That(node["children"], Is.Null, "its children are past the limit");
+                Assert.That(node["childrenNotShown"]?.Value<int>(), Is.EqualTo(2),
+                    "so the reply has to say it is not a leaf");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        /// <summary>
         /// One branch, rooted where the caller asked, and nothing from the rest of the scene.
         /// </summary>
         /// <remarks>

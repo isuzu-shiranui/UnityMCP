@@ -166,7 +166,7 @@ namespace UnityMCP.Editor.Handlers
                         effectiveLimit,
                         node => ProjectFlatNode(node, paths),
                         fieldsFilter,
-                        IdentityField
+                        AlwaysKept
                     );
                 }
                 finally
@@ -357,11 +357,12 @@ namespace UnityMCP.Editor.Handlers
             public int SceneIndex;
             public int ParentIndex; // index into the flat list, or -1 for roots.
 
-            /// <summary>Children a filter kept out of the reply.</summary>
+            /// <summary>Children a filter or 'max_depth' kept out of the reply.</summary>
             /// <remarks>
-            /// A filter matching a parent returns it with no children at all, which reads as a
-            /// leaf: asking for "Platform" answered with Platforms and nothing under it, and the
-            /// caller fetched the whole scene rather than the three plates it was after.
+            /// A parent returned with no children at all reads as a leaf: asking for "Platform"
+            /// answered with Platforms and nothing under it, and the caller fetched the whole
+            /// scene rather than the three plates it was after. 'max_depth' ends a walk the same
+            /// way, and carries a default, so it does that to a caller who never named it.
             /// </remarks>
             public int ChildrenNotShown;
         }
@@ -375,14 +376,20 @@ namespace UnityMCP.Editor.Handlers
             List<FlatNode> flat)
         {
             var myIndex = flat.Count;
-            flat.Add(new FlatNode
+            var mine = new FlatNode
             {
                 Go = transform.gameObject,
                 SceneIndex = sceneIndex,
                 ParentIndex = parentIndex
-            });
+            };
 
-            if (depth >= maxDepth) return;
+            flat.Add(mine);
+
+            if (depth >= maxDepth)
+            {
+                mine.ChildrenNotShown = transform.childCount;
+                return;
+            }
 
             for (var i = 0; i < transform.childCount; i++)
             {
@@ -405,7 +412,8 @@ namespace UnityMCP.Editor.Handlers
             {
                 Go = node.Go,
                 SceneIndex = sceneIndex,
-                ParentIndex = parentIndex
+                ParentIndex = parentIndex,
+                ChildrenNotShown = node.ChildrenBelowDepth
             };
 
             flat.Add(mine);
@@ -424,11 +432,17 @@ namespace UnityMCP.Editor.Handlers
 
         /// <summary>Kept on every node however the caller narrows the reply.</summary>
         /// <remarks>
+        /// Identity is what a diff is built on, and completeness is what tells a caller whether
+        /// it has the whole branch. Neither is a property of the object, so narrowing the reply
+        /// cannot be a reason to lose them; a walk narrowed for size is exactly the one whose
+        /// nodes would otherwise read as leaves.
+        /// <para>
         /// Not <c>[ThreadStatic]</c>: an initialiser on such a field runs only on the thread that
         /// first touched the class, and this is read from the Editor's main thread, where it would
         /// be null.
+        /// </para>
         /// </remarks>
-        private static readonly string[] IdentityField = { "instanceId" };
+        private static readonly string[] AlwaysKept = { "instanceId", "childrenNotShown" };
 
         /// <summary>
         /// The flat list the current page is being projected from. <see cref="ProjectFlatNode"/>
@@ -605,6 +619,13 @@ namespace UnityMCP.Editor.Handlers
             public List<TreeNode> Children;
             public bool Matched;
             public bool AncestorOfMatch;
+
+            /// <summary>Children 'max_depth' stopped this walk from building.</summary>
+            /// <remarks>
+            /// Counted here rather than where the reply is assembled, which sees only the
+            /// children that exist and so cannot tell a leaf from a walk that stopped.
+            /// </remarks>
+            public int ChildrenBelowDepth;
         }
 
         private static TreeNode BuildTreeNode(Transform transform, int depth, int maxDepth)
@@ -621,6 +642,10 @@ namespace UnityMCP.Editor.Handlers
                 {
                     node.Children.Add(BuildTreeNode(transform.GetChild(i), depth + 1, maxDepth));
                 }
+            }
+            else
+            {
+                node.ChildrenBelowDepth = transform.childCount;
             }
 
             return node;
