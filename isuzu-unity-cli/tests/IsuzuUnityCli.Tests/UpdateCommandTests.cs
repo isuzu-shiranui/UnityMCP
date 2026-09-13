@@ -473,17 +473,17 @@ public sealed class UpdateCommandTests : IDisposable
     /// it spawned inherits those. Unity's asset database service outlives the Editor by minutes,
     /// during which the command shows nothing and looks hung.
     /// </remarks>
-    // Without the grace period this waits for a task that never completes, so it has to fail on a
-    // clock rather than hang the run.
+    // The timeout is what a regression trips: without the grace period this waits on a task that
+    // never completes, and the run would hang rather than report. It is not what the test checks,
+    // because a machine slow enough to fail a wall-clock assertion would fail it either way.
     [Fact(Timeout = 30000)]
     public async Task OutputSomeoneElseStillHoldsOpenDoesNotHoldTheCommand()
     {
         var held = new TaskCompletionSource().Task;
-        var clock = System.Diagnostics.Stopwatch.StartNew();
 
         await UpgradeCommand.Drain(held, Task.CompletedTask, CancellationToken.None);
 
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(30), $"waited {clock.Elapsed}");
+        Assert.False(held.IsCompleted, "it came back while the stream was still open");
     }
 
     /// <summary>The grace period is not a way to ignore the caller pressing Ctrl+C.</summary>
