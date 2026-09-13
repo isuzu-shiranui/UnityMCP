@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using IsuzuUnityCli.Commands;
 using IsuzuUnityCli.Discovery;
 using IsuzuUnityCli.Housekeeping;
@@ -473,17 +475,34 @@ public sealed class UpdateCommandTests : IDisposable
     /// it spawned inherits those. Unity's asset database service outlives the Editor by minutes,
     /// during which the command shows nothing and looks hung.
     /// </remarks>
-    // The timeout is what a regression trips: without the grace period this waits on a task that
-    // never completes, and the run would hang rather than report. It is not what the test checks,
-    // because a machine slow enough to fail a wall-clock assertion would fail it either way.
-    [Fact(Timeout = 30000)]
+    /// <summary>
+    /// How long this waits before calling a regression a hang. Raised from the environment,
+    /// because the number that separates "came back" from "did not" belongs to the machine
+    /// running the test, not to the test. Without a bound of some kind a regression here does
+    /// not report: it waits on a task that never completes and takes the run with it.
+    /// </summary>
+    private static TimeSpan Patience =>
+        int.TryParse(
+            Environment.GetEnvironmentVariable("ISUZU_UNITY_CLI_TEST_TIMEOUT_SECONDS"),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out var seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : TimeSpan.FromSeconds(30);
+
+    [Fact]
     public async Task OutputSomeoneElseStillHoldsOpenDoesNotHoldTheCommand()
     {
         var held = new TaskCompletionSource().Task;
+        var drain = UpgradeCommand.Drain(held, Task.CompletedTask, CancellationToken.None);
 
-        await UpgradeCommand.Drain(held, Task.CompletedTask, CancellationToken.None);
+        Assert.True(
+            await Task.WhenAny(drain, Task.Delay(Patience)) == drain,
+            $"the drain did not come back within {Patience.TotalSeconds:0} seconds. On a machine "
+            + "where that is too short, raise ISUZU_UNITY_CLI_TEST_TIMEOUT_SECONDS.");
 
         Assert.False(held.IsCompleted, "it came back while the stream was still open");
+        Assert.False(await drain, "and it says so, because that is where the output stops");
     }
 
     /// <summary>The grace period is not a way to ignore the caller pressing Ctrl+C.</summary>
