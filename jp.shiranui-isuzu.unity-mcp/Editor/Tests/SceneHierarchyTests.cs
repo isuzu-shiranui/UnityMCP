@@ -556,6 +556,48 @@ namespace UnityMCP.Editor.Tests
             Assert.That(Count(result, "removed"), Is.Zero);
         }
 
+        /// <summary>
+        /// A diff notices a child appearing below 'max_depth', through the count on the node the
+        /// walk stopped at.
+        /// </summary>
+        /// <remarks>
+        /// The count is the only thing a reply carries about what is past the limit, so a
+        /// snapshot that left it out would answer "nothing changed" for any amount of churn
+        /// down there. What the diff says is that the branch is worth re-reading, not what
+        /// happened in it: a rename below the limit, or an equal number added and removed,
+        /// leaves the count where it was.
+        /// </remarks>
+        [Test]
+        public void ADiffNoticesAChildAddedBelowTheDepthLimit()
+        {
+            var parent = new GameObject("DiffDepthProbeParent");
+
+            try
+            {
+                var child = new GameObject("DiffDepthProbeChild");
+                child.transform.SetParent(parent.transform);
+
+                var walk = ToolArgs.Of(("name", "DiffDepthProbe"), ("maxDepth", 1));
+                var snapshot = SnapshotOf(SceneHierarchy.Browse(walk));
+
+                new GameObject("DiffDepthProbeGrandchild").transform.SetParent(child.transform);
+
+                var diff = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", "DiffDepthProbe"), ("maxDepth", 1), ("since", snapshot)));
+
+                Assert.That(diff["error"], Is.Null, "the walk is the one the snapshot was taken under");
+                Assert.That(Count(diff, "added"), Is.Zero, "the new object is past the limit");
+                Assert.That(Count(diff, "changed"), Is.EqualTo(1),
+                    "so the node the walk stopped at is what changed");
+                Assert.That(((JObject)diff["changed"][0])["childrenNotShown"].Value<int>(),
+                    Is.EqualTo(1), "and it says there is one thing under it now");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
         [Test]
         public void AnExpiredSnapshotIsAnsweredWithTheTreeRatherThanARoundTrip()
         {
