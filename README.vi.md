@@ -124,6 +124,7 @@ Các tài liệu kỹ thuật dưới đây hiện dùng tiếng Anh; CHANGELOG 
 - [Kiến trúc](docs/en/architecture.md): sơ đồ, các lớp phía Editor, cài đặt, kiểm thử
 - [Khắc phục sự cố](docs/en/troubleshooting.md)
 - [Bảo mật](docs/en/security.md)
+- [Cập nhật](docs/en/updating.md): cần chạy gì tùy theo phiên bản đang dùng
 - [Chuyển từ v3](docs/en/migration-v3.md)
 - [CHANGELOG](jp.shiranui-isuzu.unity-mcp/CHANGELOG.md)
 
