@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.3.3] - Unreleased
+
+### Fixed
+- `install.ps1` ended with "You cannot call a method on a null-valued expression" before it downloaded anything, in the Windows PowerShell console the README's one-liner is pasted into. It read the machine's architecture from `RuntimeInformation`, a name that resolves inside PSReadLine's own assembly there, where the property it wanted does not exist and reading it yields nothing. The architecture is read from the environment now, and that property only as a cross-check.
+
 ## [4.3.2] - 2026-09-13
 
 ### Changed
