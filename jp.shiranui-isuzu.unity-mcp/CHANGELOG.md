@@ -11,6 +11,7 @@
 - On macOS and Linux, the Editor logs an error rather than a warning when it cannot restrict the token and descriptor files to their owner.
 - The EditMode test script refuses a `-ProjectPath` it did not create, and records the operating system it ran on.
 - `update` installs the CLI before it changes any project, so a release whose CLI cannot be installed is never written into a manifest.
+- `scene_browse_hierarchy`, `ui_hit_test` and `asset_broken_references` now build hierarchy paths with less overhead per object: each name is read from the Editor once, and names repeated among siblings are numbered without being looked up again.
 
 ### Fixed
 - After losing its Editor, `verify`, `jobs --wait` or `mcp-stdio` could carry on in another project that matched the original name.

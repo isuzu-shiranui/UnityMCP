@@ -106,17 +106,30 @@ namespace UnityMCP.Editor.Tests
         [Test]
         public void ANameWrittenLikePathSyntaxRoundTrips()
         {
+            // The batch compares eight siblings or fewer pairwise and counts a larger group, so
+            // the root's children stay at eight and the crowd goes past it.
+            var crowd = new GameObject("Crowd");
+            crowd.transform.SetParent(this.root.transform);
+
             foreach (var name in new[] { "A/B", "A/B", "Twin[1]", "Ends\\[2]" })
             {
                 new GameObject(name).transform.SetParent(this.root.transform);
             }
 
-            foreach (Transform child in this.root.transform)
+            foreach (var name in new[] { "Item", "Item", "Item", "A/B", "A/B", "Slot[0]", "Ends\\[2]", "a", "b", "c" })
             {
-                var path = ObjectResolve.PathOf(child.gameObject);
+                new GameObject(name).transform.SetParent(crowd.transform);
+            }
 
-                Assert.That(new ObjectResolve.PathBatch().PathOf(child.gameObject), Is.EqualTo(path));
-                Assert.That(ObjectResolve.Object(path, null), Is.SameAs(child.gameObject), path);
+            foreach (var parent in new[] { this.root.transform, crowd.transform })
+            {
+                foreach (Transform child in parent)
+                {
+                    var path = ObjectResolve.PathOf(child.gameObject);
+
+                    Assert.That(new ObjectResolve.PathBatch().PathOf(child.gameObject), Is.EqualTo(path));
+                    Assert.That(ObjectResolve.Object(path, null), Is.SameAs(child.gameObject), path);
+                }
             }
         }
 

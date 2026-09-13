@@ -157,6 +157,9 @@ namespace UnityMCP.Editor.Tools
         /// <summary>Path construction shared only within one synchronous hierarchy read.</summary>
         internal sealed class PathBatch
         {
+            /// <summary>Groups up to this size compare every pair of names instead of counting them in a dictionary.</summary>
+            private const int PairwiseLimit = 8;
+
             private readonly Dictionary<Transform, string> segments = new();
             private readonly Dictionary<Transform, string> paths = new();
             private readonly HashSet<Transform> parents = new();
@@ -175,11 +178,11 @@ namespace UnityMCP.Editor.Tools
                 if (parent == null && !this.rootsRead)
                 {
                     this.rootsRead = true;
-                    this.Index(SceneRoots().Select(root => root.transform));
+                    this.Index(SceneRoots().Select(root => root.transform).ToArray());
                 }
                 else if (parent != null && this.parents.Add(parent))
                 {
-                    this.Index(parent.Cast<Transform>());
+                    this.Index(ChildrenOf(parent));
                 }
 
                 // Preserve SceneRoots' PrefabStage behavior even for an object outside that set.
@@ -189,24 +192,90 @@ namespace UnityMCP.Editor.Tools
                 return path;
             }
 
-            private void Index(IEnumerable<Transform> siblings)
+            /// <remarks>
+            /// Each name is read once, because Object.name is a native call that returns a new
+            /// string. Hashing strings is the largest cost left on the Editor's Mono, so a large
+            /// group keeps each name's tally and numbers a sibling through it instead of looking the
+            /// name up again.
+            /// </remarks>
+            private void Index(Transform[] siblings)
             {
-                var nodes = new List<(Transform Transform, string Name)>();
-                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
-                foreach (var sibling in siblings)
+                var names = new string[siblings.Length];
+
+                for (var i = 0; i < siblings.Length; i++)
                 {
-                    var name = sibling.name;
-                    nodes.Add((sibling, name));
-                    counts.TryGetValue(name, out var count);
-                    counts[name] = count + 1;
+                    names[i] = siblings[i].name;
                 }
-                var seen = new Dictionary<string, int>(StringComparer.Ordinal);
-                foreach (var (transform, name) in nodes)
+
+                if (siblings.Length <= PairwiseLimit)
                 {
-                    seen.TryGetValue(name, out var index);
-                    this.segments[transform] = counts[name] > 1 ? $"{Escape(name)}[{index}]" : Escape(name);
-                    seen[name] = index + 1;
+                    for (var i = 0; i < siblings.Length; i++)
+                    {
+                        var before = 0;
+                        var repeats = false;
+
+                        for (var j = 0; j < siblings.Length; j++)
+                        {
+                            if (j != i && string.Equals(names[j], names[i]))
+                            {
+                                repeats = true;
+
+                                if (j < i)
+                                {
+                                    before++;
+                                }
+                            }
+                        }
+
+                        this.segments[siblings[i]] = repeats ? Escape(names[i]) + Suffix(before) : Escape(names[i]);
+                    }
+
+                    return;
                 }
+
+                var tallies = new Tally[siblings.Length];
+                var byName = new Dictionary<string, Tally>(siblings.Length, StringComparer.Ordinal);
+
+                for (var i = 0; i < siblings.Length; i++)
+                {
+                    if (!byName.TryGetValue(names[i], out var tally))
+                    {
+                        tally = new Tally();
+                        byName.Add(names[i], tally);
+                    }
+
+                    tally.Count++;
+                    tallies[i] = tally;
+                }
+
+                for (var i = 0; i < siblings.Length; i++)
+                {
+                    var escaped = Escape(names[i]);
+                    this.segments[siblings[i]] = tallies[i].Count == 1 ? escaped : escaped + Suffix(tallies[i].Next++);
+                }
+            }
+
+            /// <summary>
+            /// The children read by index. Enumerating a Transform allocates an enumerator that
+            /// makes two native calls for every child.
+            /// </summary>
+            private static Transform[] ChildrenOf(Transform parent)
+            {
+                var children = new Transform[parent.childCount];
+
+                for (var i = 0; i < children.Length; i++)
+                {
+                    children[i] = parent.GetChild(i);
+                }
+
+                return children;
+            }
+
+            /// <summary>How many siblings share a name, and the index the next of them takes.</summary>
+            private sealed class Tally
+            {
+                public int Count;
+                public int Next;
             }
         }
 
@@ -372,10 +441,17 @@ namespace UnityMCP.Editor.Tools
             return duplicates > 1 ? $"{name}[{index}]" : name;
         }
 
+        private static readonly char[] PathSyntax = { '\\', '/' };
+
         /// <summary>A name as a path segment writes it.</summary>
+        /// <remarks>
+        /// Few names end in ']', so the last character is checked first, and then one scan looks for
+        /// both characters. The Editor's Mono does not vectorize IndexOf, so a separate scan for each
+        /// character costs it close to three times as much.
+        /// </remarks>
         private static string Escape(string name)
         {
-            if (name.IndexOf('\\') < 0 && name.IndexOf('/') < 0 && !name.EndsWith("]", StringComparison.Ordinal))
+            if ((name.Length == 0 || name[name.Length - 1] != ']') && name.IndexOfAny(PathSyntax) < 0)
             {
                 return name;
             }
@@ -396,6 +472,19 @@ namespace UnityMCP.Editor.Tools
             var bracket = IndexBracket(escaped, out _);
 
             return bracket > 0 ? escaped.Insert(bracket, "\\") : escaped;
+        }
+
+        private static readonly string[] Suffixes = new string[256];
+
+        /// <summary>The '[n]' after a repeated name. Hierarchy reads run on the main thread, so the cache takes no lock.</summary>
+        private static string Suffix(int index)
+        {
+            if (index >= Suffixes.Length)
+            {
+                return "[" + index + "]";
+            }
+
+            return Suffixes[index] ??= "[" + index + "]";
         }
 
         private static string Unescape(string text)
