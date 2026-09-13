@@ -113,7 +113,11 @@ public static class UpgradeCommand
         var errors = Relay(process.StandardError, context.Err, context.Cancellation);
 
         await process.WaitForExitAsync(context.Cancellation);
-        await Task.WhenAll(output, errors);
+
+        if (!await Drain(output, errors, context.Cancellation))
+        {
+            SayWhatHoldsTheOutput(context, "doctor --fix");
+        }
 
         return process.ExitCode;
     }
@@ -189,7 +193,11 @@ public static class UpgradeCommand
         try
         {
             await process.WaitForExitAsync(context.Cancellation);
-            await Task.WhenAll(output, errors);
+
+            if (!await Drain(output, errors, context.Cancellation))
+            {
+                SayWhatHoldsTheOutput(context, "The installer");
+            }
         }
         catch (OperationCanceledException) when (context.Cancellation.IsCancellationRequested)
         {
@@ -205,11 +213,47 @@ public static class UpgradeCommand
             // Bounded: an installer that will not exit must not hold the process open for good.
             try { await process.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token); }
             catch (OperationCanceledException) { }
-            try { await Task.WhenAll(output, errors); }
+            try { await Drain(output, errors, CancellationToken.None); }
             catch (OperationCanceledException) { }
             throw;
         }
         return process.ExitCode;
+    }
+
+    /// <summary>
+    /// What the child wrote, once it has exited. False when something else still holds the stream
+    /// open, which is where the output stops.
+    /// </summary>
+    /// <remarks>
+    /// Reading to the end of the stream waits for every handle on it to close, and a process the
+    /// child left behind inherits those handles and holds them for as long as it lives. Unity's
+    /// asset database service outlives the Editor that spawned it by minutes, so the wait is not
+    /// bounded by anything the caller can see: the command looks hung with nothing running.
+    /// The child's own lines are already through by the time it exits, so what is left is someone
+    /// else's pipe.
+    /// </remarks>
+    public static async Task<bool> Drain(Task output, Task errors, CancellationToken cancellation)
+    {
+        using var grace = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        grace.CancelAfter(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            await Task.WhenAll(output, errors).WaitAsync(grace.Token);
+            return true;
+        }
+        catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Why the output stops where it does, for a caller with no other way to tell.</summary>
+    private static void SayWhatHoldsTheOutput(CommandContext context, string what)
+    {
+        context.Err.WriteLine(
+            $"{what} exited, but a process it started still holds its output open, so the rest of "
+            + "that output is not shown here. Nothing is waiting on it.");
     }
 
     private static async Task Relay(TextReader reader, TextWriter writer, CancellationToken cancellation)

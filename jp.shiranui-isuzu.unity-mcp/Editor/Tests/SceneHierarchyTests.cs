@@ -556,6 +556,48 @@ namespace UnityMCP.Editor.Tests
             Assert.That(Count(result, "removed"), Is.Zero);
         }
 
+        /// <summary>
+        /// A diff notices a child appearing below 'max_depth', through the count on the node the
+        /// walk stopped at.
+        /// </summary>
+        /// <remarks>
+        /// The count is the only thing a reply carries about what is past the limit, so a
+        /// snapshot that left it out would answer "nothing changed" for any amount of churn
+        /// down there. What the diff says is that the branch is worth re-reading, not what
+        /// happened in it: a rename below the limit, or an equal number added and removed,
+        /// leaves the count where it was.
+        /// </remarks>
+        [Test]
+        public void ADiffNoticesAChildAddedBelowTheDepthLimit()
+        {
+            var parent = new GameObject("DiffDepthProbeParent");
+
+            try
+            {
+                var child = new GameObject("DiffDepthProbeChild");
+                child.transform.SetParent(parent.transform);
+
+                var walk = ToolArgs.Of(("name", "DiffDepthProbe"), ("maxDepth", 1));
+                var snapshot = SnapshotOf(SceneHierarchy.Browse(walk));
+
+                new GameObject("DiffDepthProbeGrandchild").transform.SetParent(child.transform);
+
+                var diff = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", "DiffDepthProbe"), ("maxDepth", 1), ("since", snapshot)));
+
+                Assert.That(diff["error"], Is.Null, "the walk is the one the snapshot was taken under");
+                Assert.That(Count(diff, "added"), Is.Zero, "the new object is past the limit");
+                Assert.That(Count(diff, "changed"), Is.EqualTo(1),
+                    "so the node the walk stopped at is what changed");
+                Assert.That(((JObject)diff["changed"][0])["childrenNotShown"].Value<int>(),
+                    Is.EqualTo(1), "and it says there is one thing under it now");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
         [Test]
         public void AnExpiredSnapshotIsAnsweredWithTheTreeRatherThanARoundTrip()
         {
@@ -739,6 +781,95 @@ namespace UnityMCP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(parent);
+            }
+        }
+
+        /// <summary>
+        /// A node the depth limit stopped above says how many children it has, filter or no filter.
+        /// </summary>
+        /// <remarks>
+        /// 'max_depth' carries a default, so an unfiltered read of a deep scene ends on nodes
+        /// that are not leaves without the caller having asked for anything. The two walks reach
+        /// the count differently: the filtered one never builds the children, so it cannot count
+        /// them where the reply is assembled.
+        /// </remarks>
+        [Test]
+        [TestCase(null, TestName = "DepthCutoffIsCounted_Unfiltered")]
+        [TestCase("DepthProbe", TestName = "DepthCutoffIsCounted_Filtered")]
+        public void ANodeTheDepthLimitStoppedAtSaysHowManyChildrenItHas(string nameFilter)
+        {
+            var parent = new GameObject("DepthProbeParent");
+
+            try
+            {
+                var child = new GameObject("DepthProbeChild");
+                child.transform.SetParent(parent.transform);
+
+                for (var i = 0; i < 2; i++)
+                {
+                    new GameObject("DepthProbeGrandchild" + i).transform.SetParent(child.transform);
+                }
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", nameFilter),
+                    ("maxDepth", 1)));
+
+                var parentNode = FindNode(reply, "DepthProbeParent");
+                var node = FindByName(ChildrenOf(parentNode), "DepthProbeChild");
+
+                Assert.That(parentNode, Is.Not.Null, "the parent is a root, so it is reported");
+                Assert.That(node, Is.Not.Null, "the depth limit still reaches this one");
+                Assert.That(node["children"], Is.Null, "its children are past the limit");
+                Assert.That(node["childrenNotShown"]?.Value<int>(), Is.EqualTo(2),
+                    "so the reply has to say it is not a leaf");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent);
+            }
+        }
+
+        /// <summary>
+        /// A filter that matched nothing says whether the walk looked everywhere.
+        /// </summary>
+        /// <remarks>
+        /// The filter drops the nodes it did not match, and with them every record that the walk
+        /// stopped above something. Without a count the reply is an empty set either way, and
+        /// "not in the scene" is the reading a caller takes from it — a confident wrong answer
+        /// about an object that is there.
+        /// </remarks>
+        [Test]
+        public void AFilterThatFoundNothingSaysHowMuchItNeverLookedAt()
+        {
+            var deep = new GameObject("DepthlessProbeRoot");
+            var at = deep.transform;
+
+            try
+            {
+                for (var d = 0; d < 6; d++)
+                {
+                    var step = new GameObject("DepthlessStep" + d);
+                    step.transform.SetParent(at);
+                    at = step.transform;
+                }
+
+                new GameObject("DepthlessTarget").transform.SetParent(at);
+
+                var reply = SceneHierarchy.Browse(ToolArgs.Of(("name", "DepthlessTarget")));
+
+                Assert.That(reply["total"].Value<int>(), Is.Zero, "it sits below the default limit");
+                Assert.That(reply["belowMaxDepth"], Is.Not.Null,
+                    "so the reply has to say the walk stopped short rather than that nothing matched");
+                Assert.That(reply["belowMaxDepth"].Value<int>(), Is.GreaterThan(0));
+
+                var reached = SceneHierarchy.Browse(ToolArgs.Of(
+                    ("name", "DepthlessTarget"), ("maxDepth", 12)));
+
+                Assert.That(reached["total"].Value<int>(), Is.GreaterThan(0), "and deeper finds it");
+            }
+            finally
+            {
+                Object.DestroyImmediate(deep);
             }
         }
 

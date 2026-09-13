@@ -26,7 +26,16 @@ namespace UnityMCP.Editor.Tools
             "A filtered walk also returns the parents leading down to each match, so results " +
             "include objects that do not themselves satisfy the filter. What it leaves out is a " +
             "match's own children, when they do not match too: a filter naming a parent answers " +
-            "with that parent alone, and 'childrenNotShown' on it counts what is under it. While a prefab is open for " +
+            "with that parent alone. A node whose children were left out carries " +
+            "'childrenNotShown' counting them, whether the filter dropped them or 'max_depth' " +
+            "stopped the walk above them, so a node without that key is a leaf and a node with " +
+            "it has more underneath: read the rest with 'object_path' or a larger 'max_depth'. " +
+            "'belowMaxDepth' on the reply counts every object the walk stopped above, across the " +
+            "whole of it. A filter is never applied to those, so a reply naming nothing says " +
+            "the filter matched nothing as deep as it looked, not that the scene holds no such " +
+            "object; search_query reads the whole scene and takes a property value, where this " +
+            "takes a depth. " +
+            "While a prefab is open for " +
             "editing this still reports the scene behind it, and paths from that scene cannot be " +
             "resolved by the gameobject_ and inspect_ tools, which address the prefab contents " +
             "instead. In a reply that was not narrowed by 'fields', a key missing from a node " +
@@ -35,7 +44,8 @@ namespace UnityMCP.Editor.Tools
             "asked for, and says nothing about the object — the two readings do not mix, " +
             "so do not fold a narrowed reply into a cache of full ones. The allowlist " +
             "always keeps 'instanceId', because every reply is a state a later call can " +
-            "ask the difference from. Every reply carries a 'snapshotId' naming the state " +
+            "ask the difference from, and 'childrenNotShown', because how much a reply " +
+            "leaves out is not a field of the object. Every reply carries a 'snapshotId' naming the state " +
             "it describes, which 'since' takes to ask for a difference instead of a tree.",
             Idempotency = McpIdempotency.Safe,
             // Produces the object paths every other tool takes as an argument, so it is needed

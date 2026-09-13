@@ -1,8 +1,13 @@
 # Changelog
 
-## [4.3.3] - Unreleased
+## [4.3.3] - 2026-09-14
+
+### Changed
+- `scene_browse_hierarchy` marks a node whose children `max_depth` stopped it above with `childrenNotShown`, the count a filter already put there. `max_depth` carries a default, so an unfiltered read of a deep scene used to end on nodes that are not leaves without the caller having asked for anything, and nothing in the reply told them apart from leaves. A `fields` allowlist keeps the key for the same reason it keeps `instanceId`: how much a reply leaves out is not a field of the object, and a walk narrowed for size is the one whose nodes would otherwise read as complete.
 
 ### Fixed
+- `scene_browse_hierarchy` answered a filter that matched nothing the same way whether the scene held no such object or the walk stopped above it, because a filter drops the nodes it did not match and with them every record of where it stopped. `belowMaxDepth` on the reply counts what it never reached, on a diff as well as a tree. `search_query` takes a property value and reads the whole scene, where this takes a depth.
+- `upgrade` could sit with nothing running and nothing to show. It read the installer's output to the end of the stream, which waits for every handle on that pipe, and a process the installer leaves behind inherits one and holds it for as long as it lives. The child's own output is complete once it exits, so what is left is someone else's pipe and is waited on for two seconds rather than indefinitely.
 - `install.ps1` ended with "You cannot call a method on a null-valued expression" before it downloaded anything, in the Windows PowerShell console that the README's one-liner is meant to be pasted into. It read the machine's architecture from `RuntimeInformation`, a name that resolves inside PSReadLine's own assembly there; the property it wanted does not exist on that one, and reading a static property that is not there yields nothing rather than failing. The architecture comes from the environment now, and that property is read only as a cross-check. It has been this way since 4.0.0, for anyone whose console loaded the PSReadLine that Windows ships.
 
 ## [4.3.2] - 2026-09-13
