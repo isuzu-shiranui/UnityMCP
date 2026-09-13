@@ -38,7 +38,10 @@ namespace UnityMCP.Editor.Tools
             var go = ObjectResolve.Object(objectPath, instanceId);
             var target = RequireAssetPath(path, ".prefab");
 
-            if (!overwrite && AssetDatabase.LoadAssetAtPath<GameObject>(target) != null)
+            var existing = AssetDatabase.LoadAssetAtPath<GameObject>(target);
+            AssetTools.RefuseIncompatibleAsset(target, existing);
+
+            if (!overwrite && existing != null)
             {
                 throw new McpToolException(
                     "conflict",
@@ -238,7 +241,16 @@ namespace UnityMCP.Editor.Tools
                         $"'{argumentName}.{key}' must be a number, not {token.Type}.");
                 }
 
-                return token.Value<float>();
+                var value = token.Value<double>();
+
+                if (double.IsNaN(value) || double.IsInfinity(value)
+                    || value < -float.MaxValue || value > float.MaxValue)
+                {
+                    throw new McpToolException(
+                        "invalid_params", $"'{argumentName}.{key}' must be finite and within the float range.");
+                }
+
+                return (float)value;
             }
 
             return new Vector3(Axis("x", fallback.x), Axis("y", fallback.y), Axis("z", fallback.z));

@@ -14,6 +14,36 @@ namespace UnityMCP.Editor.Tests
     [TestFixture]
     internal sealed class PrefabValidationTests
     {
+        /// <summary>
+        /// A file Unity has not imported yet loads as nothing, so the check for an existing prefab
+        /// passes it by. 'overwrite' speaks for a prefab at the path, not for whatever else is there.
+        /// </summary>
+        [Test]
+        public void AFileUnityHasNotImportedIsNotWrittenOverEvenWithOverwrite()
+        {
+            var folder = "Assets/__McpPrefabValidation_" + Guid.NewGuid().ToString("N");
+            AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder));
+            var preview = EditorSceneManager.NewPreviewScene();
+            var source = new GameObject("PrefabValidationSource");
+            SceneManager.MoveGameObjectToScene(source, preview);
+
+            try
+            {
+                var path = folder + "/Existing.prefab";
+                File.WriteAllText(path, "not a prefab");
+
+                Assert.Throws<McpToolException>(() => PrefabTools.Create(
+                    instanceId: EntityIdCompat.IdOf(source), path: path, connect: false, overwrite: true));
+
+                Assert.That(File.ReadAllText(path), Is.EqualTo("not a prefab"));
+            }
+            finally
+            {
+                EditorSceneManager.ClosePreviewScene(preview);
+                AssetDatabase.DeleteAsset(folder);
+            }
+        }
+
         [TestCase(false)]
         [TestCase(true)]
         public void InvalidVectorDoesNotLeaveAPrefabInstance(bool invalidRotation)

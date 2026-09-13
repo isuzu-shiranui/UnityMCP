@@ -327,7 +327,8 @@ namespace UnityMCP.Editor.Tools
 
                 // SaveScene writes over an existing file without asking. The file check also covers
                 // a scene on disk that has not been imported yet.
-                if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target) != null || File.Exists(target))
+                if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(target) != null
+                    || File.Exists(target) || Directory.Exists(target))
                 {
                     throw new McpToolException(
                         "conflict",

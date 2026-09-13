@@ -471,7 +471,16 @@ namespace UnityMCP.Editor.Tools
                         $"'{argumentName}.{key}' must be a number, not {token.Type}.");
                 }
 
-                return token.Value<float>();
+                var value = token.Value<double>();
+
+                if (double.IsNaN(value) || double.IsInfinity(value)
+                    || value < -float.MaxValue || value > float.MaxValue)
+                {
+                    throw new McpToolException(
+                        "invalid_params", $"'{argumentName}.{key}' must be finite and within the float range.");
+                }
+
+                return (float)value;
             }
 
             return new Vector3(Axis("x", fallback.x), Axis("y", fallback.y), Axis("z", fallback.z));

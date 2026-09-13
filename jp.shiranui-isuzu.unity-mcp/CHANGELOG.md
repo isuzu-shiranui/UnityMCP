@@ -21,7 +21,7 @@
 - Under WSL, a descriptor that a crashed Windows Editor left behind was listed as running.
 - A state directory given with a trailing separator, or one descriptor reached twice, listed its Editor twice.
 - A prerelease such as `4.3.1-1` was read as newer than `4.3.1`, so `update` refused to move a project to the release.
-- `scene_create` replaced the open scenes before it found that the folder was missing, and wrote over a scene already at the path. A path that is not a `.unity` file under `Assets/` or `Packages/` is now refused before anything changes, too.
+- `scene_create` replaced the open scenes before it found that the folder was missing or that the path was a folder, and wrote over a scene already at the path. A path that is not a `.unity` file under `Assets/` or `Packages/` is now refused before anything changes, too.
 - The MCP registry entry started the package without `mcp-stdio`, so a client that followed it got the help text.
 - On macOS and Linux, the token and descriptor files were readable under the default permissions until chmod ran after they were written.
 - The Settings window trimmed spaces and quotes from PATH entries on macOS and Linux, where they are part of the directory name.
@@ -40,6 +40,8 @@
 - `update` treated a project whose `Packages/manifest.json` could not be read as one that does not use the package, and exited with 0.
 - A server stopped by hand started again on the next domain reload when "Auto-start on launch" was on.
 - The Register button in the Settings window froze the Editor until `setup --mcp` finished. It now runs in the background and reports a timeout or a failing exit code.
+- `prefab_create` wrote over a file at its path that Unity had not imported yet.
+- `gameobject_create`, `gameobject_set_transform` and `prefab_instantiate` accepted `NaN`, infinity and values outside the float range.
 
 ## [4.3.1] - 2026-09-12
 

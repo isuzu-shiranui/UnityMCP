@@ -16,6 +16,37 @@ namespace UnityMCP.Editor.Tests
     internal sealed class GameObjectToolsTests
     {
         /// <summary>
+        /// A transform whose last vector is refused changes none of the three. A NaN passed as a
+        /// number, so it has to be refused as a value, before anything is applied.
+        /// </summary>
+        [Test]
+        public void ARefusedScaleLeavesPositionAndRotationAsTheyWere()
+        {
+            var go = new GameObject("TransformRefusal");
+
+            try
+            {
+                go.transform.localPosition = new Vector3(1, 2, 3);
+                go.transform.localEulerAngles = new Vector3(10, 20, 30);
+                var rotation = go.transform.localRotation;
+
+                var refusal = Assert.Throws<McpToolException>(() => GameObjectTools.SetTransform(
+                    instanceId: EntityIdCompat.IdOf(go),
+                    position: new JObject { ["x"] = 99 },
+                    rotation: new JObject { ["y"] = 45 },
+                    scale: new JObject { ["z"] = double.NaN }));
+
+                Assert.That(refusal.Code, Is.EqualTo("invalid_params"));
+                Assert.That(go.transform.localPosition, Is.EqualTo(new Vector3(1, 2, 3)));
+                Assert.That(go.transform.localRotation, Is.EqualTo(rotation));
+            }
+            finally
+            {
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
         /// A primitive can be created without the collider Unity attaches to it.
         /// </summary>
         /// <remarks>
