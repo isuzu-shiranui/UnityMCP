@@ -651,8 +651,7 @@ unchanged from 4.0.0.
   documentation, the changelog and the licence. Installing by git URL brings only this directory,
   so the licence has to travel with it.
 - The release publishes to NuGet through trusted publishing: nuget.org trades the workflow's
-  OpenID Connect token for a key that lasts an hour, so no API key is stored anywhere. Setting it
-  up is described in `scripts/README.md`.
+  OpenID Connect token for a key that lasts an hour, so no API key is stored anywhere.
 - Blocking dialogs are reported instead of looking like a hang. `/health` carries `mainThread`
   (`stalledMs`, the visible dialog's title, message and buttons on Windows), and a call that is
   still running because a dialog is up says so in its job envelope, in `job_status` and over MCP.
