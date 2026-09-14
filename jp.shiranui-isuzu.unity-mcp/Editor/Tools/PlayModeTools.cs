@@ -19,7 +19,7 @@ namespace UnityMCP.Editor.Tools
         [McpTool(
             "play_mode_status",
             "Report whether the Editor is currently playing, paused, or compiling, and the frame " +
-            "it is on. Playing and running are not the same: an Editor without focus stops " +
+            "it is on. pending tracks play/stop through reload and the first play frame; refused gives the latest refusal. Playing and running are not the same: an Editor without focus stops " +
             "ticking, so 'isPlaying' stays true while nothing advances. Read 'frameCount' twice " +
             "to tell the difference, and use play_mode_step to advance it by hand.",
             Idempotency = McpIdempotency.Safe)]
@@ -34,9 +34,9 @@ namespace UnityMCP.Editor.Tools
             "Settings has Reload Domain turned off, this reloads the domain and the MCP connection " +
             "briefly drops and reconnects.",
             Idempotency = McpIdempotency.Unsafe)]
-        public static JObject Play()
+        public static JObject Play([McpArg("paused", "Start paused after one completed frame.")] bool paused = false)
         {
-            return PlayModeControl.Control(ToolArgs.Of(("action", "play")));
+            return PlayModeControl.Control(ToolArgs.Of(("action", "play"), ("paused", paused)));
         }
 
         [McpTool(
@@ -79,7 +79,7 @@ namespace UnityMCP.Editor.Tools
             [McpArg("count", "How many frames to advance, 1 to 1000. Watching something happen a " +
                              "frame at a time is a call for each frame; a slow animation took " +
                              "1,255 of them.")]
-            int count = 1,
+            int? count = null,
             [McpArg("paths", "Read these while the frame is still the one just reached, in the " +
                              "same form reflect_read takes: '@scene:/Turnstile/Transform/" +
                              "localEulerAngles'. Watching something over time is a step and a " +
@@ -93,11 +93,17 @@ namespace UnityMCP.Editor.Tools
                                  "controller asset around it, because a state's progress is not a " +
                                  "property 'paths' can read. Twenty-one steps came with " +
                                  "twenty-one animator_inspect calls behind them.")]
-            string[] animators = null)
+            string[] animators = null,
+            [McpArg("seconds", "Step until Time.time advances by this positive duration; alternative to count.")] double? seconds = null,
+            [McpArg("max_frames", "Maximum stepped frames, 1 to 100000; default 2000.")] int maxFrames = 2000,
+            [McpArg("changes", "Record bare values after every frame for 1 to 20 paths. Multiple changes within one frame appear once. At most 200 changes per path; beyond that retain the first 199 and last and mark truncated.")] bool changes = false)
         {
             return PlayModeControl.Control(ToolArgs.Of(
                 ("action", "step"),
                 ("count", count),
+                ("seconds", seconds),
+                ("max_frames", maxFrames),
+                ("changes", changes),
                 ("paths", paths == null ? null : new JArray(paths)),
                 ("animators", animators == null ? null : new JArray(animators))));
         }

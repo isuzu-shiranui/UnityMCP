@@ -63,6 +63,8 @@ namespace UnityMCP.Editor.TestRunner
 
             public int Inconclusive;
 
+            public int Total;
+
             /// <summary>
             /// Names of the tests seen so far, so progress can be reported before the run ends.
             /// A set rather than a count because the callbacks fire more than once per test —
@@ -82,6 +84,8 @@ namespace UnityMCP.Editor.TestRunner
                     ["mode"] = this.Mode,
                     ["startedAt"] = this.StartedAt,
                     ["completedAt"] = this.CompletedAt,
+                    ["total"] = this.Total,
+                    ["ranAny"] = this.Total > 0,
                     ["passed"] = this.Passed,
                     ["failed"] = this.Failed,
                     ["skipped"] = this.Skipped,
@@ -100,6 +104,7 @@ namespace UnityMCP.Editor.TestRunner
                     Mode = (string)json["mode"],
                     StartedAt = (string)json["startedAt"],
                     CompletedAt = (string)json["completedAt"],
+                    Total = (int?)json["total"] ?? ((int?)json["passed"] ?? 0) + ((int?)json["failed"] ?? 0) + ((int?)json["inconclusive"] ?? 0),
                     Passed = (int?)json["passed"] ?? 0,
                     Failed = (int?)json["failed"] ?? 0,
                     Skipped = (int?)json["skipped"] ?? 0,
@@ -231,6 +236,7 @@ namespace UnityMCP.Editor.TestRunner
                     current.Failed = result.FailCount;
                     current.Skipped = result.SkipCount;
                     current.Inconclusive = result.InconclusiveCount;
+                    current.Total = result.PassCount + result.FailCount + result.InconclusiveCount;
                     current.Results = new JArray(Flatten(result).Cast<object>().ToArray());
 
                     Persist();
@@ -256,7 +262,7 @@ namespace UnityMCP.Editor.TestRunner
                     // that ran — observed as 22 finished for an 11-test run. Nothing else is
                     // affected, because the other numbers come from the result tree at
                     // RunFinished, and re-adding a name is harmless.
-                    current.Finished.Add(result.Test.FullName);
+                    if (current.Finished.Add(result.Test.FullName) && result.TestStatus != TestStatus.Skipped) current.Total++;
                 }
             }
         }
@@ -402,7 +408,7 @@ namespace UnityMCP.Editor.TestRunner
         [McpTool(
             "test_results",
             "Report the state of the current or most recent test run: counts, and every failure with " +
-            "its message. Answers while a run is in progress, when tools that need the main thread cannot.",
+            "its message. total counts tests that ran (excluding skipped); ranAny says whether any ran. Answers while a run is in progress, when tools that need the main thread cannot.",
             Idempotency = McpIdempotency.Safe,
             MainThread = false)]
         public static JObject Results(

@@ -47,6 +47,16 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void NameFallbackFindsInactiveDescendantsButRefusesAmbiguity()
+        {
+            this.root.transform.Find("Child").gameObject.SetActive(false);
+            Assert.That(ObjectResolve.Object("Child", null).name, Is.EqualTo("Child"));
+            var error = Assert.Throws<McpToolException>(() => ObjectResolve.Object("Twin", null));
+            Assert.That(error.Message, Does.Contain("/ResolveRoot/Twin[0]").And.Contain("/ResolveRoot/Twin[1]"));
+            Assert.Throws<McpToolException>(() => ObjectResolve.Object("/Child", null));
+        }
+
+        [Test]
         public void ResolvesARootByPath()
         {
             Assert.That(ObjectResolve.Object("/ResolveRoot", null).name, Is.EqualTo("ResolveRoot"));

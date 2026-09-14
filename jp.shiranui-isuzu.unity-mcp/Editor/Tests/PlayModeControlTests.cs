@@ -1,8 +1,12 @@
-﻿using Newtonsoft.Json.Linq;
+﻿using System.Collections;
+
+using Newtonsoft.Json.Linq;
 
 using NUnit.Framework;
 
 using UnityEditor;
+
+using UnityEngine.TestTools;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Handlers;
@@ -31,6 +35,7 @@ namespace UnityMCP.Editor.Tests
         public void TearDown()
         {
             FrameSequencer.CancelAll("PlayModeControlTests finished");
+            PlayModeRequest.Clear();
         }
 
         /// <summary>
@@ -156,6 +161,29 @@ namespace UnityMCP.Editor.Tests
             Assert.That(FrameSequencer.ActiveCount, Is.EqualTo(before),
                 "there is nothing to defer when the Editor is already where it was asked to be");
         }
+
+        [UnityTest]
+        public IEnumerator AStoppedEditorCompletesTheRequestWithoutAnEnteredEditModeEvent()
+        {
+            Assert.That(EditorApplication.isPlaying, Is.False, "this fixture only covers edit mode");
+            Assert.That(EditorApplication.isPlayingOrWillChangePlaymode, Is.False);
+
+            // An already stopped Editor produces no EnteredEditMode event to clear the request.
+            PlayModeRequest.Begin("stop");
+
+            for (var frame = 0; frame < 60 && FrameSequencer.IsRunning("play_mode_request"); frame++)
+            {
+                yield return null;
+            }
+
+            var status = PlayModeControl.Control(new JObject { ["action"] = "status" });
+
+            Assert.That((string)status["pending"], Is.Null);
+            Assert.That(status["refused"].Type, Is.EqualTo(JTokenType.Null),
+                "reaching edit mode completes a stop request even before its state-change event");
+            Assert.That(FrameSequencer.IsRunning("play_mode_request"), Is.False);
+        }
+
         /// <summary>
         /// A step and the look that always follows it, in one call.
         /// </summary>

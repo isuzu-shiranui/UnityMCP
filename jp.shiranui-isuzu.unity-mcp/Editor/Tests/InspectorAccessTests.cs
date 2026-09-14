@@ -10,6 +10,7 @@ using UnityEngine;
 
 using UnityMCP.Editor.Core;
 using UnityMCP.Editor.Handlers;
+using UnityMCP.Editor.Tools;
 
 namespace UnityMCP.Editor.Tests
 {
@@ -27,6 +28,111 @@ namespace UnityMCP.Editor.Tests
             public long signed;
             public ulong unsigned;
             public double precise;
+        }
+
+        private sealed class AmbiguousPathFixture : ScriptableObject
+        {
+            public float m_Mass = 1;
+            public float m_mass = 2;
+            public NamedArrayFixture m_Array = new NamedArrayFixture { m_Foo = 3 };
+        }
+
+        [System.Serializable]
+        private struct NamedArrayFixture
+        {
+            public float m_Foo;
+        }
+
+        [TestCase("Rigidbody", "mass", "m_Mass", false)]
+        [TestCase("Rigidbody", "mass", "m_Mass", true)]
+        [TestCase("Transform", "localPosition.x", "m_LocalPosition.x", true)]
+        [TestCase("BoxCollider", "isTrigger", "m_IsTrigger", true)]
+        public void CSharpPropertyNamesReadWriteAndListSerializedValues(string componentType, string path, string serializedPath, bool infer)
+        {
+            if (componentType == "Rigidbody") target.AddComponent<Rigidbody>();
+            if (componentType == "BoxCollider") target.AddComponent<BoxCollider>();
+            var value = componentType == "BoxCollider" ? new JValue(true) : new JValue(7.5f);
+            var namedType = infer ? null : componentType;
+            var written = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "write"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", namedType), ("propertyPath", path), ("value", value)));
+
+            Assert.That(written["error"], Is.Null, written.ToString());
+            if (componentType == "Rigidbody") Assert.That(target.GetComponent<Rigidbody>().mass, Is.EqualTo(7.5f).Within(0.00001f));
+            if (componentType == "Transform") Assert.That(target.transform.localPosition.x, Is.EqualTo(7.5f));
+            if (componentType == "BoxCollider") Assert.That(target.GetComponent<BoxCollider>().isTrigger, Is.True);
+            var read = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "read"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", namedType), ("propertyPath", path)));
+            var listed = InspectorTools.List(objectPath: "/InspectorAccessTests", componentType: namedType, propertyPath: path);
+            foreach (var reply in new[] { read, listed })
+            {
+                Assert.That(reply["error"], Is.Null, reply.ToString());
+                Assert.That((string)reply["property"]?["path"], Is.EqualTo(serializedPath));
+                if (componentType == "BoxCollider") Assert.That((bool)reply["property"]["value"], Is.True);
+                else Assert.That((float)reply["property"]["value"], Is.EqualTo(7.5f).Within(0.00001f), reply.ToString());
+            }
+        }
+
+        [TestCase("read")]
+        [TestCase("write")]
+        [TestCase("list")]
+        public void MisspelledPropertyReportsTheSerializedCandidate(string mode)
+        {
+            var body = target.AddComponent<Rigidbody>();
+            var reply = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", mode), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "Rigidbody"), ("propertyPath", "mas"), ("value", 9)));
+
+            Assert.That((string)reply["error"], Does.Contain("m_Mass"));
+            Assert.That(body.mass, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void AmbiguousAliasesAreRefusedWhileExactSerializedNamesStillResolve()
+        {
+            var fixture = ScriptableObject.CreateInstance<AmbiguousPathFixture>();
+            try
+            {
+                using var serialized = new SerializedObject(fixture);
+                Assert.That(SerializedPropertyPath.Find(serialized, "MASS", out var error), Is.Null);
+                Assert.That(error, Does.Contain("ambiguous").And.Contain("m_Mass").And.Contain("m_mass"));
+                var exact = SerializedPropertyPath.Find(serialized, "m_Mass", out error);
+                Assert.That(error, Is.Null);
+                Assert.That(exact.propertyPath, Is.EqualTo("m_Mass"));
+                Assert.That(exact.floatValue, Is.EqualTo(1));
+                var nested = SerializedPropertyPath.Find(serialized, "Array.foo", out error);
+                Assert.That(error, Is.Null);
+                Assert.That(nested.propertyPath, Is.EqualTo("m_Array.m_Foo"));
+                Assert.That(nested.floatValue, Is.EqualTo(3));
+            }
+            finally { Object.DestroyImmediate(fixture); }
+        }
+
+        [Test]
+        public void AliasAndSerializedNameCannotWriteTheSamePropertyTwice()
+        {
+            var body = target.AddComponent<Rigidbody>();
+            var reply = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "write"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "Rigidbody"),
+                ("values", new JObject { ["mass"] = 7, ["m_Mass"] = 9 })));
+
+            Assert.That((string)reply["error"], Does.Contain("Nothing was written"));
+            Assert.That(body.mass, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ParentAliasAndSerializedChildCannotOverwriteEachOtherInOneBatch()
+        {
+            var reply = InspectorAccess.Access(ToolArgs.Of(
+                ("mode", "write"), ("objectPath", "/InspectorAccessTests"),
+                ("componentType", "Transform"),
+                ("values", new JObject { ["localPosition"] = new JObject { ["x"] = 1, ["y"] = 2, ["z"] = 3 },
+                    ["m_LocalPosition.x"] = 9 })));
+
+            Assert.That((string)reply["error"], Does.Contain("Nothing was written"));
+            Assert.That(target.transform.localPosition, Is.EqualTo(Vector3.zero));
         }
 
         [Test]
@@ -105,16 +211,18 @@ namespace UnityMCP.Editor.Tests
             Assert.That(body.useGravity, Is.False);
         }
 
-        [TestCase(false)]
-        [TestCase(true)]
-        public void ResizingAndEditingTheSameArrayIsRefusedBeforeApplying(bool resizeFirst)
+        [TestCase(false, "m_Materials.Array.size")]
+        [TestCase(true, "m_Materials.Array.size")]
+        [TestCase(false, "materials.Array.size")]
+        [TestCase(true, "materials.Array.size")]
+        public void ResizingAndEditingTheSameArrayIsRefusedBeforeApplying(bool resizeFirst, string sizePath)
         {
             var renderer = target.AddComponent<MeshRenderer>();
             renderer.sharedMaterials = new Material[] { null };
             var values = new JObject();
-            if (resizeFirst) values["m_Materials.Array.size"] = 0;
+            if (resizeFirst) values[sizePath] = 0;
             values["m_Materials.Array.data[0]"] = JValue.CreateNull();
-            if (!resizeFirst) values["m_Materials.Array.size"] = 0;
+            if (!resizeFirst) values[sizePath] = 0;
 
             var reply = InspectorAccess.Access(ToolArgs.Of(
                 ("mode", "write"), ("objectPath", "/InspectorAccessTests"),

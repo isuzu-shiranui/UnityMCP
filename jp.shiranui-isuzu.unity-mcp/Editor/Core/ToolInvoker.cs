@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -201,6 +203,10 @@ namespace UnityMCP.Editor.Core
                     parameter.Parameter.ParameterType,
                     parameter.Required,
                     parameter.DefaultValue);
+                var description = (string)descriptor.InputSchema["properties"]?[parameter.Name]?["description"] ?? "";
+                bindings[i].Coordinates = (bindings[i].Underlying == typeof(JObject) || bindings[i].Kind == BindKind.Object
+                    || (bindings[i].Underlying == typeof(JToken) && new[] { "position", "rotation", "scale" }.Contains(parameter.Name)))
+                    && Regex.IsMatch(description, @"\{\s*x\s*,\s*y(?:\s*,\s*z)?(?:\s*,\s*w)?\s*\}");
             }
 
             try
@@ -605,15 +611,79 @@ namespace UnityMCP.Editor.Core
             return new List<T>(1) { coerce(token, element) };
         }
 
+        internal static JToken NormalizeObject(JToken token, McpParameterBinding binding)
+        {
+            var objectParameter = binding.Underlying == typeof(JObject) || binding.Kind == BindKind.Object;
+            if (!objectParameter && !binding.Coordinates) return token;
+            if (token.Type == JTokenType.String)
+            {
+                var text = token.Value<string>().Trim();
+                if (text.StartsWith("{", StringComparison.Ordinal)) return StrictObject(text);
+                if (binding.Coordinates)
+                {
+                    var parts = text.Split(',');
+                    if (parts.Length >= 2 && parts.Length <= 4)
+                    {
+                        var numbers = new JArray();
+                        foreach (var part in parts)
+                        {
+                            if (!double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+                                || double.IsNaN(number) || double.IsInfinity(number)) throw ObjectSpelling(binding);
+                            numbers.Add(number);
+                        }
+                        token = numbers;
+                    }
+                    else throw ObjectSpelling(binding);
+                }
+                else throw ObjectSpelling(binding);
+            }
+            if (binding.Coordinates && token is JArray array)
+            {
+                if (array.Count < 2 || array.Count > 4 || array.Any(t => (t.Type != JTokenType.Float && t.Type != JTokenType.Integer)
+                    || double.IsNaN((double)t) || double.IsInfinity((double)t))) throw ObjectSpelling(binding);
+                var result = new JObject();
+                var axes = new[] { "x", "y", "z", "w" };
+                for (var i = 0; i < array.Count; i++) result[axes[i]] = array[i].DeepClone();
+                return result;
+            }
+            if (objectParameter && token is not JObject) throw ObjectSpelling(binding);
+            return token;
+        }
+
+        private static FormatException ObjectSpelling(McpParameterBinding binding) => new(binding.Coordinates
+            ? "Accepted spellings: a JSON object, a strict JSON object string, comma-separated x,y,z, or a numeric array of 2 to 4 numbers."
+            : "Accepted spellings: a JSON object or a string containing a strict JSON object with double-quoted property names.");
+
+        private static readonly Regex JsonLexeme = new(
+            @"\G(?:[{}\[\],:]|true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|""(?:[^""\\\x00-\x1F]|\\(?:[""\\/bfnrt]|u[0-9a-fA-F]{4}))*"")");
+
+        private static JObject StrictObject(string text)
+        {
+            string previous = null;
+            for (var i = 0; i < text.Length;)
+            {
+                if (text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n') { i++; continue; }
+                var match = JsonLexeme.Match(text, i);
+                if (!match.Success || match.Index != i || (previous == "," && (match.Value == "}" || match.Value == "]")))
+                    throw new FormatException("Expected strict JSON with double-quoted names and strings; comments and trailing commas are not accepted.");
+                previous = match.Value;
+                i += match.Length;
+            }
+            using var reader = new JsonTextReader(new StringReader(text)) { DateParseHandling = DateParseHandling.None };
+            var result = JObject.Load(reader, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+            if (reader.Read()) throw new FormatException("Expected exactly one strict JSON object.");
+            return result;
+        }
+
         internal static T CoerceJson<T>(JToken token, McpParameterBinding binding)
             where T : JToken
         {
-            return (T)token;
+            return (T)NormalizeObject(token, binding);
         }
 
         internal static T CoerceObject<T>(JToken token, McpParameterBinding binding)
         {
-            return token.ToObject<T>(ResultSerializer);
+            return NormalizeObject(token, binding).ToObject<T>(ResultSerializer);
         }
 
         // ── the boxing path: dry runs, and any descriptor that did not compile ─────────
@@ -706,7 +776,7 @@ namespace UnityMCP.Editor.Core
 
                 try
                 {
-                    bound[i] = Coerce(token, binding.DeclaredType);
+                    bound[i] = Coerce(NormalizeObject(token, binding), binding.DeclaredType);
                 }
                 catch (McpToolException)
                 {

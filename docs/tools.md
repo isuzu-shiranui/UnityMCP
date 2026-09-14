@@ -14,7 +14,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 
 | ツール | 冪等性 | 用途 |
 |---|---|---|
-| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 1,692 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します |
+| `console_read_logs` | safe | コンソールのエントリを読む。`total` は絞り込みに一致した件数、`inConsole` はコンソール全体の件数、`errors` / `warnings` は絞り込みに関係なく重大度ごとの件数。**スタックトレースは既定で付きません**（各エントリが `f` と `l` でファイルと行を持っているため）。必要なときは `stack_trace: true` を渡します。例外 20 件で 612 トークン対 1,692 トークンの差です。ファイルのパスは末尾 3 セグメントに短縮します。`type` はカンマ区切りで複数を指定できます（`error,warning`） |
 | `console_get_count` | safe | エラー / 警告 / ログの件数 |
 | `console_clear` | unsafe | コンソールをクリア |
 | `editor_log_tail` | safe | `Editor.log` を直接読む（Editor が固まっていても動く） |
@@ -24,14 +24,14 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `compile_status` | safe | コンパイル中か、直前のコンパイルが成功したか |
 | `compile_request` | unsafe | 再コンパイルを要求。先にアセットの完全なリフレッシュが実行されるので、変更されたアセットのインポートが起きます。モーダルダイアログが開くこともあります |
 | `test_run` | unsafe | EditMode / PlayMode テストの実行を開始 |
-| `test_results` | safe | 実行中・直近のテスト結果（実行中でも読める） |
+| `test_results` | safe | 実行中・直近のテスト結果（実行中でも読める）。`total` は実行したテストの件数（スキップを除く）、`ranAny` は 1 件でも実行したかどうかです |
 | `scene_browse_hierarchy` | safe | シーン階層の走査。`path` を返すので編集系にそのまま渡せます。絞り込んでも、一致したオブジェクトへ至る親は結果に含まれます。**一致したものの子は、その子自身が一致しない限り出ません** — 親の名前で絞ると親1つだけが返ります。返らなかった子の数は `childrenNotShown` で分かります。フィルターが落とした場合と、`max_depth` が手前で止まった場合の両方に付くので、このキーが無いノードは葉、あるノードはまだ下があります。`fields` で絞っても落ちません。`missing_scripts: true` は、スクリプトが解決できないコンポーネントを持つオブジェクトだけを返します。各オブジェクトの `missingScripts` が、その件数です。ノードに無いキーは既定値です（active は true、tag は Untagged、layer は Default、欠けたスクリプトなし）。`object_path` を渡すと、シーンのルートではなくそのオブジェクトから下だけを返します。特定のオブジェクトの下に何があるかを訊くのに、シーン全体を取る必要はありません。応答は必ず `snapshotId` を返し、それを `since` に渡すと木の代わりにその状態との差分が返ります。snapshot はスクリプトの再読み込みを越えないので、失効していれば `sinceExpired` を付けて木が返ります。`limit` や `offset` で一部しか返らなかった応答の snapshot は、差分の基準にできません |
 | `scene_list` | safe | 開いているシーンとビルド設定のシーン |
-| `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です。配列は長さと要素の指定方法に加えて、中身も `elements` として返します（先頭20件まで。それ以上あるときは `elementsShown` が付きます）。要素が構造体のときは中身を返しません |
-| `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと、その GameObject が持つコンポーネントの一覧になります。`detail: "full"` を付ければ全コンポーネントのプロパティが1回で返るので、コンポーネントごとに呼ぶ必要はありません |
+| `inspect_read` | safe | シリアライズプロパティの読み取り。`component_type` を省くと GameObject 自身が対象です。配列は長さと要素の指定方法に加えて、中身も `elements` として返します（先頭20件まで。それ以上あるときは `elementsShown` が付きます）。要素が構造体のときは中身を返しません。`component_type` は短い型名でも完全な型名でも受け付けます。省いたときにプロパティが GameObject に無ければ、そのプロパティを持つコンポーネントが 1 つだけならそれを使い、応答の `component` に型名を返します。複数あれば候補を並べて断ります。プロパティパスが見つからないときは、C# の名前（`mass`）を一意に決まる範囲でシリアライズ名（`m_Mass`）として探し、決まらなければ近い名前を並べて断ります。`asset_path` を渡すとアセットを対象にします（下の `inspect_write` を参照） |
+| `inspect_list` | safe | シリアライズプロパティの一覧。`component_type` を省くと、その GameObject が持つコンポーネントの一覧になります。`detail: "full"` を付ければ全コンポーネントのプロパティが1回で返るので、コンポーネントごとに呼ぶ必要はありません。`asset_path` を渡すとアセットを対象にします（下の `inspect_write` を参照） |
 | `asset_find` | safe | 型 / 名前 / フォルダー / ラベルでアセット検索。応答は `limit` で打ち切ります。一致件数は `total` に入ります |
 | `asset_info` | safe | 型・GUID・importer・ラベル。依存は `include_dependencies` を渡したときだけ返します |
-| `play_mode_status` | safe | 再生中 / 一時停止中 / コンパイル中 |
+| `play_mode_status` | safe | 再生中 / 一時停止中 / コンパイル中。`pending` は、`play_mode_play` か `play_mode_stop` を受け付けてから切り替えが終わるまで `"play"` か `"stop"` を返します。Play への切り替えでは、指定した一時停止の状態になり 1 フレーム進んだところで終わりです。`refused` は、直近の要求が受け付けられなかったとき（コンパイルエラーなど）に、その要求と理由を返します。どちらもドメインリロードをまたいで保持します |
 | `project_assemblies` | safe | ロード済みアセンブリ一覧 |
 | `project_packages` | safe | UPM パッケージ一覧 |
 | `capture_screenshot` | unsafe | Game / Scene ビューや Editor パネルの画像。パネルは画面から読み取るので、Editor に重なっているものが一緒に写ります。ウィンドウを手前に出してから撮ります。`save_path` を渡すとファイルに出力します。途中のディレクトリは作成し、既存のファイルは上書きします。`focus` に写したいオブジェクトを渡すと、カメラの視野に入っていないときは撮らずに断ります |
@@ -40,6 +40,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `animator_audit` | safe | Editor が何も知らせてくれない問題を Animator Controller から洗い出す。何も変更しません。報告するのは、どこからも参照されていないパラメーター、モーションが空のステート、既定ステートから到達できないステート、ステートが 1 つも無いレイヤー、名前が重複したレイヤー、条件も Exit Time も無い遷移、そして 1 つのレイヤーの中で Write Defaults が食い違っているステートです |
 | `memory_usage` | safe | 読み込まれているオブジェクトの重さを、**プロジェクトの資産かどうかで分けて**大きい順に返す。この切り分けが要点で、Editor は自前のレンダーターゲットやアイコンアトラスを抱えており、それらがメモリ上の最大のテクスチャになることが普通にあります。混ぜて報告しても開発者にできることがありません。種類ごとの合計を先に返し、そのあと重い順に個別のアセットをパスつきで挙げます。**今読み込まれているものの大きさ**であって、ディスク上のファイルサイズでも、ビルドしたプレイヤーが抱える量でもありません。Editor はビルドが持たない形でテクスチャを保持するので、予算ではなく順位として読みます |
 | `ui_hit_test` | safe | 画面のある点をクリックしたとき、実際にどの uGUI 要素に届くか。「ボタンを押しても何も起きない」に答えるためのものです。点の下にある要素をイベントシステムが見る順に並べるので、先頭が実際にクリックを受け取るものです。`object_path` に本来押したい要素を渡すと、何がその上に被っているかを名前で答えます。あわせて、点の下にありながら当たり判定に出てこない要素を理由つきで列挙します（Raycast Target が off、オブジェクトが非アクティブ、CanvasGroup の Blocks Raycasts が off、ルートの Canvas に GraphicRaycaster が無い）。**Play モード中でないと使えません。** `EventSystem.current` が動作中にしか設定されないためで、Edit モードではどの点も「何も無い」と答えてしまい、壊れた UI と見分けがつかなくなります。uGUI 専用で、UI Toolkit は対象外です。com.unity.ugui が入っていないプロジェクトでは、このツール自体が現れません |
+| `ui_click` | unsafe | Play モード中の uGUI 要素を、EventSystem を通して押します。Editor にフォーカスが無くても届きます。対象は `object_path`、`instance_id`、`text`（表示文字列かオブジェクト名。有効で操作できる Selectable のうち 1 つに決まるもの）、`position`（左下原点の `[x, y]`。`normalized` で 0〜1 の割合）のどれか 1 つです。狙った点の最前面が対象でもその子でもなければ、押さずに何が被っているかを返して断ります。押したあと `wait_frames`（既定 1）フレーム進めてから応答を作り、`textChanges` に変わった Text / TMP_Text を並べます（最大 2,000 コンポーネントを比べ、変化は 50 件まで）。Selectable と、対象か親にあるポインターの down / up / click ハンドラーに届きます。ドラッグとスクロールは送りません。入力デバイスを直接読むコードには届きません |
 | `definitions_list` | safe | 定義ツールの一覧と読み込みエラー |
 
 ## オーサリング（作る・変える）
@@ -64,9 +65,9 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `gameobject_reparent` | unsafe | 親子付け。ワールド位置は既定で維持します。`keep_world_position: false` ではローカル位置とローカル回転をリセットするので、親の原点に移動します |
 | `gameobject_set_transform` | unsafe | 位置 / 回転 / スケール。指定した軸だけ変える |
 | `gameobject_set_active` | unsafe | 有効・無効の切り替え |
-| `gameobject_add_component` | unsafe | コンポーネント追加 |
+| `gameobject_add_component` | unsafe | コンポーネント追加。`values` にシリアライズプロパティと値を渡すと、追加と同時に書き込みます。書き込みは `inspect_write` と同じ処理で、追加と同じ 1 つの Undo にまとまります。1 つでも書けなければ、依存して追加されたコンポーネントも含めて追加ごと取り消して断ります。書いた値は応答の `written` に入ります |
 | `gameobject_remove_component` | unsafe | コンポーネント削除。基底型でも一致するので、`Renderer` が MeshRenderer に当たります。同じ型が複数あるときは `index` で選びます |
-| `inspect_write` | unsafe | シリアライズプロパティの書き込み。`component_type` を省くと GameObject 自身が対象です |
+| `inspect_write` | unsafe | シリアライズプロパティの書き込み。`component_type` の扱いは `inspect_read` と同じで、`values` のプロパティはすべて同じ 1 つのコンポーネントに解決できなければ断ります。`asset_path` を渡すとアセットに書いて保存します。Prefab（Variant を含む）ではその中身が対象で、`object_path` にルートの名前を除いた相対パス（`Body/Hitbox`）を渡すと子を指せます。それ以外のアセットはメインアセットが対象です。保存を確かめたときだけ `saved: true` を返し、`overriddenBy` に、そのプロパティを上書きしていて新しい値にならなかったインスタンスを、開いているシーンからプロパティごとに 50 件まで並べます |
 | `asset_create_folder` | unsafe | フォルダー作成（親も作る、冪等） |
 | `asset_move` | unsafe | 移動・リネーム（GUID を維持） |
 | `asset_delete` | unsafe | 削除。OS のゴミ箱へ移動するので、通常はそこから戻せます。フォルダーを渡すと配下すべてが対象です |
@@ -79,11 +80,11 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `prefab_instantiate` | unsafe | Prefab をシーンに配置。生成したインスタンスが選択状態になります |
 | `prefab_apply` | unsafe | インスタンスのオーバーライドを Prefab へ適用。`confirm: true` が必要。Undo で戻せず、その Prefab の全インスタンスに及びます |
 | `menu_execute` | unsafe | メニュー項目の実行 |
-| `play_mode_play` | unsafe | 再生開始。Enter Play Mode Settings で Reload Domain を無効にしていなければ、ドメインリロードで接続が一瞬切れます |
+| `play_mode_play` | unsafe | 再生開始。Enter Play Mode Settings で Reload Domain を無効にしていなければ、ドメインリロードで接続が一瞬切れます。`paused: true` を渡すと、1 フレーム進めたところで一時停止した状態で始まります |
 | `play_mode_stop` | unsafe | 停止。こちらも Reload Domain が有効なら接続が一瞬切れます |
 | `play_mode_pause` | unsafe | 一時停止。Play Mode の外では、その旨のエラーで失敗します |
 | `play_mode_unpause` | unsafe | 一時停止解除。Play Mode の外では同じくエラーで失敗します |
-| `play_mode_step` | unsafe | フレームを進める。必要なら先に一時停止します。`count` で 1〜1000 フレームをまとめて進められ、応答には到達フレームと経過秒数が入ります。`paths` を渡すと、進めた直後のそのフレームのまま `reflect_read` と同じ形で読めます。`animators` にオブジェクトのパスを渡すと、そのフレームでの Animator の状態（各レイヤーの状態名・進行度・遷移中か・パラメータの値）が同じ応答に入ります。状態の進行度はプロパティではないので `paths` では読めません。Play Mode の外では同じくエラーで失敗し、測定値は付きません |
+| `play_mode_step` | unsafe | フレームを進める。必要なら先に一時停止します。`count` で 1〜1000 フレームをまとめて進められ、応答には到達フレームと経過秒数が入ります。`paths` を渡すと、進めた直後のそのフレームのまま `reflect_read` と同じ形で読めます。`animators` にオブジェクトのパスを渡すと、そのフレームでの Animator の状態（各レイヤーの状態名・進行度・遷移中か・パラメータの値）が同じ応答に入ります。状態の進行度はプロパティではないので `paths` では読めません。Play Mode の外では同じくエラーで失敗し、測定値は付きません。`count` の代わりに `seconds` を渡すと、`Time.time` がその秒数だけ進むまで進めます（上限は `max_frames`、既定 2,000 フレーム）。`changes: true` と `paths`（1〜20 本）を渡すと、1 フレーム進めるごとに読み、値が変わったときだけ `[frame, time, value]` を記録して `changes` に返します。1 フレームの中で 2 回変わった値は 1 回に見えます。記録は 1 本あたり 200 件までで、超えたら最初の 199 件と最後の 1 件を残して `truncated: true` を付けます。読めないパスは最初のエラーだけを返し、消えたオブジェクトは null になります。応答の `stopReason` は止まった理由（`count`、`seconds`、`max_frames`、`play_mode_ended`）です |
 | `animator_create` | unsafe | Animator Controller のアセットを作り、`object_path` を渡せばその GameObject に付けます（Animator が無ければ足します）。編集する `animator_*` は11本あるのに作る手段が無く、空のプロジェクトからは11本すべてに手が届きませんでした。作られるのは Base Layer が1つだけの空の Controller で、中身は `animator_add_state` と `animator_add_parameter` で埋めます |
 | `animation_clip_create` | unsafe | 空の AnimationClip アセットを作ります。状態にはモーションが要り、他に作る手段がありませんでした。カーブは持ちません。クリップの長さはカーブから決まるので、ここで設定する長さはありません。カーブを入れるのは `animation_clip_write_curves` です。ループはカーブではなく設定なので、ここにあります |
 | `animation_clip_write_curves` | unsafe | AnimationClip に float カーブを書きます。1本ずつではなく複数まとめて渡します（揺れ・回り込み・うなずきで3本になるため）。各カーブは対象の子パス・コンポーネント型・シリアライズされたプロパティ名・キー列で指定します。接線は Animation ウィンドウの Auto と同じ形に均されます。1本でも解決できなければ何も書きません。長さはキーから決まるので応答で返します |
@@ -161,7 +162,7 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 | `animator_set_parameter` | unsafe | 実行中の Animator のパラメータを設定します（Bool / Trigger / Int / Float）。**Play mode 限定**で、停止中は「既定値は controller 側にある」と案内して拒否します。無い名前を渡すと、現存するパラメータの一覧を添えて拒否します |
 | `reflect_read` | unsafe | 型とメンバーパスで private を含む live な状態を読む。`Renderer.material` のような getter は読むだけで共有アセットをインスタンス化するので、`sharedMaterial` を読んでください。複数まとめて読むなら `paths`（最大50本）。結果は要求したパスをキーにした辞書で返り、読めなかった1本はその要素だけが `error` になります。Collider の `bounds` を読むときは物理へ同期してから返します |
 | `reflect_find_type` | safe | ロード済み型の検索 |
-| `execute_code` | unsafe | C# スニペットのコンパイル・実行（専用ツールで届かないときの最後の手段） |
+| `execute_code` | unsafe | C# スニペットのコンパイル・実行（専用ツールで届かないときの最後の手段）。コンパイルエラーは、送ったスニペットの中の行と列で返します。スニペットからは `McpSnippet` の `PathOf(go)`（ツールと同じ `[k]` 付きのパス）、`Find(path)`、`IdOf(obj)`、`All<T>(includeInactive)` を using なしで使えます。`IdOf` と `All` は Unity 2022.3 と 6.5 の API の違いを吸収します |
 
 ## 入力（Editor の GUI 経路に合成する）
 
@@ -201,5 +202,7 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 
   アセットは OS のゴミ箱へ移動し、フォルダーを渡した場合は配下すべてが移動します。GameObject は Undo で戻せます。ただし未保存シーンへの上書きは拒否します。これだけは Undo でも戻せないためです。
 - `gameobject_set_transform` は RectTransform も動かしますが、書き込むのは `localPosition` です。そのため `m_AnchoredPosition` の値は 1 回分遅れて追いつきます。書き込んだ直後に `inspect_read` で読み直すと、実際には動いているのに古い値が返ります。読み直して確かめるなら `reflect_read` を使うか、1 呼び出し置いてください。
-- `execute_code` のコードはメソッドの本体に置かれるので、using ディレクティブを書くとコンパイルエラーになります。`System`、`System.Collections`、`System.Collections.Generic`、`System.Linq`、`System.Threading.Tasks`、`UnityEngine`、`UnityEditor` は最初から取り込まれています。それ以外の型は `UnityEngine.Rendering.Volume` のように完全な形で書いてください。
+- `execute_code` のコードはメソッドの本体に置かれるので、using ディレクティブを書くとコンパイルエラーになります。`System`、`System.Collections`、`System.Collections.Generic`、`System.Linq`、`System.Threading.Tasks`、`UnityEngine`、`UnityEditor`、`UnityEngine.SceneManagement`、`UnityEditor.SceneManagement` は最初から取り込まれています。`Object` は `UnityEngine.Object` を指します。それ以外の型は `UnityEngine.Rendering.Volume` のように完全な形で書いてください。
 - `execute_code` は Undo の対象になりません。オーサリングは専用ツールを使ってください。
+- オブジェクト型の引数は、厳密な JSON のオブジェクトを文字列にしたものも受け付けます。`{x, y, z}` と書かれたベクトルの引数は、カンマ区切りの数値（`"1,2,3"`）と 2〜4 個の数値の配列も受け付け、順に x / y / z / w に入れます。それ以外の文字列は推測せずに断ります。
+- 先頭が `/` でないパスがシーンのルートから解決できないときは、非アクティブなものを含めて名前が完全に一致するオブジェクトを探します。1 つならそれを使い、複数あればパスを 10 件まで並べて断ります。

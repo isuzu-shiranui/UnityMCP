@@ -9,9 +9,10 @@ The CLI reads the descriptor file the Editor publishes. It therefore needs no po
 ```bash
 isuzu-unity-cli projects                 # Editors currently running
 isuzu-unity-cli health                   # server state, queue depth, running jobs
-isuzu-unity-cli tools                    # what this Editor publishes, with argument names
+isuzu-unity-cli tools                    # tool names, by group
+isuzu-unity-cli tools <tool> [<tool>...] # the named tools' descriptions and arguments
+isuzu-unity-cli tools --search <words>   # find a tool by name, description or argument
 isuzu-unity-cli tools --group <name>     # filter by group (comma-separated for several)
-isuzu-unity-cli tools <tool>             # one tool's description and arguments
 isuzu-unity-cli mcp-stdio --group <name> # narrow what the MCP client is offered
 isuzu-unity-cli call <tool> [...]        # invoke a tool
 isuzu-unity-cli verify [...]             # recompile, test and summarise in one call
@@ -37,6 +38,21 @@ isuzu-unity-cli call play_mode_status --raw          # the whole envelope, not j
 ```
 
 Values are typed automatically. `--limit 20` sends a number. `--active_only true` sends a boolean. Naming the same option twice or more sends a list (`--paths one --paths two`), which is how an array is typed in a shell that eats quotes.
+
+An object argument can be given in any of these ways:
+
+- `--values.speed 45` sends `{"values":{"speed":45}}`. Only the first `.` separates, so the key of `--values.m_LocalPosition.x 2` is `m_LocalPosition.x`.
+- `--args-file args.json` reads the arguments from a JSON object in a file, with or without a byte order mark. An option on the command line wins over the same key in the file.
+- JSON whose values are all numbers, such as `--position '{x:1,y:0,z:2}'`, is rebuilt even after its double quotes are gone, because Windows PowerShell 5.1 strips them from arguments passed to a native program. JSON with a word as a value, such as `{m_Text:true}`, is refused: without its quotes there is no telling whether it was a string or a boolean.
+
+Words left after the tool name that are not part of a `--name value` pair are not dropped; the call stops with exit code 2.
+
+`call` returns once the work it started is over.
+
+- `play_mode_play` and `play_mode_stop` ask `play_mode_status` until the change of mode has finished, domain reload included, and print that status. If the Editor did not enter play mode (compile errors, for example), the call prints `error [play_refused]` with the reason and exits 1.
+- A call that returns a job id waits for the job and prints its result.
+- `--wait-timeout <seconds>` sets how long to wait: 60 seconds for play mode and 120 for a job by default. The work goes on in the Editor when the wait runs out, and the call exits 4.
+- `--no-wait` prints the first answer and returns.
 
 JSON is indented in a terminal and packed when the output is piped or redirected. `--compact` packs it in a terminal too.
 
@@ -84,7 +100,7 @@ A reconnect is refused even for the same project when its path is written differ
 | 1 | error (for `verify`: compile errors, failed tests, or inconclusive tests) |
 | 2 | bad arguments. An option the command does not have, an option missing its value, and `call` without a tool name all return it. So does a `verify` `--timeout` that is not a positive number, or a `verify` `--logs` that is not a count |
 | 3 | no Editor found, the choice is ambiguous, the selected project cannot be reconnected to, or the Editor kept rejecting the token |
-| 4 | `verify` or `jobs --wait` exceeded `--timeout` |
+| 4 | `verify` or `jobs --wait` exceeded `--timeout`, or `call` exceeded `--wait-timeout` |
 | 130 | interrupted with Ctrl+C |
 
 Errors go to stderr. That makes the CLI usable in scripts.
@@ -103,7 +119,9 @@ isuzu-unity-cli verify --raw                 # the summary as JSON
 
 The Editor's server goes down during the compile. `verify` expects the connection errors in that window and waits. It re-reads the descriptor before continuing. `--timeout` defaults to 300 seconds.
 
-With `--test`, a completed run containing failed or inconclusive tests exits 1. Skipped tests alone do not fail verification. The counts cover the whole run, even when the Editor limits the returned details. In `--raw` output, `tests.inconclusive` reports the inconclusive count and `tests.truncated` indicates that the details are incomplete; `tests.failures` contains only the non-success details returned by the Editor, excluding skipped tests.
+The first five compile errors are printed with their line and one line of source either side.
+
+With `--test`, a completed run containing failed or inconclusive tests exits 1. A run that matched no test prints `tests: none matched` and exits 1, so a mistyped filter is not taken for a pass. Skipped tests alone do not fail verification. The counts cover the whole run, even when the Editor limits the returned details. In `--raw` output, `tests.ranAny` says whether any test ran, `tests.inconclusive` reports the inconclusive count and `tests.truncated` indicates that the details are incomplete; `tests.failures` contains only the non-success details returned by the Editor, excluding skipped tests.
 
 When the token is rejected, the descriptor is read again as well. If the token there has not changed, it keeps reading for 15 seconds, then stops with exit code 3. With `--raw`, a summary of the steps that ran is still printed, with `ok: false`.
 
@@ -119,15 +137,21 @@ Work slower than `syncWaitMs` (3 seconds by default) returns a job id instead of
 
 `isuzu-unity-cli jobs` lists jobs. `isuzu-unity-cli jobs <id>` reports one job's state and result.
 
-Do not repeat a call that returned a job id. The work is still running, and repeating the call runs it twice.
+`call` waits for a job by default. When a job id comes back anyway, because of `--no-wait` or because the wait ran out, do not repeat the call. The work is still running, and repeating the call runs it twice.
 
 `--wait` polls until the job ends and prints only its last answer. Whatever is holding the Editor up while the wait lasts — a compilation, a dialog, a main thread that has not come back — is reported on stderr. Exit codes: 0 the job completed, 1 it failed or was cancelled, 2 an option is wrong, 3 no Editor or an ambiguous one, 4 the wait timed out.
 
 `--timeout <seconds>` (300 by default) gives up waiting. The job itself keeps running in the Editor.
 
-## tools --group
+## tools
 
-`isuzu-unity-cli tools --group <name>[,<name>]` filters the tool list by group. The groups are `diagnostics`, `authoring`, `rendering`, `timeline`, `build`, `code` and `input`. Name one tool instead and only its description and arguments are printed, which is far smaller than the whole list.
+`isuzu-unity-cli tools` prints only the tool names, one line per group. A listing with every description is more than an agent's shell tool shows in one reply, and it arrives cut off.
+
+- `tools <tool> [<tool>...]` prints the named tools' descriptions and, for each argument, its name, type, default, whether it is required, and what it means.
+- `tools --search <words>` prints up to ten tools whose name, description or argument names contain the words, name matches first.
+- `tools --long` prints every tool with its arguments and description.
+- `--raw` prints the catalog as the Editor returns it; with a tool name, only that tool's definition.
+- `--group <name>[,<name>]` filters by group. The groups are `diagnostics`, `authoring`, `rendering`, `timeline`, `build`, `code` and `input`.
 
 ## setup
 

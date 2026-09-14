@@ -265,6 +265,40 @@ public sealed class VerifyCommandTests
         Assert.Contains("  Assets/Bar.cs(3,1): CS1002: ; expected", output.ToString());
     }
 
+    /// <summary>A compile error comes with the lines around it, read from the project the descriptor names.</summary>
+    /// <remarks>The descriptor's path is the Assets folder, and the error's file is relative to the folder above it.</remarks>
+    [Fact]
+    public async Task ACompileErrorShowsTheSourceAroundItsLine()
+    {
+        var name = "VerifySource" + Guid.NewGuid().ToString("N");
+        var root = Path.Combine(Path.GetTempPath(), name);
+        Directory.CreateDirectory(Path.Combine(root, "Assets"));
+        File.WriteAllText(Path.Combine(root, "Assets", "Foo.cs"), "class Foo\n{\n    int Add(int a, int b)\n    {\n        return a + b\n    }\n}\n");
+
+        try
+        {
+            using var server = new FakeUnityServer()
+                .Enqueue(200, Idle("T0"))
+                .Enqueue(200, Requested)
+                .Enqueue(200, Compiling)
+                .Enqueue(200, """
+                    {"status":"success","result":{"isCompiling":false,"isUpdating":false,"succeeded":false,
+                     "errorCount":1,"completedAt":"T1","truncated":false,"messages":[
+                       {"type":"error","file":"Assets/Foo.cs","line":5,"column":21,"message":"CS1002: ; expected"}]}}
+                    """)
+                .Enqueue(200, NoErrors);
+
+            var (context, output, _) = Context(() => [server.Descriptor(name)]);
+
+            Assert.Equal(1, await Verify(context));
+            Assert.Contains("        4 |     {\n        5 |         return a + b\n        6 |     }\n", output.ToString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task DroppedConnectionsDuringPollingAreRetried()
     {

@@ -35,62 +35,42 @@ namespace UnityMCP.Editor.Handlers
 
                 if (acrossPaths != null)
                 {
+                    if (parameters["assetPath"] != null)
+                        throw new McpToolException("invalid_params", "asset_path cannot be combined with object_paths.");
                     return WriteAcross(acrossPaths, componentType, componentIndex, parameters);
                 }
 
-                var go = Tools.ObjectResolve.Object(objectPath, instanceId);
-
+                using var scope = InspectorTarget.Open(parameters["assetPath"]?.ToString(), objectPath, instanceId);
+                var source = scope.Target;
+                var go = source as GameObject;
                 var offset = parameters["offset"]?.Value<int>() ?? 0;
                 var limit = parameters["limit"]?.Value<int>() ?? 0;
                 var fields = ListResponseBuilder.ParseFieldsParam(parameters["fields"]?.ToString());
-
-                // The components view answers a listing only. A read or a write with no component
-                // named targets the GameObject itself, which is what those tools promise; sending
-                // them here answered a write with a component list and wrote nothing.
-                if (mode == "list" && string.IsNullOrEmpty(componentType))
-                {
-                    var detail = parameters["detail"]?.ToString() ?? "standard";
-                    return ListComponents(
-                        go, offset, limit <= 0 ? int.MaxValue : limit, fields, detail);
-                }
-
-                SerializedObject serializedObject;
-                string target;
-
-                if (string.IsNullOrEmpty(componentType))
-                {
-                    serializedObject = new SerializedObject(go);
-                    target = "GameObject";
-                }
-                else
-                {
-                    var component = FindComponent(go, componentType, componentIndex);
-                    if (component == null)
-                    {
-                        return new JObject
-                        {
-                            ["error"] = $"Component '{componentType}' (index {componentIndex}) not found on '{go.name}'"
-                        };
-                    }
-
-                    serializedObject = new SerializedObject(component);
-                    target = componentType;
-                }
-
+                // Only listing without a component or property returns the component overview.
+                // Reads and writes must resolve a target; an overview would report success without writing.
+                if (mode == "list" && string.IsNullOrEmpty(componentType) && string.IsNullOrEmpty(propertyPath) && go != null)
+                    return ListComponents(go, offset, limit <= 0 ? int.MaxValue : limit, fields, parameters["detail"]?.ToString() ?? "standard");
+                var resolved = ResolveTarget(source, componentType, componentIndex, PropertyPaths(parameters));
+                using var serializedObject = new SerializedObject(resolved);
+                var target = resolved.GetType().FullName;
                 if (mode == "write")
                 {
-                    return parameters["values"] is JObject many
+                    var overrides = scope.Overrides(resolved, PropertyPaths(parameters));
+                    var reply = parameters["values"] is JObject many
                         ? WriteProperties(serializedObject, many, target)
                         : WriteProperty(serializedObject, propertyPath, value, target);
+                    if (reply["error"] == null && scope.IsAsset)
+                    {
+                        scope.Save();
+                        reply["saved"] = true;
+                        reply["overriddenBy"] = overrides;
+                        reply.Remove("note");
+                    }
+                    return reply;
                 }
-
-                // Read mode
-                if (string.IsNullOrEmpty(propertyPath))
-                {
-                    return ListProperties(serializedObject, target, offset, limit, fields);
-                }
-
-                return ReadProperty(serializedObject, propertyPath, target);
+                return string.IsNullOrEmpty(propertyPath)
+                    ? ListProperties(serializedObject, target, offset, limit, fields)
+                    : ReadProperty(serializedObject, propertyPath, target);
             }
             catch (McpToolException)
             {
@@ -153,27 +133,11 @@ namespace UnityMCP.Editor.Handlers
             {
                 var go = Tools.ObjectResolve.Object(path, null);
 
-                if (string.IsNullOrEmpty(componentType))
-                {
-                    targets.Add(go);
-                    continue;
-                }
-
-                var component = FindComponent(go, componentType, componentIndex);
-
-                if (component == null)
-                {
-                    throw new McpToolException(
-                        "not_found",
-                        $"'{path}' has no '{componentType}' at index {componentIndex}. "
-                        + "Nothing was written.");
-                }
-
-                targets.Add(component);
+                targets.Add(ResolveTarget(go, componentType, componentIndex, PropertyPaths(parameters)));
             }
 
             var serialized = new SerializedObject(targets.ToArray());
-            var label = string.IsNullOrEmpty(componentType) ? "GameObject" : componentType;
+            var label = targets[0].GetType().FullName;
 
             var written = parameters["values"] is JObject set
                 ? WriteProperties(serialized, set, label)
@@ -327,23 +291,41 @@ namespace UnityMCP.Editor.Handlers
             };
         }
 
-        private static Component FindComponent(GameObject go, string typeName, int index)
-        {
-            var components = go.GetComponents<Component>();
-            var count = 0;
+        private static string[] PropertyPaths(JObject parameters) => parameters["values"] is JObject values
+            ? values.Properties().Select(p => p.Name).ToArray()
+            : string.IsNullOrEmpty((string)parameters["propertyPath"]) ? Array.Empty<string>() : new[] { (string)parameters["propertyPath"] };
 
-            foreach (var comp in components)
+        internal static UnityEngine.Object ResolveTarget(UnityEngine.Object source, string componentType, int index, string[] properties)
+        {
+            if (source is not GameObject go)
             {
-                if (comp == null) continue;
-                if (comp.GetType().Name == typeName)
+                if (!string.IsNullOrEmpty(componentType))
+                    throw new McpToolException("invalid_params", "component_type applies to GameObjects, not this asset.");
+                return source;
+            }
+            if (!string.IsNullOrEmpty(componentType)) return Tools.ObjectResolve.Component(go, componentType, index);
+            bool HasAll(UnityEngine.Object obj)
+            {
+                using var serialized = new SerializedObject(obj);
+                return properties.All(path => SerializedPropertyPath.Find(serialized, path, out _) != null);
+            }
+            if (properties.Length == 0 || HasAll(go)) return go;
+            var matches = go.GetComponents<Component>().Where(c => c != null && HasAll(c)).ToArray();
+            if (matches.Length == 1) return matches[0];
+            var candidates = new List<string>();
+            foreach (var obj in new UnityEngine.Object[] { go }.Concat(go.GetComponents<Component>().Where(c => c != null)))
+            {
+                using var serialized = new SerializedObject(obj);
+                foreach (var path in properties)
                 {
-                    if (count == index)
-                        return comp;
-                    count++;
+                    var prop = SerializedPropertyPath.Find(serialized, path, out var error);
+                    candidates.Add(prop == null ? error : $"{obj.GetType().FullName}: {prop.propertyPath}.");
                 }
             }
-
-            return null;
+            throw new McpToolException(matches.Length == 0 ? "not_found" : "conflict", (matches.Length == 0
+                ? $"No single component on '{go.name}' has all properties: {string.Join(", ", properties)}. Nothing was written."
+                : $"Properties match several components on '{go.name}': {string.Join(", ", matches.Select(c => c.GetType().FullName))}. Specify component_type and component_index.")
+                + " " + string.Join(" ", candidates.Distinct().Take(12)));
         }
 
         private static JObject ListProperties(
@@ -376,12 +358,12 @@ namespace UnityMCP.Editor.Handlers
         private static JObject ReadProperty(SerializedObject serializedObject, string propertyPath,
             string componentType)
         {
-            var prop = serializedObject.FindProperty(propertyPath);
+            var prop = SerializedPropertyPath.Find(serializedObject, propertyPath, out var error);
             if (prop == null)
             {
                 return new JObject
                 {
-                    ["error"] = $"Property '{propertyPath}' not found on component '{componentType}'"
+                    ["error"] = error
                 };
             }
 
@@ -399,7 +381,7 @@ namespace UnityMCP.Editor.Handlers
         /// refusal rather than a component half configured. Setting up a single
         /// ConfigurableJoint took twenty-one calls before this, one property at a time.
         /// </remarks>
-        private static JObject WriteProperties(
+        internal static JObject WriteProperties(
             SerializedObject serializedObject, JObject values, string componentType)
         {
             if (values.Count == 0)
@@ -407,7 +389,22 @@ namespace UnityMCP.Editor.Handlers
                 return new JObject { ["error"] = "'values' is empty; name at least one property." };
             }
 
-            var conflict = SerializedValues.BatchPathConflict(values);
+            var paths = new Dictionary<string, string>();
+            var canonicalValues = new JObject();
+            foreach (var pair in values)
+            {
+                var prop = SerializedPropertyPath.Find(serializedObject, pair.Key, out var error);
+                if (prop == null) return new JObject { ["error"] = error + " Nothing was written." };
+                if (canonicalValues.ContainsKey(prop.propertyPath))
+                    return new JObject { ["error"] = $"Several values resolve to '{prop.propertyPath}'. Nothing was written." };
+                var overlap = paths.Values.FirstOrDefault(path => path.StartsWith(prop.propertyPath + ".", StringComparison.Ordinal)
+                    || prop.propertyPath.StartsWith(path + ".", StringComparison.Ordinal));
+                if (overlap != null)
+                    return new JObject { ["error"] = $"Cannot write both '{overlap}' and '{prop.propertyPath}' in the same batch. Nothing was written." };
+                paths[pair.Key] = prop.propertyPath;
+                canonicalValues[prop.propertyPath] = pair.Value.DeepClone();
+            }
+            var conflict = SerializedValues.BatchPathConflict(canonicalValues);
             if (conflict != null)
             {
                 return new JObject { ["error"] = conflict };
@@ -417,17 +414,7 @@ namespace UnityMCP.Editor.Handlers
 
             foreach (var pair in values)
             {
-                var prop = serializedObject.FindProperty(pair.Key);
-
-                if (prop == null)
-                {
-                    return new JObject
-                    {
-                        ["error"] = $"Property '{pair.Key}' not found on component "
-                                    + $"'{componentType}'. Nothing was written; inspect_list "
-                                    + "names the paths this component takes.",
-                    };
-                }
+                var prop = serializedObject.FindProperty(paths[pair.Key]);
 
                 var failed = SerializedValues.Write(prop, pair.Value);
 
@@ -444,7 +431,7 @@ namespace UnityMCP.Editor.Handlers
 
             foreach (var pair in values)
             {
-                var prop = serializedObject.FindProperty(pair.Key);
+                var prop = serializedObject.FindProperty(paths[pair.Key]);
                 written[pair.Key] = SerializedValues.Read(prop);
             }
 
@@ -471,12 +458,12 @@ namespace UnityMCP.Editor.Handlers
                 return new JObject { ["error"] = "value is required for write mode" };
             }
 
-            var prop = serializedObject.FindProperty(propertyPath);
+            var prop = SerializedPropertyPath.Find(serializedObject, propertyPath, out var error);
             if (prop == null)
             {
                 return new JObject
                 {
-                    ["error"] = $"Property '{propertyPath}' not found on component '{componentType}'"
+                    ["error"] = error
                 };
             }
 
@@ -490,7 +477,7 @@ namespace UnityMCP.Editor.Handlers
 
             // Re-read to return updated value
             serializedObject.Update();
-            prop = serializedObject.FindProperty(propertyPath);
+            prop = SerializedPropertyPath.Find(serializedObject, propertyPath, out _);
 
             var written = new JObject
             {

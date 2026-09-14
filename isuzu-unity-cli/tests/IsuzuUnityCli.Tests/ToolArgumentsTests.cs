@@ -92,4 +92,26 @@ public sealed class ToolArgumentsTests
 
         Assert.Equal("[\"error\",\"log\"]", args["type"]!.ToJsonString());
     }
+
+    /// <summary>A dotted name is a field of an object argument, split at the first dot only.</summary>
+    /// <remarks>Serialized property paths carry dots of their own, and they are keys, not nesting.</remarks>
+    [Fact]
+    public void ADottedNameSetsOneFieldOfAnObject()
+    {
+        var parsed = ArgParser.Parse(["call", "x", "--values.m_LocalPosition.x", "2", "--values.speed", "45", "--values.label", "true"]);
+        var args = ToolArguments.Build("x", parsed);
+
+        Assert.Equal("{\"m_LocalPosition.x\":2,\"speed\":45,\"label\":true}", args["values"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void AnArgumentsFileWithAByteOrderMarkIsReadAndOptionsOverrideIt()
+    {
+        var parsed = ArgParser.Parse(["call", "x", "--args-file", "args.json", "--limit", "3"]);
+        var args = ToolArguments.Build("x", parsed, _ => "﻿{\"m_Text\":\"true\",\"limit\":1}");
+
+        Assert.Equal("true", args["m_Text"]!.GetValue<string>());
+        Assert.Equal(3, args["limit"]!.GetValue<long>());
+        Assert.False(args.ContainsKey("args-file"));
+    }
 }

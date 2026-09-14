@@ -40,14 +40,14 @@ public static class ArgParser
     /// </remarks>
     public static readonly IReadOnlySet<string> CallReservedOptions = new HashSet<string>(StringComparer.Ordinal)
     {
-        "json", "project", "file", "raw", "help", "version", "compact",
+        "json", "project", "file", "raw", "help", "version", "compact", "args-file", "no-wait", "wait-timeout",
     };
 
     /// <summary>Options the CLI consumes itself; they are never forwarded to a tool.</summary>
     public static readonly IReadOnlySet<string> CliOnlyOptions = new HashSet<string>(StringComparer.Ordinal)
     {
         "json", "project", "file", "raw", "help", "agent", "client", "yes", "no-skill", "mcp", "scope", "fix", "version",
-        "group", "compact", "release",
+        "group", "compact", "release", "args-file", "no-wait", "wait-timeout", "search", "long",
     };
 
     /// <summary>
@@ -71,6 +71,8 @@ public static class ArgParser
     private static readonly IReadOnlyDictionary<string, IReadOnlySet<string>> ValuelessPerCommand =
         new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal)
         {
+            ["tools"] = new HashSet<string>(StringComparer.Ordinal) { "long" },
+            ["call"] = new HashSet<string>(StringComparer.Ordinal) { "no-wait" },
             ["verify"] = new HashSet<string>(StringComparer.Ordinal) { "test", "no-compile" },
             ["jobs"] = new HashSet<string>(StringComparer.Ordinal) { "wait" },
             ["update"] = new HashSet<string>(StringComparer.Ordinal) { "dry-run" },

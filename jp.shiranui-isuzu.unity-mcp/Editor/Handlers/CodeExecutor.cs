@@ -66,7 +66,11 @@ namespace UnityMCP.Editor.Handlers
             "System.Linq",
             "System.Threading.Tasks",
             "UnityEngine",
-            "UnityEditor"
+            "UnityEditor",
+            "UnityEngine.SceneManagement",
+            "UnityEditor.SceneManagement",
+            "UnityMCP.Editor",
+            "Object = UnityEngine.Object"
         };
 
         /// <summary>Serializer for return values; matches the camelCase used everywhere else.</summary>
@@ -103,7 +107,7 @@ namespace UnityMCP.Editor.Handlers
 
                 if (!CompiledCache.TryGetValue(hash, out var method))
                 {
-                    var compiled = Compile(wrappedCode, out var errors);
+                    var compiled = Compile(wrappedCode, code, out var errors);
 
                     if (compiled == null)
                     {
@@ -175,7 +179,7 @@ namespace UnityMCP.Editor.Handlers
 
                 if (!CompiledCache.TryGetValue(hash, out var method))
                 {
-                    var compiled = Compile(wrappedCode, out var errors);
+                    var compiled = Compile(wrappedCode, code, out var errors);
 
                     if (compiled == null)
                     {
@@ -203,8 +207,8 @@ namespace UnityMCP.Editor.Handlers
         /// imported so <c>args["x"].Value&lt;T&gt;()</c> resolves.
         /// </summary>
         /// <remarks>
-        /// The output for <c>withArgs: false</c> is the cache key of every snippet compiled so far
-        /// in a session, so its text must stay exactly what it is.
+        /// This output is hashed as the session's compiled-snippet cache key. Keep it deterministic:
+        /// changing the wrapper between calls loads another assembly that the domain cannot unload.
         /// </remarks>
         internal static string Wrap(string code, bool withArgs)
         {
@@ -221,14 +225,16 @@ namespace McpCodeExecution
     {{
         public static object {signature}
         {{
-            {code}
+#line 1 ""snippet""
+{code}
+#line default
             return null;
         }}
     }}
 }}";
         }
 
-        private static MethodInfo Compile(string wrappedCode, out string[] errors)
+        private static MethodInfo Compile(string wrappedCode, string snippet, out string[] errors)
         {
             EnsureReferences();
 
@@ -252,7 +258,14 @@ namespace McpCodeExecution
             {
                 errors = emitResult.Diagnostics
                     .Where(d => d.Severity == DiagnosticSeverity.Error)
-                    .Select(d => d.GetMessage())
+                    .Select(d =>
+                    {
+                        const string marker = "#line 1 \"snippet\"\n";
+                        var start = wrappedCode.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+                        var offset = Math.Max(0, Math.Min(snippet.Length, d.Location.SourceSpan.Start - start));
+                        var position = Microsoft.CodeAnalysis.Text.SourceText.From(snippet).Lines.GetLinePosition(offset);
+                        return $"line {position.Line + 1}, column {position.Character + 1}: {d.GetMessage()}";
+                    })
                     .ToArray();
 
                 return null;

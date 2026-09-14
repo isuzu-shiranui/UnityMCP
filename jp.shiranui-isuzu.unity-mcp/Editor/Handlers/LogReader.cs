@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 using Newtonsoft.Json.Linq;
@@ -77,13 +78,9 @@ namespace UnityMCP.Editor.Handlers
 
                 // Checked here rather than in the loop: the loop compares against each name in
                 // turn, so one it does not know narrows nothing and every severity comes back.
-                if (typeFilter != "all" && typeFilter != "error"
-                    && typeFilter != "warning" && typeFilter != "log")
-                {
-                    throw new McpToolException(
-                        "invalid_params",
-                        $"'{typeFilter}' is not a severity. Use all, error, warning or log.");
-                }
+                var severities = typeFilter.Split(',').Select(t => t.Trim()).ToArray();
+                if (severities.Any(t => t != "all" && t != "error" && t != "warning" && t != "log"))
+                    throw new McpToolException("invalid_params", $"'{typeFilter}' is not a severity list. Use all, error, warning or log, separated by commas.");
 
                 var fieldsParam = parameters["fields"]?.ToString();
                 var fieldsFilter = ListResponseBuilder.ParseFieldsParam(fieldsParam);
@@ -112,12 +109,7 @@ namespace UnityMCP.Editor.Handlers
                         var mode = (int)ModeField.GetValue(entry);
                         var typeChar = GetTypeChar(mode);
 
-                        if (typeFilter != "all")
-                        {
-                            if (typeFilter == "error" && typeChar != "E") continue;
-                            if (typeFilter == "warning" && typeChar != "W") continue;
-                            if (typeFilter == "log" && typeChar != "L") continue;
-                        }
+                        if (!severities.Contains("all") && !severities.Contains(typeChar == "E" ? "error" : typeChar == "W" ? "warning" : "log")) continue;
 
                         var message = (string)MessageField.GetValue(entry) ?? "";
                         var file = LogNoise.ShortenPath((string)FileField.GetValue(entry) ?? "");

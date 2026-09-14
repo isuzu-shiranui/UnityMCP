@@ -42,7 +42,7 @@ namespace UnityMCP.Editor.Tools
             int limit = 50,
             [McpArg("offset", "Entries to skip, for paging.")]
             int offset = 0,
-            [McpArg("type", "Severity filter: all, error, warning, or log.")]
+            [McpArg("type", "Severity filter: all, error, warning, or log; comma-separated lists such as error,warning are accepted.")]
             string type = "all",
             [McpArg("fields", "Comma-separated field whitelist, to keep responses small. The " +
                               "fields are 't' (severity), 'm' (message), 'f' (file) and " +

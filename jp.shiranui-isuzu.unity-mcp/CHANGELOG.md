@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `ui_click` presses a uGUI element in play mode through the EventSystem, so it reaches a button while the Editor has no focus, which `input_pointer` does not. It finds the element by path, instance id, label or screen point, refuses when something else is in front of it, and reports the texts that changed.
+- `play_mode_play` takes `paused`. `play_mode_step` takes `seconds` and `changes`: it steps until that much game time has passed and returns every value each path changed to, with its frame and time, so watching a value over time is one call rather than a step and a read per frame.
+- `play_mode_status` reports `pending` and `refused`, kept across the domain reload, so play mode that is still starting can be told from play mode the Editor refused.
+- `inspect_read`, `inspect_list` and `inspect_write` take `asset_path`. A write to a prefab saves it and names the scene instances whose override kept their own value.
+- `gameobject_add_component` takes `values`, written in the same undo step as the add.
+- Snippets for `execute_code` can call `McpSnippet.PathOf`, `Find`, `IdOf` and `All<T>`.
+- `tools --search <words>` finds a tool by what it does, and `tools <name>...` prints each argument's type, default and meaning.
+- `call` takes `--a.b value` for one field of an object argument, and `--args-file` for arguments kept in a JSON file.
+
+### Changed
+- `tools` lists tool names by group. The whole catalog with its descriptions is longer than an agent's shell tool shows in one reply, so it arrived cut off. `--long` prints the full listing.
+- `call` returns once its work is done: it waits for `play_mode_play` and `play_mode_stop` to finish changing mode, and follows a job to its result. `--no-wait` returns the first answer, and `--wait-timeout` sets how long to wait; running out exits 4.
+- `verify` prints the source lines around each compile error, and a test run that matched no test fails with `tests: none matched`.
+- The bundled skill is a table of common tasks and a PowerShell template that runs several calls in one command.
+- `component_type` accepts full type names, and when it is omitted the one component that has the property is used. A C# property name such as `mass` resolves to its serialized name, and a name that matches nothing lists the nearest ones.
+- `console_read_logs` takes several severities, such as `error,warning`.
+- Object arguments accept a JSON object sent as a string, and vector arguments accept `1,0,2`.
+- A scene path without a leading `/` that does not resolve from the scene roots finds a uniquely named object anywhere in the scene.
+- `test_results` reports `total` and `ranAny`.
+- Compile errors from `execute_code` give the line and column in the snippet.
+
+### Fixed
+- `call` refused JSON whose double quotes Windows PowerShell had removed, even when it held only numbers. Such JSON is rebuilt now; with a word in it, it is still refused, since the quotes decided whether that word was a string.
+- `call` dropped words left after the tool name without saying so.
+- A call that reached the Editor while it was going down for a domain reload failed with `server_stopped` although it never ran. `call`, `verify` and the waits send it again.
+
 ## [4.3.3] - 2026-09-14
 
 ### Changed
