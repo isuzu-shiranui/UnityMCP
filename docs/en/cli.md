@@ -41,7 +41,7 @@ Values are typed automatically. `--limit 20` sends a number. `--active_only true
 
 An object argument can be given in any of these ways:
 
-- `--values.speed 45` sends `{"values":{"speed":45}}`. Only the first `.` separates, so the key of `--values.m_LocalPosition.x 2` is `m_LocalPosition.x`.
+- `--values.speed 45` sends `{"values":{"speed":45}}`. Only the first `.` acts as a separator, so the key of `--values.m_LocalPosition.x 2` is `m_LocalPosition.x`.
 - `--args-file args.json` reads the arguments from a JSON object in a file, with or without a byte order mark. An option on the command line wins over the same key in the file.
 - JSON whose values are all numbers, such as `--position '{x:1,y:0,z:2}'`, is rebuilt even after its double quotes are gone, because Windows PowerShell 5.1 strips them from arguments passed to a native program. JSON with a word as a value, such as `{m_Text:true}`, is refused: without its quotes there is no telling whether it was a string or a boolean.
 

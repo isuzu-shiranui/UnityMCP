@@ -136,7 +136,7 @@ Codex は Streamable HTTP にも直接つなげます。`isuzu-unity-cli setup -
 
 - エンドポイントはステートレスです。セッション ID を持ちません。
 - プロトコルのバージョンは 2025-11-25 / 2025-06-18 / 2025-03-26 に対応しています。
-- `tools/list` にはアノテーションが付きます。`Idempotency` が `Safe` のツールには `readOnlyHint` と `idempotentHint` が付きます。破壊的なツールには `destructiveHint` が付きます。
+- `tools/list` にはアノテーションが付きます。`Idempotency` が `Safe` のツールは `readOnlyHint` と `idempotentHint` が `true` に、破壊的なツールは `destructiveHint` が `true` になります。`openWorldHint` は常に `false` です。
 - `tools/call` は JSON をテキストの content ブロックで返します。スクリーンショットは画像の content ブロックを追加し、`structuredContent` は返しません。ツール自体のエラーは、トランスポートのエラーにはなりません。`isError` の結果として、モデルに読める形で返ります。
 - GET と DELETE は 405 を返します。`Origin` が別ドメインなら 403 を返します。
 - `tools/list_changed` は送られません。パッケージの追加・削除や定義ツールの変更で、ツールが増減することがあります。その場合はクライアントを再接続してください。

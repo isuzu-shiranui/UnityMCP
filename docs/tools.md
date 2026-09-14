@@ -45,7 +45,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 
 ## オーサリング（作る・変える）
 
-1 回の呼び出しが Undo 1 操作にまとまるのは、`UndoGroup` が付いたツールです。オーサリングでは `gameobject_` で始まる 8 つ、`inspect_write`、`prefab_create`、`prefab_instantiate`、そして `animator_` で始まる編集用の 10 個の、合わせて 21 個です。描画では `material_set` です。Timeline と Recorder では `timeline_` で始まる 7 つと `recorder_add_track` です。
+1 回の呼び出しが Undo 1 操作にまとまるのは、`UndoGroup` が付いたツールです。オーサリングでは `gameobject_` で始まる 8 つ、`inspect_write`、`prefab_create`、`prefab_instantiate`、`animator_create`、`animation_clip_create`、そして `animator_` で始まる編集用の 10 個の、合わせて 23 個です。描画では `material_set`、`material_create`、`scene_settings` です。ビルドでは `project_settings` です。Timeline と Recorder では `timeline_` で始まる 7 つと `recorder_add_track` です。
 
 それ以外は Undo でまとめて戻せません。`asset_delete` は Undo ではなく OS のゴミ箱へ移動するので、通常はゴミ箱から取り出して戻します。フォルダーを渡すと、配下すべてが移動します。
 
@@ -67,7 +67,7 @@ Unity 6.5 以降では `instanceId` が JSON の数値ではなく文字列で�
 | `gameobject_set_active` | unsafe | 有効・無効の切り替え |
 | `gameobject_add_component` | unsafe | コンポーネント追加。`values` にシリアライズプロパティと値を渡すと、追加と同時に書き込みます。書き込みは `inspect_write` と同じ処理で、追加と同じ 1 つの Undo にまとまります。1 つでも書けなければ、依存して追加されたコンポーネントも含めて追加ごと取り消して断ります。書いた値は応答の `written` に入ります |
 | `gameobject_remove_component` | unsafe | コンポーネント削除。基底型でも一致するので、`Renderer` が MeshRenderer に当たります。同じ型が複数あるときは `index` で選びます |
-| `inspect_write` | unsafe | シリアライズプロパティの書き込み。`component_type` の扱いは `inspect_read` と同じで、`values` のプロパティはすべて同じ 1 つのコンポーネントに解決できなければ断ります。`asset_path` を渡すとアセットに書いて保存します。Prefab（Variant を含む）ではその中身が対象で、`object_path` にルートの名前を除いた相対パス（`Body/Hitbox`）を渡すと子を指せます。それ以外のアセットはメインアセットが対象です。保存を確かめたときだけ `saved: true` を返し、`overriddenBy` に、そのプロパティを上書きしていて新しい値にならなかったインスタンスを、開いているシーンからプロパティごとに 50 件まで並べます |
+| `inspect_write` | unsafe | シリアライズプロパティの書き込み。`component_type` の扱いは `inspect_read` と同じで、`values` のプロパティはすべて同じ 1 つのコンポーネントに解決できなければ断ります。`object_paths` に最大 500 件のパスを渡すと、同じ書き込みを 1 つの Undo 操作でまとめて行い、1 つでも解決できなければ何も書きません。`asset_path` を渡すとアセットに書いて保存します。Prefab（Variant を含む）ではその中身が対象で、`object_path` にルートの名前を除いた相対パス（`Body/Hitbox`）を渡すと子を指せます。それ以外のアセットはメインアセットが対象です。保存を確かめたときだけ `saved: true` を返し、`overriddenBy` に、そのプロパティを上書きしていて新しい値にならなかったインスタンスを、開いているシーンからプロパティごとに 50 件まで並べます |
 | `asset_create_folder` | unsafe | フォルダー作成（親も作る、冪等） |
 | `asset_move` | unsafe | 移動・リネーム（GUID を維持） |
 | `asset_delete` | unsafe | 削除。OS のゴミ箱へ移動するので、通常はそこから戻せます。フォルダーを渡すと配下すべてが対象です |
@@ -198,7 +198,7 @@ Recorder は Timeline のトラックとして扱います。フレームレー�
 
   Prefab を開いている間は例外です。`scene_browse_hierarchy` が返すのは、背後のシーンのパスのままです。`gameobject_` と `inspect_` のツールは Prefab の中身を見るので、そのパスを解決できません。
 - Play Mode 中のシーン編集は、成功したように見えて終了時に破棄されます。その状況では応答に `playModeWarning` が付きます。アセットの変更は残るので、そちらには付きません。
-- 削除は確認を求めません。その代わり、通常は元に戻せます。確認を求めるのは `prefab_apply` と `editor_dialog_press` の 2 つです。どちらも元に戻せないためです。
+- 削除は確認を求めません。その代わり、通常は元に戻せます。確認を求めるのは `prefab_apply`、`editor_dialog_press`、`package_resolve` の 3 つです。どれも元に戻せないためです。
 
   アセットは OS のゴミ箱へ移動し、フォルダーを渡した場合は配下すべてが移動します。GameObject は Undo で戻せます。ただし未保存シーンへの上書きは拒否します。これだけは Undo でも戻せないためです。
 - `gameobject_set_transform` は RectTransform も動かしますが、書き込むのは `localPosition` です。そのため `m_AnchoredPosition` の値は 1 回分遅れて追いつきます。書き込んだ直後に `inspect_read` で読み直すと、実際には動いているのに古い値が返ります。読み直して確かめるなら `reflect_read` を使うか、1 呼び出し置いてください。

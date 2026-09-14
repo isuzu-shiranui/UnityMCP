@@ -104,7 +104,7 @@ u call execute_code --file $env:TEMP\visible.cs
 | `error [conflict]` | Several matches, or something covers the element you tried to click; the message names them |
 | `error [play_refused]` | Play mode did not start; `u verify` shows the compile errors |
 | exit code 4 | The wait ran out while the work continues; the message says how to pick it up |
-| `No Editor is running.` | Open the project in Unity first |
+| `No running Unity Editor found` | Open the project in Unity first |
 
 More: `reference/tools.md` (tools by area), `reference/workflows.md` (dialogs, a stuck Editor,
 input recording).
