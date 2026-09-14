@@ -1,6 +1,6 @@
 # Changelog
 
-## [4.4.0] - Unreleased
+## [4.4.0] - 2026-09-14
 
 ### Added
 - `ui_click` presses a uGUI element in play mode through the EventSystem, so it reaches a button while the Editor has no focus, which `input_pointer` does not. It finds the element by path, instance id, label or screen point, refuses when something else is in front of it, and reports the texts that changed.
