@@ -9,9 +9,10 @@ CLI は Editor が公開する descriptor ファイルを読みます。その�
 ```bash
 isuzu-unity-cli projects                 # 起動中の Editor 一覧
 isuzu-unity-cli health                   # サーバーの状態・キュー深さ・実行中ジョブ数
-isuzu-unity-cli tools                    # 利用可能なツールと引数名
+isuzu-unity-cli tools                    # ツール名をグループごとに一覧
+isuzu-unity-cli tools <tool> [<tool>...] # 指定したツールの説明と引数
+isuzu-unity-cli tools --search <words>   # 名前・説明・引数名からツールを探す
 isuzu-unity-cli tools --group <name>     # グループで絞り込み（カンマ区切りで複数可）
-isuzu-unity-cli tools <tool>             # 1 つのツールの説明と引数だけ
 isuzu-unity-cli call <tool> [...]        # ツールの実行
 isuzu-unity-cli verify [...]             # 再コンパイル・テスト・結果の要約を 1 回で
 isuzu-unity-cli jobs [id]                # ジョブの一覧、または指定 ID の状態
@@ -37,6 +38,21 @@ isuzu-unity-cli call play_mode_status --raw          # 結果だけでなく応�
 ```
 
 値の型は自動で決まります。`--limit 20` は数値として送られます。`--active_only true` は真偽値として送られます。同じオプションを 2 回以上書くと配列になります（`--paths one --paths two`）。引用符が通らないシェルで配列を渡すのはこの書き方です。
+
+オブジェクト型の引数は、次のどれかで渡します。
+
+- `--values.speed 45` は `{"values":{"speed":45}}` として送られます。区切るのは最初の `.` だけなので、`--values.m_LocalPosition.x 2` のキーは `m_LocalPosition.x` です。
+- `--args-file args.json` は、ファイルに書いた JSON オブジェクトを引数として読みます。BOM 付きでも読めます。コマンドラインのオプションはファイルの同名のキーより優先されます。
+- `--position '{x:1,y:0,z:2}'` のように、値が数値だけの JSON は、二重引用符が消えていても元の形に戻して送ります。Windows PowerShell 5.1 はネイティブ実行ファイルに渡す引数から二重引用符を取り除くためです。値に語を含むもの（`{m_Text:true}` など）は、文字列だったか真偽値だったかを区別できないので拒否します。
+
+ツール名の後ろに `--name value` の形になっていない語が残ったときは、捨てずに終了コード 2 で止まります。
+
+`call` は、呼び出した処理が終わってから戻ります。
+
+- `play_mode_play` と `play_mode_stop` は、Play モードの切り替えが終わるまで `play_mode_status` を問い合わせ、その状態を表示します。途中のドメインリロードも待ちます。Editor が Play モードに入らなかったとき（コンパイルエラーなど）は `error [play_refused]` と理由を出して終了コード 1 を返します。
+- job ID が返ったときは、そのジョブの終わりまで待って結果を表示します。
+- 待ちの上限は `--wait-timeout <秒>` で変えられます。既定は Play モードの切り替えが 60 秒、ジョブが 120 秒です。上限に達しても処理は Editor の中で続いていて、終了コード 4 を返します。
+- `--no-wait` を付けると、最初の応答をそのまま表示して戻ります。
 
 JSON は端末では整形して出力し、パイプやリダイレクトのときは詰めて出力します。端末でも詰めたいときは `--compact` を付けてください。
 
@@ -84,7 +100,7 @@ Unity プロジェクトのフォルダーの中から実行したのに、そ�
 | 1 | エラー（`verify` ではコンパイルエラー、テスト失敗、または判定不能のテスト） |
 | 2 | 引数の誤り。そのコマンドが持たないオプション、値の無いオプション、`call` にツール名が無い場合に返ります。`verify` の `--timeout` に正の数でない値、`--logs` に 0 以上の整数でない値を渡した場合も同じです |
 | 3 | Editor が見つからない、候補が複数あって決められない、選んだプロジェクトに再接続できない、または Editor がトークンを拒否し続けた |
-| 4 | `verify` または `jobs --wait` の `--timeout` 超過 |
+| 4 | `verify` または `jobs --wait` の `--timeout` 超過、`call` の `--wait-timeout` 超過 |
 | 130 | Ctrl+C による中断 |
 
 エラーは stderr に出力されます。そのため、そのままスクリプトに組み込めます。
@@ -103,7 +119,9 @@ isuzu-unity-cli verify --raw                 # 要約を JSON で
 
 コンパイル中は Editor のサーバーが一度停止します。`verify` はその間の接続エラーを想定して待ちます。そのあと descriptor を読み直してから続けます。`--timeout` の既定は 300 秒です。
 
-`--test` では、完了した実行に失敗または判定不能（inconclusive）のテストがあれば終了コード 1 を返します。スキップだけでは失敗になりません。Editor が返す詳細を制限していても、件数は実行全体の集計です。`--raw` の出力では、`tests.inconclusive` が判定不能の件数、`tests.truncated` が詳細の一部省略を示します。`tests.failures` には、Editor が返した詳細のうち、成功でもスキップでもないものだけが含まれます。
+コンパイルエラーは、最初の 5 件について該当行と前後 1 行のソースも表示します。
+
+`--test` では、完了した実行に失敗または判定不能（inconclusive）のテストがあれば終了コード 1 を返します。テストが 1 件も一致しなかったときは `tests: none matched` と表示して終了コード 1 を返します。フィルターの書き間違いを成功と取り違えないためです。スキップだけでは失敗になりません。Editor が返す詳細を制限していても、件数は実行全体の集計です。`--raw` の出力では、`tests.ranAny` がテストを 1 件でも実行したか、`tests.inconclusive` が判定不能の件数、`tests.truncated` が詳細の一部省略を示します。`tests.failures` には、Editor が返した詳細のうち、成功でもスキップでもないものだけが含まれます。
 
 トークンが拒否されたときも descriptor を読み直します。トークンが変わっていなければ 15 秒のあいだ読み直しを続け、それでも拒否されれば終了コード 3 で停止します。`--raw` のときは、それまでに実行した手順の要約を `ok: false` として出力します。
 
@@ -119,15 +137,21 @@ isuzu-unity-cli verify --raw                 # 要約を JSON で
 
 `isuzu-unity-cli jobs` はジョブの一覧を表示します。`isuzu-unity-cli jobs <id>` は指定した ID の状態と結果を表示します。
 
-job ID が返ったときは、同じ呼び出しをやり直さないでください。処理はまだ動いています。やり直すと 2 回実行されます。
+`call` は既定でジョブの終わりまで待ちます。`--no-wait` を付けたときや待ちの上限に達したときに job ID が返ったら、同じ呼び出しをやり直さないでください。処理はまだ動いています。やり直すと 2 回実行されます。
 
 `--wait` を付けると、終わるまで一定間隔で問い合わせて、最後の答えだけを表示します。待っている間に Editor を止めているもの（コンパイル中、ダイアログが出ている、メインスレッドが戻ってこない）は標準エラーへ出します。終了コードは、ジョブが完了したとき 0、失敗または取り消しのとき 1、オプションの誤りで 2、Editor が見つからないか複数あって決められないとき 3、待ちを打ち切ったとき 4 です。
 
 `--timeout <秒>`（既定 300）で待ちを打ち切ります。打ち切ってもジョブ自体は Editor の中で動き続けます。
 
-## tools --group
+## tools
 
-`isuzu-unity-cli tools --group <name>[,<name>]` はツール一覧をグループで絞り込みます。グループは `diagnostics` / `authoring` / `rendering` / `timeline` / `build` / `code` / `input` です。ツール名を 1 つ渡すと、そのツールの説明と引数だけを表示します。一覧全体を読むより小さく済みます。
+`isuzu-unity-cli tools` はツール名だけをグループごとに 1 行で表示します。説明まで含めた一覧はエージェントのシェルツールが 1 回に表示できる量を超え、途中で切れるためです。
+
+- `tools <tool> [<tool>...]` は、指定したツールの説明と、引数ごとの名前・型・既定値・必須かどうか・説明を表示します。
+- `tools --search <words>` は、名前・説明・引数名に語を含むツールを、名前に含むものを先にして最大 10 件表示します。
+- `tools --long` は、全ツールの引数と説明を 1 ツールずつ表示します。
+- `--raw` は、Editor が返すカタログを JSON のまま表示します。ツール名を渡したときは、そのツールの定義だけを表示します。
+- `--group <name>[,<name>]` はグループで絞り込みます。グループは `diagnostics` / `authoring` / `rendering` / `timeline` / `build` / `code` / `input` です。
 
 ## setup
 

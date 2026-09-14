@@ -85,7 +85,8 @@ public sealed class CommandContext
     /// still running also gets the Editor's explanation on stderr, where a reader watching the
     /// terminal sees why nothing is coming back.
     /// </summary>
-    public int Report(Envelope envelope, bool raw)
+    /// <param name="announced">The explanation was already printed while waiting, so it is not repeated.</param>
+    public int Report(Envelope envelope, bool raw, bool announced = false)
     {
         if (raw)
         {
@@ -93,7 +94,7 @@ public sealed class CommandContext
             // treatment: printed, a screenshot costs about ninety times what it does as a file.
             ReportWritten(InlineImage.Externalise(envelope.Raw, CaptureDirectory));
             JsonOutput.Print(Out, envelope.Raw, Indented);
-            ReportRunning(envelope);
+            if (!announced) ReportRunning(envelope);
             return envelope.IsError ? 1 : 0;
         }
 
@@ -107,7 +108,7 @@ public sealed class CommandContext
         var written = InlineImage.Externalise(result, CaptureDirectory);
         JsonOutput.Print(Out, result, Indented);
         ReportWritten(written);
-        ReportRunning(envelope);
+        if (!announced) ReportRunning(envelope);
         return 0;
     }
 

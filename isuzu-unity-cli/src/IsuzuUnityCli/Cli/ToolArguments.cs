@@ -4,7 +4,10 @@ using System.Text.Json.Nodes;
 
 namespace IsuzuUnityCli.Cli;
 
-/// <summary>Assembles a tool's arguments from <c>--json</c>, individual <c>--name value</c> pairs, bare flags, and <c>--file</c>.</summary>
+/// <summary>
+/// Assembles a tool's arguments from <c>--args-file</c>, <c>--json</c>, individual
+/// <c>--name value</c> pairs, bare flags, and <c>--file</c>, later sources overriding earlier ones.
+/// </summary>
 public static class ToolArguments
 {
     public static JsonObject Build(string tool, ParsedArgs parsed, Func<string, string>? readFile = null)
@@ -12,29 +15,30 @@ public static class ToolArguments
         readFile ??= path => File.ReadAllText(path, Encoding.UTF8);
         var args = new JsonObject();
 
-        var json = parsed.Option("json");
-        if (json is not null)
+        // A file is the one spelling of structured arguments that no shell rewrites: Windows
+        // PowerShell strips the double quotes out of an argument, and what is left cannot say
+        // whether "true" was a string.
+        var argsFile = parsed.Option("args-file");
+        if (argsFile is not null)
         {
-            JsonNode? decoded;
+            string text;
 
             try
             {
-                decoded = JsonNode.Parse(json);
+                text = readFile(argsFile);
             }
-            catch (JsonException e)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                throw new CliException($"--json is not valid JSON: {e.Message}");
+                throw new CliException($"--args-file could not be read: {e.Message}", 2);
             }
 
-            if (decoded is not JsonObject obj)
-            {
-                throw new CliException("--json must be a JSON object.");
-            }
+            Merge(args, ParseObject(text.TrimStart('﻿'), "--args-file"));
+        }
 
-            foreach (var pair in obj.ToList())
-            {
-                args[pair.Key] = pair.Value?.DeepClone();
-            }
+        var json = parsed.Option("json");
+        if (json is not null)
+        {
+            Merge(args, ParseObject(json, "--json"));
         }
 
         foreach (var pair in parsed.Options)
@@ -55,11 +59,11 @@ public static class ToolArguments
                     many.Add(ScalarCoercion.ToJsonNode(value));
                 }
 
-                args[pair.Key] = many;
+                Set(args, pair.Key, many);
                 continue;
             }
 
-            args[pair.Key] = ScalarCoercion.ToJsonNode(pair.Value);
+            Set(args, pair.Key, ScalarCoercion.ToJsonNode(pair.Value));
         }
 
         foreach (var flag in parsed.Flags)
@@ -68,7 +72,7 @@ public static class ToolArguments
             // '--type' does. Taking the flag would drop what was typed before it.
             if (!ArgParser.CallReservedOptions.Contains(flag) && !args.ContainsKey(flag))
             {
-                args[flag] = true;
+                Set(args, flag, JsonValue.Create(true));
             }
         }
 
@@ -98,5 +102,60 @@ public static class ToolArguments
         }
 
         return args;
+    }
+
+    private static JsonObject ParseObject(string text, string option)
+    {
+        JsonNode? decoded;
+
+        try
+        {
+            decoded = JsonNode.Parse(text);
+        }
+        catch (JsonException e)
+        {
+            throw new CliException($"{option} is not valid JSON: {e.Message}");
+        }
+
+        return decoded as JsonObject ?? throw new CliException($"{option} must be a JSON object.");
+    }
+
+    private static void Merge(JsonObject into, JsonObject from)
+    {
+        foreach (var pair in from.ToList())
+        {
+            into[pair.Key] = pair.Value?.DeepClone();
+        }
+    }
+
+    /// <summary>Sets an argument, reading <c>a.b</c> as the field <c>b</c> of the object argument <c>a</c>.</summary>
+    /// <remarks>
+    /// Only the first dot nests, because serialized property paths carry dots of their own:
+    /// <c>--values.m_LocalPosition.x 2</c> is the key <c>m_LocalPosition.x</c> inside <c>values</c>.
+    /// </remarks>
+    private static void Set(JsonObject args, string name, JsonNode value)
+    {
+        var dot = name.IndexOf('.');
+
+        if (dot <= 0 || dot == name.Length - 1)
+        {
+            args[name] = value;
+            return;
+        }
+
+        var parent = name.Substring(0, dot);
+
+        if (args[parent] is null)
+        {
+            args[parent] = new JsonObject();
+        }
+
+        if (args[parent] is not JsonObject fields)
+        {
+            throw new CliException(
+                $"--{name} sets a field of '{parent}', but '{parent}' was also given as a value that is not an object.", 2);
+        }
+
+        fields[name.Substring(dot + 1)] = value;
     }
 }

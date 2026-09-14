@@ -143,4 +143,38 @@ public sealed class ScalarCoercionTests
         Assert.Equal(JsonValueKind.String, node.GetValueKind());
         Assert.Equal(value, node.GetValue<string>());
     }
+
+    /// <summary>
+    /// Quote-stripped JSON holding only numbers is sent as the structure it was.
+    /// </summary>
+    /// <remarks>
+    /// A position typed as {"x":1,"y":0,"z":2} reaches the CLI as {x:1,y:0,z:2}, and nothing in it
+    /// depended on the quotes.
+    /// </remarks>
+    [Theory]
+    [InlineData("{x:0,y:1.5,z:-2}", "{\"x\":0,\"y\":1.5,\"z\":-2}")]
+    [InlineData("[0,1,0]", "[0,1,0]")]
+    [InlineData("{values:{m_LocalPosition.x:2}}", "{\"values\":{\"m_LocalPosition.x\":2}}")]
+    public void NumbersSurviveTheLossOfTheirQuotes(string value, string expected)
+    {
+        Assert.Equal(expected, ScalarCoercion.ToJsonNode(value).ToJsonString());
+    }
+
+    /// <summary>
+    /// A word inside quote-stripped JSON is refused, because its type went with the quotes.
+    /// </summary>
+    /// <remarks>
+    /// {"m_Text":"true"} arrives as {m_Text:true}, the same text a boolean would; rebuilt as one,
+    /// a label would be written as a checkbox value.
+    /// </remarks>
+    [Theory]
+    [InlineData("{m_Text:true}")]
+    [InlineData("{name:Player,count:2}")]
+    [InlineData("[a,b]")]
+    public void WordsWhoseQuotesWereRemovedAreRefused(string value)
+    {
+        var thrown = Assert.Throws<CliException>(() => ScalarCoercion.ToJsonNode(value));
+
+        Assert.Contains("--args-file", thrown.Message);
+    }
 }

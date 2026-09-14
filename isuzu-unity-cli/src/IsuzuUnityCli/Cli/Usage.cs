@@ -10,8 +10,9 @@ public static class Usage
 
         COMMANDS
           projects                       List Editors that are currently running
-          tools [exact-name]             List tools, or print one tool's full schema as JSON
-                                         With a name the output is the same with or without --raw
+          tools [name...]                List tool names by group, or show the named tools'
+                                         arguments. --search <words> finds a tool by what it
+                                         does, --long lists every description, --raw prints JSON
           call <tool> [args]             Invoke a tool
           verify                         Recompile, optionally run the tests, read the console,
                                          and answer with one exit code
@@ -31,8 +32,14 @@ public static class Usage
           --<name> <value>               Individual argument. Naming one twice sends a list, which
                                          is how an array is typed where quotes do not survive:
                                          --paths one --paths two
+          --<name>.<field> <value>       One field of an object argument: --values.speed 45
+          --args-file <path>             Arguments as a JSON object in a file; options win
           --file <path>                  For execute_code: read the snippet from a file and
                                          send it base64-encoded, so nothing can mangle it
+          --no-wait                      Return the first answer. By default a call waits for
+                                         play mode to finish changing and for a job to end
+          --wait-timeout <seconds>       How long that wait lasts (60 for play mode, 120 for a
+                                         job); running out exits 4 while the work goes on
 
         OPTIONS
           --project <name>               Which Editor to use; needed when several are running.

@@ -776,6 +776,7 @@ namespace UnityMCP.Editor.Tools
 
             if (value is UnityEngine.Object unityObject)
             {
+                if (unityObject == null) return JValue.CreateNull();
                 return new JObject
                 {
                     ["name"] = unityObject.name,

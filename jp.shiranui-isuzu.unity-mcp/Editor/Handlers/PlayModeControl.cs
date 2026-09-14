@@ -30,26 +30,30 @@ namespace UnityMCP.Editor.Handlers
                 case "play":
                     if (EditorApplication.isPlaying)
                     {
+                        PlayModeRequest.Clear();
+                        EditorApplication.isPaused = parameters["paused"]?.Value<bool>() ?? false;
                         var status = GetStatus();
                         status["message"] = "Already in play mode";
                         return status;
                     }
-                    OnTheNextFrame(() => EditorApplication.isPlaying = true, PlayLabel);
+                    PlayModeRequest.Begin("play", parameters["paused"]?.Value<bool>() ?? false);
                     return new JObject
                     {
                         ["deferred"] = true,
                         ["action"] = "play",
+                        ["paused"] = parameters["paused"]?.Value<bool>() ?? false,
                         ["message"] = "Play mode will start on next frame. Connection may be interrupted during domain reload."
                     };
 
                 case "stop":
-                    if (!EditorApplication.isPlaying)
+                    if (!EditorApplication.isPlaying && !EditorApplication.isPlayingOrWillChangePlaymode)
                     {
+                        PlayModeRequest.Clear();
                         var status = GetStatus();
                         status["message"] = "Not in play mode";
                         return status;
                     }
-                    OnTheNextFrame(() => EditorApplication.isPlaying = false, "play_mode_stop");
+                    PlayModeRequest.Begin("stop");
                     return new JObject
                     {
                         ["deferred"] = true,
@@ -74,60 +78,7 @@ namespace UnityMCP.Editor.Handlers
                     return GetStatus();
 
                 case "step":
-                    var wanted = parameters["count"]?.Value<int>() ?? 1;
-
-                    // Before the play-mode check: a count of 5000 is wrong whether or not anything
-                    // is running, and answering "not playing" would send the caller to start play
-                    // mode and hit the same wall again.
-                    if (wanted < 1 || wanted > MaxStep)
-                    {
-                        throw new McpToolException(
-                            "invalid_params",
-                            $"'count' takes 1 to {MaxStep} frames. Watching something happen a "
-                            + "frame at a time cost 1,255 calls once, which is why it takes more "
-                            + "than one; a run this long comes back as a job.");
-                    }
-
-                    if (!EditorApplication.isPlaying)
-                    {
-                        return NotPlaying("step");
-                    }
-
-                    if (!EditorApplication.isPaused)
-                    {
-                        EditorApplication.isPaused = true;
-                    }
-
-                    var from = Time.frameCount;
-
-                    // Step is synchronous: the frame is over by the time it returns, so a loop
-                    // here really does advance that many. Measured at about 2.5 ms a frame.
-                    for (var i = 0; i < wanted; i++)
-                    {
-                        EditorApplication.Step();
-                    }
-
-                    var stepped = GetStatus();
-                    stepped["steppedFrames"] = Time.frameCount - from;
-
-                    // Read here rather than in a call of its own. Watching something over time is
-                    // a step and a look, over and over: twenty-one steps came with forty-six
-                    // reads behind them, and every one of those was a round trip spent asking
-                    // where the thing had got to.
-                    if (parameters["paths"] is JArray watching && watching.Count > 0)
-                    {
-                        stepped["reads"] = Tools.ReflectTools.Many(
-                            watching.Select(t => t.ToString()).ToArray());
-                    }
-
-                    // What a state machine is doing is not a property, so 'paths' cannot reach it
-                    // and the look after each step was a whole animator_inspect.
-                    if (parameters["animators"] is JArray animators && animators.Count > 0)
-                    {
-                        stepped["animators"] = Animators(animators.Select(t => t.ToString()));
-                    }
-
-                    return stepped;
+                    return Step(parameters);
 
                 default:
                     return new JObject { ["error"] = $"Unknown action: {action}" };
@@ -184,7 +135,7 @@ namespace UnityMCP.Editor.Handlers
         /// </remarks>
         private static JObject NotPlaying(string verb)
         {
-            if (FrameSequencer.IsRunning(PlayLabel) || EditorApplication.isPlayingOrWillChangePlaymode)
+            if (PlayModeRequest.Pending == "play" || EditorApplication.isPlayingOrWillChangePlaymode)
             {
                 return new JObject
                 {
@@ -213,6 +164,8 @@ namespace UnityMCP.Editor.Handlers
         {
             return new JObject
             {
+                ["pending"] = PlayModeRequest.Pending,
+                ["refused"] = PlayModeRequest.Refused,
                 ["isPlaying"] = EditorApplication.isPlaying,
                 ["isPaused"] = EditorApplication.isPaused,
                 ["isCompiling"] = EditorApplication.isCompiling,
@@ -229,29 +182,75 @@ namespace UnityMCP.Editor.Handlers
                 ["frameCount"] = Time.frameCount,
             };
         }
-        /// <summary>
-        /// Runs <paramref name="action"/> on the next Editor frame, keeping the Editor ticking
-        /// until it has.
-        /// </summary>
-        /// <remarks>
-        /// The work is deferred so the HTTP response is written before entering or leaving play
-        /// mode reloads the domain and drops the connection. <c>EditorApplication.delayCall</c>
-        /// looks like the way to do that and is not: an Editor without focus stops ticking once
-        /// the request that woke it is answered, and the callback waits for a frame that never
-        /// arrives. A sequence is what the loop waker watches.
-        /// </remarks>
-        private static void OnTheNextFrame(Action action, string label)
+        private static JObject Step(JObject parameters)
         {
-            FrameSequencer.Run(Steps(action), label);
-        }
-
-        private static IEnumerator<FrameStep> Steps(Action action)
-        {
-            yield return FrameStep.Wait();
-
-            action();
-
-            yield return FrameStep.Done(new JObject { ["ok"] = true });
+            var count = parameters["count"]?.Value<int>() ?? 1;
+            var seconds = parameters["seconds"]?.Value<double>();
+            var maxFrames = parameters["max_frames"]?.Value<int>() ?? 2000;
+            var changes = parameters["changes"]?.Value<bool>() ?? false;
+            var paths = (parameters["paths"] as JArray)?.Select(t => t.ToString()).Distinct().ToArray();
+            // Validate before checking play mode: an invalid request must not send the caller to
+            // start play mode only to encounter the same invalid arguments on the next call.
+            if (count < 1 || count > MaxStep)
+                throw new McpToolException("invalid_params", "count must be between 1 and 1000.");
+            if (seconds.HasValue && (parameters["count"] != null || seconds <= 0 || double.IsNaN(seconds.Value) || double.IsInfinity(seconds.Value)))
+                throw new McpToolException("invalid_params", "seconds must be finite and positive, and cannot be combined with count.");
+            if (maxFrames < 1 || maxFrames > 100000)
+                throw new McpToolException("invalid_params", "max_frames must be between 1 and 100000.");
+            if (changes && (paths == null || paths.Length == 0 || paths.Length > 20))
+                throw new McpToolException("invalid_params", "changes needs paths, with 1 to 20 paths.");
+            if (!EditorApplication.isPlaying) return NotPlaying("step");
+            EditorApplication.isPaused = true;
+            var from = Time.frameCount;
+            var startTime = (double)Time.time;
+            var logs = new JObject();
+            var roots = new Dictionary<string, UnityEngine.Object>();
+            void Sample(int frame)
+            {
+                foreach (var path in paths)
+                {
+                    if (logs[path]?["error"] != null) continue;
+                    try
+                    {
+                        if (!roots.ContainsKey(path))
+                            roots[path] = Tools.ReflectTools.ResolveRoot(Tools.ReflectTools.SplitPath(path), out _, out _, out _) as UnityEngine.Object;
+                        var root = roots[path];
+                        var read = !ReferenceEquals(root, null) && root == null ? JValue.CreateNull()
+                            : Tools.ReflectTools.Many(new[] { path })[path];
+                        var error = read is JObject obj ? (string)obj["error"] : null;
+                        var value = read is JObject objValue ? objValue["value"] : read;
+                        logs[path] = StepChangeLog.Append((JObject)logs[path], value, frame, Time.time, error);
+                    }
+                    catch (Exception e)
+                    {
+                        logs[path] = StepChangeLog.Append((JObject)logs[path], null, frame, Time.time, e.InnerException?.Message ?? e.Message);
+                    }
+                }
+            }
+            if (changes) Sample(0);
+            var limit = seconds.HasValue ? maxFrames : Math.Min(count, maxFrames);
+            var steps = 0;
+            // Step is synchronous: the frame has finished when it returns, so sampling here sees
+            // each completed frame and the loop advances the requested number of frames.
+            for (; steps < limit && EditorApplication.isPlaying;)
+            {
+                EditorApplication.Step();
+                steps++;
+                if (changes) Sample(steps);
+                if (seconds.HasValue && (double)Time.time - startTime >= seconds.Value) break;
+            }
+            var result = GetStatus();
+            result["steppedFrames"] = EditorApplication.isPlaying ? Time.frameCount - from : steps;
+            result["stopReason"] = !EditorApplication.isPlaying ? "play_mode_ended"
+                : seconds.HasValue ? ((double)Time.time - startTime >= seconds.Value ? "seconds" : "max_frames")
+                : steps >= count ? "count" : "max_frames";
+            if (changes) result["changes"] = logs;
+            // Read before returning so the reported state belongs to the final stepped frame.
+            else if (paths != null && paths.Length > 0) result["reads"] = Tools.ReflectTools.Many(paths);
+            // Animator state-machine progress is not a property that the paths reader can reach.
+            if (parameters["animators"] is JArray animators && animators.Count > 0)
+                result["animators"] = Animators(animators.Select(t => t.ToString()));
+            return result;
         }
     }
 }

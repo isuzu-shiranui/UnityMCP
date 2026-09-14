@@ -94,16 +94,31 @@ public sealed class VerifyCompletionTests
     [InlineData(null, 1)]
     [InlineData("interrupted", 1)]
     [InlineData("completed", 0)]
-    public async Task OnlyKnownCompletionCanSucceedEvenForZeroTests(string? status, int expectedExit)
+    public async Task OnlyKnownCompletionCanSucceed(string? status, int expectedExit)
     {
         using var server = new TcpReplyServer(
             TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"started\":true}}"),
-            TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"status\":" + (status is null ? "null" : "\"" + status + "\"") + ",\"passed\":0,\"failed\":0}}"),
+            TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"status\":" + (status is null ? "null" : "\"" + status + "\"") + ",\"passed\":1,\"failed\":0}}"),
             TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"logs\":[]}}"));
         var output = new StringWriter();
         var context = new CommandContext { Out = output, Err = new StringWriter(), ReadDescriptors = () => [server.Descriptor] };
         var exit = await Program.Run(["verify", "--no-compile", "--test", "--raw"], context);
         Assert.Equal(expectedExit, exit);
         Assert.Equal(expectedExit == 0, JsonNode.Parse(output.ToString())!["ok"]!.GetValue<bool>());
+    }
+
+    /// <summary>A run that matched no test is not a pass.</summary>
+    /// <remarks>A filter with a typo completes with nothing failed, and reporting that as success hides that nothing was tested.</remarks>
+    [Fact]
+    public async Task ACompletedRunWithNoTestsSaysNoneMatchedAndFails()
+    {
+        using var server = new TcpReplyServer(
+            TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"started\":true}}"),
+            TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"status\":\"completed\",\"passed\":0,\"failed\":0}}"),
+            TcpReplyServer.Reply.Json("{\"status\":\"success\",\"result\":{\"logs\":[]}}"));
+        var output = new StringWriter();
+        var context = new CommandContext { Out = output, Err = new StringWriter(), ReadDescriptors = () => [server.Descriptor] };
+        Assert.Equal(1, await Program.Run(["verify", "--no-compile", "--test", "--filter", "Nope"], context));
+        Assert.Contains("tests: none matched (edit)", output.ToString());
     }
 }

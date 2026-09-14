@@ -31,7 +31,7 @@ namespace UnityMCP.Editor.Ugui
             "inactive object, a CanvasGroup with Blocks Raycasts off, or a Canvas with no " +
             "GraphicRaycaster. Pass 'object_path' to aim at an element and be told why it is not " +
             "being clicked; pass 'position' to ask what is at a point. This needs play mode, " +
-            "because EventSystem.current is only set while the game runs.",
+            "because EventSystem.current is only set while the game runs. Use ui_click to press the element.",
             Idempotency = McpIdempotency.Safe,
             MaxResultSizeChars = 60000)]
         public static JObject HitTest(

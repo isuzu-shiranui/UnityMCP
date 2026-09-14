@@ -144,7 +144,7 @@ public static class Program
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["projects"] = new[] { "raw" },
-            ["tools"] = new[] { "group", "project", "raw" },
+            ["tools"] = new[] { "group", "project", "raw", "search", "long" },
             ["verify"] = new[]
             {
                 "project", "no-compile", "test", "test-mode", "assembly", "filter", "category",
@@ -166,10 +166,10 @@ public static class Program
     private static void RefuseMissingValues(ParsedArgs parsed)
     {
         var required = parsed.Command == "call"
-            ? new[] { "project", "json", "file" }
+            ? new[] { "project", "json", "file", "args-file", "wait-timeout" }
             : parsed.Command switch
             {
-                "tools" => new[] { "project", "group" },
+                "tools" => new[] { "project", "group", "search" },
                 "verify" => new[] { "project", "test-mode", "assembly", "filter", "category", "timeout", "logs" },
                 "health" => new[] { "project" },
                 "jobs" => new[] { "project", "timeout" },

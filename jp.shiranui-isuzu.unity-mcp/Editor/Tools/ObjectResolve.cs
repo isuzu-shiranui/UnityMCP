@@ -111,6 +111,14 @@ namespace UnityMCP.Editor.Tools
 
                 if (match == null)
                 {
+                    if (!path.StartsWith("/", StringComparison.Ordinal))
+                    {
+                        var named = SceneRoots().SelectMany(root => root.GetComponentsInChildren<Transform>(true))
+                            .Where(t => t.name == Unescape(path)).Select(t => t.gameObject).Take(11).ToArray();
+                        if (named.Length == 1) return named[0];
+                        if (named.Length > 1) throw new McpToolException("conflict", $"Several objects are named '{path}': "
+                            + string.Join(", ", named.Take(10).Select(PathOf)) + (named.Length > 10 ? ", ..." : ""));
+                    }
                     throw new McpToolException("not_found", NotFoundMessage(path, segments, depth, level));
                 }
 
@@ -378,6 +386,20 @@ namespace UnityMCP.Editor.Tools
             }
 
             return segments;
+        }
+
+        internal static GameObject Relative(GameObject root, string path)
+        {
+            if (string.IsNullOrEmpty(path)) return root;
+            if (path.StartsWith("/", StringComparison.Ordinal))
+                throw new McpToolException("invalid_params", "Prefab object_path must be relative to the root, without a leading '/'.");
+            var current = root;
+            foreach (var segment in Segments(path))
+            {
+                current = MatchSegment(Children(current), segment);
+                if (current == null) throw new McpToolException("not_found", $"No prefab child at '{path}'.");
+            }
+            return current;
         }
 
         private static IEnumerable<GameObject> Children(GameObject go)

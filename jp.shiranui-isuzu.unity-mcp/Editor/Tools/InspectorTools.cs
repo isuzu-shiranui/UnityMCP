@@ -25,19 +25,21 @@ namespace UnityMCP.Editor.Tools
             // several reference arrays is twenty times the size of the same read without them.
             MaxResultSizeChars = 200000)]
         public static JObject Read(
-            [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x.")]
+            [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x. C# names such as localPosition.x resolve when unambiguous; errors include serialized path candidates.")]
             string propertyPath,
             [McpArg("instance_id", "Target object instance id; alternative to object_path.")]
             long? instanceId = null,
             [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
             string objectPath = null,
-            [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
+            [McpArg("component_type", "Short or full component type name. Omit to resolve a property on the GameObject or a unique component.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
-            int componentIndex = 0)
+            int componentIndex = 0,
+            [McpArg("asset_path", "Asset path. Prefabs address their contents; object_path optionally names a child relative to the root, excluding the root name. Other assets address the main asset.")] string assetPath = null)
         {
             return InspectorAccess.Access(ToolArgs.Of(
                 ("mode", "read"),
+                ("assetPath", assetPath),
                 ("propertyPath", propertyPath),
                 ("instanceId", instanceId),
                 ("objectPath", objectPath),
@@ -59,7 +61,7 @@ namespace UnityMCP.Editor.Tools
             long? instanceId = null,
             [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
             string objectPath = null,
-            [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
+            [McpArg("component_type", "Short or full component type name. Omit to resolve a property on the GameObject or a unique component.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
             int componentIndex = 0,
@@ -74,10 +76,14 @@ namespace UnityMCP.Editor.Tools
                               "serialized properties. Applies only when 'component_type' is " +
                               "omitted; naming a component returns that component's properties, " +
                               "which this does not change.")]
-            string detail = "standard")
+            string detail = "standard",
+            [McpArg("asset_path", "Asset path. Prefabs address their contents, optionally at relative object_path; other assets address the main asset.")] string assetPath = null,
+            [McpArg("property_path", "Describe one property instead of the full list. Accepts a serialized path or an unambiguous C# name, e.g. mass or localPosition.x.")] string propertyPath = null)
         {
             return InspectorAccess.Access(ToolArgs.Of(
                 ("mode", "list"),
+                ("propertyPath", propertyPath),
+                ("assetPath", assetPath),
                 ("instanceId", instanceId),
                 ("objectPath", objectPath),
                 ("componentType", componentType),
@@ -98,7 +104,9 @@ namespace UnityMCP.Editor.Tools
             "multi-selection. Both are one undo step, and both write nothing at all if any path " +
             "fails to resolve, so nothing is left half applied. Setting up one ConfigurableJoint " +
             "took twenty-one calls without the first, and swapping a material across three " +
-            "hundred objects took two hundred and ninety-nine without the second.",
+            "hundred objects took two hundred and ninety-nine without the second. " +
+            "asset_path saves the asset and reports saved only after confirmation; overriddenBy lists " +
+            "at most 50 instances per property in loaded scenes that keep their overrides.",
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Inspector Write",
             // 'value' is whatever JSON the property's type needs, which the schema can only call
@@ -109,7 +117,7 @@ namespace UnityMCP.Editor.Tools
                 @"{""object_path"":""/Player"",""component_type"":""Transform"",""property_path"":""m_LocalScale"",""value"":{""x"":2,""y"":2,""z"":2}}",
             })]
         public static JObject Write(
-            [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x. " +
+            [McpArg("property_path", "Serialized property path, e.g. m_LocalPosition.x, or an unambiguous C# name such as localPosition.x. " +
                                      "Several at once go in 'values' instead.")]
             string propertyPath = null,
             [McpArg("value", "New value; its JSON type must match the property's type. A reference " +
@@ -135,13 +143,15 @@ namespace UnityMCP.Editor.Tools
             long? instanceId = null,
             [McpArg("object_path", "Scene path of the target GameObject, as scene_browse_hierarchy reports it, e.g. /Root/Child.")]
             string objectPath = null,
-            [McpArg("component_type", "Component type name; omit for the GameObject itself.")]
+            [McpArg("component_type", "Short or full component type name. Omit to resolve a property on the GameObject or a unique component.")]
             string componentType = null,
             [McpArg("component_index", "Which component to use when several share the type.")]
-            int componentIndex = 0)
+            int componentIndex = 0,
+            [McpArg("asset_path", "Asset path. Prefabs address their contents; object_path optionally names a child relative to the root, excluding the root name. Other assets address the main asset.")] string assetPath = null)
         {
             return InspectorAccess.Access(ToolArgs.Of(
                 ("mode", "write"),
+                ("assetPath", assetPath),
                 ("propertyPath", propertyPath),
                 ("value", value),
                 ("values", values),

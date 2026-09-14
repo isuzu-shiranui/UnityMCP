@@ -1,237 +1,110 @@
 ---
 name: isuzu-unity-cli
 description: >
-  Control Unity Editor from the CLI with the isuzu-unity-cli command. Execute C# code, browse scene
-  hierarchy, inspect/modify GameObjects, capture screenshots, read console logs, check compile
-  status, control play mode, and execute menu items. Use when: user wants to interact with Unity
-  Editor programmatically, run C# code in Unity, debug Unity scenes, capture Unity screenshots,
-  check Unity logs, or automate Unity Editor operations via command line.
+  Drive the open Unity Editor from the shell with the isuzu-unity-cli command: console errors,
+  compiling and tests, scenes, GameObjects and components, prefabs, play mode, uGUI clicks, and C#
+  run inside the Editor. SKILL.md gives a command for each common task, so no tool list is needed.
 ---
 
-# Unity MCP - CLI Control for Unity Editor
+# isuzu-unity-cli
 
-Drive a running Unity Editor with the `isuzu-unity-cli` command. It reads the descriptor file the
-Editor publishes, so it needs no port scan, no token handling, and no MCP client running.
+Each command talks to the Unity Editor that has this project open and prints compact JSON. A call
+returns when its work is done: `play_mode_play` returns once play mode has started, and a call that
+takes long waits for its result.
 
-```bash
-isuzu-unity-cli projects   # which Editors are running
-isuzu-unity-cli tools      # what this Editor publishes, with argument names
-isuzu-unity-cli health     # server state, queue depth, running jobs
+## Rules
+
+- Do not list tools. The table below covers common work; for anything else run
+  `isuzu-unity-cli tools --search <words>`, then `isuzu-unity-cli tools <name>`.
+- Put every call you already know into one shell command with the template below. Do not read
+  again to confirm a change: each reply already shows the result, and you can answer from it.
+- Windows PowerShell deletes double quotes inside arguments, so never pass JSON text. Use
+  `--name value`; repeat an option for a list (`--paths a --paths b`); `--values.m_Mass 2` sets one
+  field of an object argument; a vector is `--position '1,0,2'`; anything else goes in a file:
+  `--args-file args.json`.
+- Single-quote values with spaces, commas or `@`: `'/Main Camera'`, `'error,warning'`,
+  `'@scene:/Boss/Enemy/health'`. Unquoted, PowerShell splits `1,0,2` into three words.
+- Scene paths start with `/`. Siblings that share a name take a 0-based index: `/Audio/Speaker[1]`.
+- Property paths are serialized names (`m_Mass`, `m_LocalPosition.x`, a script's field name); the C#
+  name (`mass`) also works when it is unambiguous, and a miss lists the nearest names.
+
+## Template
+
+```powershell
+function u { isuzu-unity-cli @args; if ($LASTEXITCODE) { throw "isuzu-unity-cli $args failed ($LASTEXITCODE)" } }
+try {
+  u call play_mode_play
+  u call ui_click --text Start
+} finally { isuzu-unity-cli call play_mode_stop }
 ```
 
-## Read the console first
+A failed call throws, so the calls after it do not run on a broken state, and `finally` leaves play
+mode. Without play mode, the `try`/`finally` is not needed.
 
-When something does not work or does not show up, read the console errors and warnings before
-building any instrumentation of your own (reflection reads, debug counters, synthetic tests).
+## Tasks
 
-```bash
-isuzu-unity-cli call console_read_logs --type error --limit 30
-```
-
-Unity has usually already written down the cause in one line. Order diagnostics by cost:
-console, then existing debug displays, then your own instrumentation.
-
-- Check both `--type error` and `--type warning` as soon as a symptom appears. The cause is
-  sometimes on the warning side.
-- Do not trust an empty console. If entries may have been dropped, read the log file directly
-  with `editor_log_tail`. It works while the Editor is busy.
-- After a compile, reimport or recompile, confirm `succeeded` with `compile_status`. A failed
-  compile leaves the Editor running the previous assembly with `isCompiling` back to false, so
-  silence is not success.
-- "Fix until the errors are gone" is itself an objective completion criterion.
-
-## Calling tools
-
-```bash
-isuzu-unity-cli call <tool>                                # no arguments
-isuzu-unity-cli call <tool> --name value --other 3         # individual arguments
-isuzu-unity-cli call <tool> --json '{"key":"value"}'       # one JSON object
-isuzu-unity-cli call <tool> --project MyGame               # when several Editors are open
-isuzu-unity-cli call <tool> --raw                          # whole envelope, not just the result
-```
-
-Values are typed automatically. `--limit 20` sends a number and `--active_only true` sends a boolean,
-and a value that parses as JSON is sent as JSON, which is how a list or an object gets in.
-Errors print to stderr and set a non-zero exit code, so the commands can be used in scripts.
-
-A list can also be typed by naming the option once per value, which no shell can mangle:
-
-```bash
-isuzu-unity-cli call reflect_read --paths "@scene:/A/Transform/position" --paths "@scene:/B/Transform/position"
-```
-
-That is the way to do it on Windows PowerShell, which strips the double quotes out of an argument
-on its way to a program: `--paths '["a","b"]'` arrives as `[a,b]` and is refused rather than read
-as one long path.
-
-Run `isuzu-unity-cli tools` for the authoritative list. It comes from the Editor, so it always
-matches the version you are talking to.
-
-## Verify an edit in one call
-
-```bash
-isuzu-unity-cli verify                       # recompile, collect errors, read console errors
-isuzu-unity-cli verify --test                # also run the EditMode suite and list failures
-isuzu-unity-cli verify --test --filter Foo   # narrow the tests (also --assembly / --category)
-```
-
-Exit code 0 means the edit compiled and the tests passed; 1 means compile errors or test
-failures; 4 means the `--timeout` (300 s by default) was exceeded.
-
-## Execute C# code
-
-Always pass snippets with `--file`.
-
-```bash
-cat > /tmp/snippet.cs <<'EOF'
-var lights = UnityEngine.Object.FindObjectsByType<Light>(FindObjectsSortMode.None);
-foreach (var l in lights) l.intensity = 2f;
-Debug.Log($"adjusted {lights.Length} lights");
-return lights.Length;
-EOF
-isuzu-unity-cli call execute_code --file /tmp/snippet.cs
-```
-
-`--file` sends the snippet base64-encoded. Passing C# through a shell and a JSON encoder loses
-the backslashes in string literals, and the failure appears as a compile error in generated
-source you never see ("Unrecognized escape sequence", "Newline in constant").
-
-Namespaces already imported: `System`, `System.Collections`, `System.Collections.Generic`,
-`System.Linq`, `System.Threading.Tasks`, `UnityEngine`, `UnityEditor`. Write statements only,
-with no class or method wrapper. `return <expr>;` returns a value. `Debug.Log` output is captured
-separately.
-
-A snippet is not undoable. Nothing it changes goes on the undo stack, so authoring belongs in
-the dedicated tools.
-
-Return values are serialized structurally, so returning a list gives an array. A snippet that
-uses `await` returns no value. The Editor does not block its main thread on an incomplete Task.
-
-Identical snippets are compiled once and reused. Each distinct snippet loads an assembly that
-cannot be unloaded, so a long session of one-off snippets grows the domain until the next reload.
-
-## Keeping the two halves in step
-
-The CLI and the Unity package ship as one version. When a command prints a line on stderr saying a
-newer release is out, or a reply mentions version skew, `isuzu-unity-cli update` moves both: it
-replaces the CLI and retargets each project's package. It refuses the installs it cannot move - a
-`file:` working copy, a folder under `Packages/`, anything VCC or ALCOM manages - and names the
-step that does move them. A CLI installed with winget or as a dotnet tool is updated by that tool:
-`update` prints the command, and until the CLI has been updated it moves the packages only as far as
-the version the CLI runs, so run it again afterwards. `--dry-run` says what would change without
-changing it.
-
-## The rest of it
-
-Two files sit beside this one. Read the one the task calls for rather than both:
-
-- `reference/tools.md` - what each tool is for, by area: authoring, animator controllers,
-  rendering and shaders, timeline and recorder.
-- `reference/workflows.md` - the sequences that come up: chasing an error to the object that
-  raised it, editing a script and confirming it built, running the tests, proving a rendering
-  change did something, reproducing an interaction, recovering a connection that stopped
-  answering.
-
-## Ask for more in one call
-
-Reading and writing one thing at a time is the largest cost here, and every one of these numbers
-came from watching a real task:
-
-```bash
-# Several paths in one read: three objects' bounds took fourteen calls without this
-isuzu-unity-cli call reflect_read --json '{"paths":[
-  "@scene:/A/MeshRenderer/bounds","@scene:/A/BoxCollider/bounds",
-  "@scene:/B/MeshRenderer/bounds"],"depth":2}'
-
-# Every component on an object, with its properties, in one call rather than one call each
-isuzu-unity-cli call inspect_list --object_path /Player --detail full
-
-# Several properties on one component: one ConfigurableJoint took twenty-one calls without this
-isuzu-unity-cli call inspect_write --json '{"object_path":"/Hair","component_type":"ConfigurableJoint",
-  "values":{"m_XMotion":0,"m_YMotion":0,"m_ZMotion":0}}'
-
-# The same edit across many objects, the way the Inspector edits a multi-selection:
-# swapping a material across three hundred objects took two hundred and ninety-nine calls
-isuzu-unity-cli call inspect_write --json '{"object_paths":["/Brick_0","/Brick_1","/Brick_2"],
-  "component_type":"MeshRenderer","property_path":"m_ReceiveShadows","value":false}'
-
-# Frames, not one frame: watching an animation a frame at a time cost 1,255 calls.
-# 'paths' reads while the frame is still that one, so a step and the look that always
-# follows it are one call: twenty-one steps once came with forty-six reads behind them.
-isuzu-unity-cli call play_mode_step --json '{"count":120,"paths":[
-  "@scene:/Turnstile/Transform/localEulerAngles"]}'
-```
-
-Both `values` and `object_paths` write nothing at all if any path fails to resolve, so a refusal
-costs a round trip rather than leaving something half configured.
-
-`paths` is also how to ask what a set of objects has in common. Reading each renderer's
-`sharedMaterial` tells the materials apart by the `instanceId` every reference carries, so two
-materials with the same name still count as two:
-
-```bash
-# 360 renderers in batches of 50: 8 calls and 104 KB, and it found 301 distinct materials.
-# Asking a material tool once per object took 361 calls and 886 KB for the same answer.
-isuzu-unity-cli call reflect_read --json '{"paths":[
-  "@scene:/HeavyScene/Brick_0/MeshRenderer/sharedMaterial",
-  "@scene:/HeavyScene/Brick_1/MeshRenderer/sharedMaterial"],"depth":1}'
-```
-
-`search_query` has a `ref:` token that goes the other way - `h: ref:Assets/Art/Stone.mat` names
-the scene objects using that material. It works on assets only, so a material created at run time
-and never saved has no path to search by; `sharedMaterial` through `paths` reaches those too.
-
-A picture is the other end of the scale. `capture_screenshot` writes the file and prints about 90
-tokens, but looking at the picture costs the image: about 800 tokens at the default 1024x576,
-more than all but a handful of replies here. Read the numbers with `inspect_read` or
-`reflect_read` when a number would answer the question.
-
-## Finding what a reply cannot show
-
-```bash
-# Fields whose target was deleted: the id is still there and the object is gone. A field nobody
-# filled in has neither, so an empty slot is not reported as damage.
-isuzu-unity-cli call asset_broken_references --scope scene
-isuzu-unity-cli call asset_broken_references --scope assets --folder Assets/Prefabs --max_seconds 30
-
-# The Editor's own search, for conditions the hierarchy walk cannot express
-isuzu-unity-cli call search_query --json '{"query":"h: t:meshrenderer p(castshadows)!=\"Off\""}'
-isuzu-unity-cli call search_query --json '{"query":"p: t:Material"}'
-```
-
-`search_query` is Unity's query language, not one this package defines: a term Unity does not
-understand narrows nothing rather than failing, so check the count against what you expected. A
-project query can also come back empty the first time it is asked in a session - ask again before
-concluding it found nothing.
-
-## Jobs
-
-Work slower than about three seconds returns a job id instead of a result:
-
-```json
-{"state":"running","jobId":"execute_code-3","poll":"/jobs/execute_code-3"}
-```
-
-```bash
-isuzu-unity-cli jobs execute_code-3
-isuzu-unity-cli jobs execute_code-3 --wait   # poll until it ends, print its last answer
-```
-
-Do not repeat the call. The work is still running, and repeating the call runs it twice.
-
-`--wait` exits 0 when the job completed and 1 when it failed or was cancelled, so a script can
-stop on it. `--timeout <seconds>` (300 by default) gives up waiting without stopping the job.
-
-## Errors
-
-| Message | Meaning |
+| Task | Calls |
 |---|---|
-| `No running Unity Editor found` | No Editor has a project open with the package installed |
-| `Several Editors are running` | Pass `--project <name>` |
-| `No running Editor has <folder> open` | The project the command selected is not open. Open it, or run the command again with `--project` |
-| `The working directory is inside the Unity project` | That project is not open. Open it, or pass `--project` to choose another |
-| `kept rejecting the token` | The descriptor is stale; restart the Editor |
-| `error [invalid_params]` | Argument missing or the value was rejected; the text says which |
-| `error [tool_not_found]` | Run `isuzu-unity-cli tools` |
-| `error [unauthorized]` | The descriptor is stale; restart the Editor |
-| The call fails outright right after `play_mode_play`, `play_mode_stop` or a script edit | The Editor is reloading its domain and the server is gone for those few seconds; it comes back on its own. A read can simply be called again. A change may already have arrived, so read the state back before sending it again. `reference/workflows.md` has the rest |
+| Fix compile errors | `u verify` prints each error with the source lines around it; after the edit, `u verify --test --filter <regex>` compiles and runs the tests in one call |
+| Run tests | `u verify --no-compile --test --filter <regex>` (EditMode; `tests: none matched` when nothing matched) |
+| Console errors and warnings | `u call console_read_logs --type 'error,warning' --limit 30` |
+| Find objects | `u call scene_browse_hierarchy --name <text>` or `--component <Type>` |
+| Objects matching a condition | `execute_code` with `McpSnippet.All<T>(true)` and `McpSnippet.PathOf` (below) |
+| Every property of an object | `u call inspect_list --object_path <path> --detail full` |
+| Read or write a property | `u call inspect_read --object_path <path> --property_path <prop>`; `inspect_write` also takes `--value <v>`, or `--values.<prop> <v>` for several. The component is found from the property; add `--component_type <Type>` when several have it |
+| Change a prefab asset | `u call inspect_write --asset_path Assets/X.prefab --property_path <prop> --value <v>` saves it; `overriddenBy` lists scene instances that keep their own value; `--object_path Child/Name` for a child |
+| Create an object | `u call gameobject_create --name <n> --parent_path <path> --position '1,0,2'` |
+| Add a component | `u call gameobject_add_component --object_path <path> --component_type <Type> --values.<field> <v>` |
+| Many objects by a formula | `foreach ($i in 0..9) { u call gameobject_create --name "Item$i" --parent_path /Root --position "$($i * 2),0,0"; u call gameobject_add_component --object_path "/Root/Item$i" --component_type Rigidbody --values.m_Mass ($i + 1) }`, then `u call scene_save` |
+| Add a script, then use it | one command: write the file, `u verify`, `u call gameobject_add_component --object_path /<name> --component_type <Class> --values.<field> <v>`, `u call scene_save`. A name without a leading `/` is looked up anywhere in the scene |
+| Why a camera does not draw an object | the second snippet below gives every usual cause in one call; fix the one it shows with `inspect_write`, then `u call scene_save` |
+| Exception in play mode | `u call play_mode_play`, `u call play_mode_step --count 150`, `u call console_read_logs --type error --stack_trace true --limit 5` |
+| A value while playing, or its value after each call that changes it | `u call play_mode_play --paused`, then `u call play_mode_step --seconds 3 --changes --paths '@scene:/<object>/<Component>/<field>'`: `changes` lists `[frame, time, value]` each time the value changed, which is its value right after the code that changed it. No breakpoints or source reading needed |
+| Press a uGUI button | `u call ui_click --text <label>` (or `--object_path`): `textChanges` shows the text it changed |
+| Save the scene | `u call scene_save` |
+
+## execute_code
+
+```powershell
+@'
+return McpSnippet.All<Light>(true)
+    .Where(l => l.enabled && l.gameObject.activeInHierarchy)
+    .Select(l => McpSnippet.PathOf(l.gameObject));
+'@ | Set-Content -Encoding UTF8 $env:TEMP\snippet.cs
+u call execute_code --file $env:TEMP\snippet.cs
+```
+
+Why a camera does not draw an object (replace the two paths):
+
+```powershell
+@'
+var cam = McpSnippet.Find("/Main Camera").GetComponent<Camera>();
+var r = McpSnippet.Find("/Path/To/Object").GetComponentInChildren<Renderer>(true);
+return new { cameraObjectActive = cam.gameObject.activeInHierarchy, cameraEnabled = cam.enabled, cam.targetTexture, cam.cullingMask, r.gameObject.layer, layerInMask = (cam.cullingMask & (1 << r.gameObject.layer)) != 0,
+    objectActive = r.gameObject.activeInHierarchy, rendererEnabled = r.enabled, material = r.sharedMaterial ? r.sharedMaterial.name : null,
+    cam.nearClipPlane, cam.farClipPlane, depth = cam.transform.InverseTransformPoint(r.bounds.center).z, halfDepth = r.bounds.extents.z,
+    inFrustum = GeometryUtility.TestPlanesAABB(GeometryUtility.CalculateFrustumPlanes(cam), r.bounds) };
+'@ | Set-Content -Encoding UTF8 $env:TEMP\visible.cs
+u call execute_code --file $env:TEMP\visible.cs
+```
+
+- Statements with `return <value>`. `System`, `System.Linq`, `UnityEngine`, `UnityEditor` and both
+  `SceneManagement` namespaces are imported. `McpSnippet` has `PathOf(go)`, `Find(path)`,
+  `IdOf(obj)` and `All<T>(includeInactive)`.
+- Record scene edits with `Undo.RegisterCreatedObjectUndo` or `Undo.RecordObject`, then save with
+  `u call scene_save` rather than inside the snippet.
+- A compile error names the line and column in your snippet.
+
+## When a call fails
+
+| Output | Meaning |
+|---|---|
+| `error [not_found]` | The path or name does not exist; the message lists what does |
+| `error [invalid_params]` | A wrong argument; `isuzu-unity-cli tools <name>` shows the right ones |
+| `error [conflict]` | Several matches, or something covers the element you tried to click; the message names them |
+| `error [play_refused]` | Play mode did not start; `u verify` shows the compile errors |
+| exit code 4 | The wait ran out while the work continues; the message says how to pick it up |
+| `No running Unity Editor found` | Open the project in Unity first |
+
+More: `reference/tools.md` (tools by area), `reference/workflows.md` (dialogs, a stuck Editor,
+input recording).

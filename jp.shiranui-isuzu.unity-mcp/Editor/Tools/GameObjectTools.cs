@@ -297,27 +297,39 @@ namespace UnityMCP.Editor.Tools
             Idempotency = McpIdempotency.Unsafe,
             UndoGroup = "MCP Add Component")]
         public static JObject AddComponent(
-            [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")]
-            string objectPath = null,
-            [McpArg("instance_id", "Instance id, instead of a path.")]
-            long? instanceId = null,
-            [McpArg("component_type", "Type name of the component to add.", Required = true)]
-            string componentType = null)
+            [McpArg("object_path", "Hierarchy path, from scene_browse_hierarchy.")] string objectPath = null,
+            [McpArg("instance_id", "Instance id, instead of a path.")] long? instanceId = null,
+            [McpArg("component_type", "Type name of the component to add.", Required = true)] string componentType = null,
+            [McpArg("values", "Serialized property paths or unambiguous C# names and values for the new component. Add and writes share one undo step; any invalid property reverts the entire add, including required components.")] JObject values = null)
         {
             var go = ObjectResolve.Object(objectPath, instanceId);
             var type = FindComponentType(componentType);
-
-            var added = Undo.AddComponent(go, type);
-
-            if (added == null)
+            Undo.IncrementCurrentGroup();
+            var group = Undo.GetCurrentGroup();
+            Undo.SetCurrentGroupName("MCP Add Component");
+            try
             {
-                throw new McpToolException(
-                    "tool_failed",
-                    $"Unity refused to add {type.Name} to '{go.name}'. A RequireComponent dependency " +
-                    "may be missing, or the component may already be present and disallow duplicates.");
+                var added = Undo.AddComponent(go, type);
+                if (added == null)
+                    throw new McpToolException("tool_failed", $"Unity refused to add {type.Name} to '{go.name}'. A RequireComponent dependency "
+                        + "may be missing, or the component may already be present and disallow duplicates.");
+                JObject written = null;
+                if (values != null)
+                {
+                    using var serialized = new SerializedObject(added);
+                    written = Handlers.InspectorAccess.WriteProperties(serialized, values, type.FullName);
+                    if (written["error"] != null) throw new McpToolException("invalid_params", (string)written["error"]);
+                }
+                var reply = Describe(go, components: true);
+                if (written != null) reply["written"] = written["written"];
+                Undo.CollapseUndoOperations(group);
+                return reply;
             }
-
-            return Describe(go, components: true);
+            catch
+            {
+                Undo.RevertAllDownToGroup(group);
+                throw;
+            }
         }
 
         [McpTool(

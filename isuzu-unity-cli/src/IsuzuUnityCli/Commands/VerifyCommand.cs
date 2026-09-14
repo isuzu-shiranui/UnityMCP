@@ -172,6 +172,9 @@ public static class VerifyCommand
     private sealed class Verifier
     {
         private const int TransportRetryMs = 200;
+
+        /// <summary>Compile errors printed with the source around them; the rest keep one line each.</summary>
+        private const int SourceExcerpts = 5;
         private const int UnauthorizedRetryMs = 500;
 
         private readonly CommandContext _context;
@@ -239,12 +242,16 @@ public static class VerifyCommand
 
         private List<ConsoleEntry> ConsoleErrors { get; } = new();
 
+        /// <summary>Whether the test step ran any test at all.</summary>
+        /// <remarks>A filter that matches nothing completes with nothing failed, which read as a pass.</remarks>
+        private bool RanAny => Passed + Failed + Skipped + Inconclusive + Failures.Count > 0;
+
         public bool Ok =>
             !TimedOut
             && StoppedBy is null
             && RefusedBy is null
             && (!CompileRan || CompileSucceeded == true)
-            && (!TestsRan || (Failed == 0 && Inconclusive == 0 && Failures.Count == 0 && TestStatus == "completed"));
+            && (!TestsRan || (Failed == 0 && Inconclusive == 0 && Failures.Count == 0 && TestStatus == "completed" && RanAny));
 
         public async Task Compile(int intervalMs, int startGraceMs, CancellationToken cancellation)
         {
@@ -385,6 +392,7 @@ public static class VerifyCommand
                         ["failed"] = Failed,
                         ["skipped"] = Skipped,
                         ["inconclusive"] = Inconclusive,
+                        ["ranAny"] = RanAny,
                         ["truncated"] = TestDetailsTruncated,
                         ["failures"] = new JsonArray(Failures
                             .Select(f => (JsonNode)new JsonObject { ["name"] = f.Name, ["message"] = f.Message })
@@ -423,13 +431,22 @@ public static class VerifyCommand
             {
                 text.Append($"compile: FAILED ({CompileErrorCount} errors)\n");
 
-                foreach (var error in CompileErrors)
+                foreach (var (error, index) in CompileErrors.Select((error, index) => (error, index)))
                 {
                     text.Append("  ").Append(Describe(error)).Append('\n');
+
+                    if (index < SourceExcerpts)
+                    {
+                        AppendSource(text, error);
+                    }
                 }
             }
 
-            if (TestsRan)
+            if (TestsRan && TestStatus == "completed" && !RanAny)
+            {
+                text.Append($"tests: none matched ({TestMode})\n");
+            }
+            else if (TestsRan)
             {
                 // Counts cover the full run; the returned details may stop before a failure.
                 // Keep visible non-success cases counted even if a response omits totals.
@@ -508,6 +525,15 @@ public static class VerifyCommand
                     }
 
                     await Task.Delay(UnauthorizedRetryMs, cancellation);
+                    continue;
+                }
+                // A server going down for the domain reload fails what it had queued before running
+                // it, so even test_run is sent again. The compile this command requested is what
+                // triggers that reload, and stopping here reported the compile as unfinished.
+                catch (UnityError e) when (e.Code == "server_stopped")
+                {
+                    Rediscover(cancellation);
+                    await Task.Delay(TransportRetryMs, cancellation);
                     continue;
                 }
                 // Only a reply that never arrived leaves test_run unconfirmed. A gateway status means
@@ -789,6 +815,37 @@ public static class VerifyCommand
         }
 
         private static JsonObject StatusBody() => new() { ["include_warnings"] = false, ["limit"] = 200 };
+
+        /// <summary>The line a compile error names, with one line either side.</summary>
+        /// <remarks>A fix needs the code as well as the message, and without it the next step was a separate read of the file.</remarks>
+        private void AppendSource(StringBuilder text, CompileError error)
+        {
+            if (error.Line <= 0 || error.File.Length == 0 || _instance.ProjectPath.Length == 0)
+            {
+                return;
+            }
+
+            var first = Math.Max(1, error.Line - 1);
+            string[] lines;
+
+            try
+            {
+                var path = Path.IsPathRooted(error.File)
+                    ? error.File
+                    : Path.Combine(ProjectMatcher.ProjectRootOf(_instance.ProjectPath), error.File);
+                lines = File.ReadLines(path).Skip(first - 1).Take(error.Line + 1 - first + 1).ToArray();
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return;
+            }
+
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var number = (first + i).ToString(CultureInfo.InvariantCulture);
+                text.Append("    ").Append(number.PadLeft(5)).Append(" | ").Append(lines[i]).Append('\n');
+            }
+        }
 
         /// <summary>
         /// Unity's compiler messages already carry the file and position, so the composed prefix

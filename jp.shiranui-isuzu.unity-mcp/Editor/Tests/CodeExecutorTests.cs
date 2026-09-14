@@ -27,6 +27,40 @@ namespace UnityMCP.Editor.Tests
         }
 
         [Test]
+        public void CompileErrorsPointIntoTheOriginalSnippet()
+        {
+            var result = Run("var ok = 1;\n    MissingSymbol();");
+            Assert.That((string)result["error"], Does.Contain("line 2, column 5:"));
+            result = CodeExecutor.Execute("var ok = 1;\n    MissingSymbol();", new JObject());
+            Assert.That((string)result["error"], Does.Contain("line 2, column 5:"));
+        }
+
+        [Test]
+        public void IncompleteSyntaxReportsTheSnippetEnd()
+        {
+            var result = Run("if (true) {");
+            Assert.That((string)result["error"], Does.Contain("line 1, column 12:"));
+        }
+
+        [Test]
+        public void HelpersCompileAndResolveInactiveIndexedObjects()
+        {
+            var result = Run(@"
+var root = new GameObject(""SnippetRoot"");
+try {
+    var first = new GameObject(""Twin""); first.transform.SetParent(root.transform);
+    var second = new GameObject(""Twin""); second.transform.SetParent(root.transform); second.SetActive(false);
+    var path = McpSnippet.PathOf(second);
+    return path == ""/SnippetRoot/Twin[1]"" && McpSnippet.Find(path) == second
+        && McpSnippet.All<GameObject>(true).Contains(second) && !McpSnippet.All<GameObject>().Contains(second)
+        && !string.IsNullOrEmpty(McpSnippet.IdOf(second))
+        && SceneManager.GetActiveScene().IsValid() && typeof(EditorSceneManager) != null;
+} finally { Object.DestroyImmediate(root); }");
+            Assert.That(result["error"], Is.Null, result.ToString());
+            Assert.That((bool)result["returnValue"], Is.True);
+        }
+
+        [Test]
         public void ReturnsAScalarValue()
         {
             var result = Run("return 1 + 1;");

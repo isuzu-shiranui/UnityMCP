@@ -16,19 +16,55 @@ public sealed class ToolsCommandTests
         ]}}
         """;
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ExactNamePreservesCompleteSchemaAndSafetyDescription(bool raw)
+    [Fact]
+    public async Task RawExactNamePreservesCompleteSchemaAndSafetyDescription()
     {
         using var server = new FakeUnityServer().Enqueue(200, Catalog);
         var output = new StringWriter();
         var context = new CommandContext { Out = output, Err = new StringWriter(), ReadDescriptors = () => [server.Descriptor()] };
-        var args = new List<string> { "tools", "chosen", "--group", "diagnostics" };
-        if (raw) args.Add("--raw");
-        Assert.Equal(0, await Program.Run(args.ToArray(), context));
+        Assert.Equal(0, await Program.Run(["tools", "chosen", "--group", "diagnostics", "--raw"], context));
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Catalog)!["result"]!["tools"]![0], JsonNode.Parse(output.ToString())));
         Assert.Equal("/tools?group=diagnostics", Assert.Single(server.Requests).Path);
+    }
+
+    [Fact]
+    public async Task ExactNameShowsEveryArgumentWithItsChoicesAndWhetherItIsRequired()
+    {
+        using var server = new FakeUnityServer().Enqueue(200, Catalog);
+        var output = new StringWriter();
+        var context = new CommandContext { Out = output, Err = new StringWriter(), ReadDescriptors = () => [server.Descriptor()] };
+        Assert.Equal(0, await Program.Run(["tools", "chosen", "other"], context));
+        Assert.Equal(
+            "chosen  read-only\n  Read first; do not repeat a pending job.\n  --mode one|two, required: Choose a mode.\nother\n  Other tool.\n",
+            output.ToString());
+    }
+
+    [Fact]
+    public void BareListingIsNamesByGroupWithoutDescriptions()
+    {
+        var tools = JsonNode.Parse("""
+            [{"name":"a_read","group":"diagnostics","description":"Long text."},
+             {"name":"b_write","group":"authoring","description":"Long text."},
+             {"name":"c_read","group":"diagnostics","description":"Long text."}]
+            """)!.AsArray().Select(n => n!.AsObject()).ToList();
+        Assert.Equal(
+            "diagnostics: a_read c_read\nauthoring: b_write\ntools <name> [<name>...] shows arguments; tools --search <words> finds a tool.\n",
+            ToolsCommand.Names(tools));
+    }
+
+    [Fact]
+    public async Task SearchTakesTheWordsAShellSplitApartAndRanksNameMatchesFirst()
+    {
+        using var server = new FakeUnityServer().Enqueue(200, """
+            {"status":"success","result":{"tools":[
+              {"name":"console_read_logs","description":"Read the console. Also mentions play mode.","inputSchema":{"type":"object"}},
+              {"name":"play_mode_step","description":"Advance play mode. More.","inputSchema":{"type":"object","properties":{"count":{}}}}
+            ]}}
+            """);
+        var output = new StringWriter();
+        var context = new CommandContext { Out = output, Err = new StringWriter(), ReadDescriptors = () => [server.Descriptor()] };
+        Assert.Equal(0, await Program.Run(["tools", "--search", "play", "mode"], context));
+        Assert.Equal("play_mode_step [count]  Advance play mode.\nconsole_read_logs  Read the console.\n", output.ToString());
     }
 
     [Theory]
@@ -43,13 +79,6 @@ public sealed class ToolsCommandTests
         Assert.Equal(2, await Program.Run(["tools", name], context));
         Assert.Equal("", output.ToString());
         Assert.Contains(name, error.ToString());
-    }
-
-    [Fact]
-    public async Task ExtraNamesFailBeforeContactingTheEditor()
-    {
-        var context = new CommandContext { Out = new StringWriter(), Err = new StringWriter(), ReadDescriptors = () => throw new InvalidOperationException("must not resolve") };
-        Assert.Equal(2, await Program.Run(["tools", "one", "two"], context));
     }
 
     [Fact]

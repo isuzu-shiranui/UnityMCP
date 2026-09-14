@@ -368,6 +368,8 @@ namespace UnityMCP.Editor.Core
 
         public BindKind Kind { get; }
 
+        public bool Coordinates { get; set; }
+
         /// <summary>Enum member names, in <see cref="EnumValues"/> order.</summary>
         public string[] EnumNames { get; }
 
