@@ -79,7 +79,7 @@ namespace UnityMCP.Editor.Handlers
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
             ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
             NullValueHandling = NullValueHandling.Ignore,
-            MaxDepth = 12,
+            Converters = { new UnityValueConverter() },
         });
 
         public static JObject Execute(JObject parameters)
@@ -456,12 +456,112 @@ namespace McpCodeExecution
 
             try
             {
-                return JToken.FromObject(value, ValueSerializer);
+                using var writer = new DepthLimitedTokenWriter();
+                ValueSerializer.Serialize(writer, value);
+                return writer.Token;
             }
             catch (Exception e)
             {
                 // Falling back to ToString is still better than failing the whole call.
                 return new JValue($"{value} (not serializable: {e.Message})");
+            }
+        }
+
+        /// <summary>Unity values and objects inside a return value, written as their data.</summary>
+        /// <remarks>
+        /// Json.NET writes every public property. Unity's value types reach themselves through
+        /// properties (Color.linear, Vector3.normalized), so writing one recursed until the stack
+        /// overflowed, and a stack overflow ends the Editor process instead of reaching a catch. A
+        /// live UnityEngine.Object would expand into its whole object graph.
+        /// </remarks>
+        private sealed class UnityValueConverter : JsonConverter
+        {
+            public override bool CanRead => false;
+
+            public override bool CanConvert(Type objectType) =>
+                typeof(UnityEngine.Object).IsAssignableFrom(objectType)
+                || objectType == typeof(Vector2) || objectType == typeof(Vector3) || objectType == typeof(Vector4)
+                || objectType == typeof(Vector2Int) || objectType == typeof(Vector3Int) || objectType == typeof(Quaternion)
+                || objectType == typeof(Color) || objectType == typeof(Color32) || objectType == typeof(Rect)
+                || objectType == typeof(Bounds) || objectType == typeof(Matrix4x4);
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) =>
+                throw new NotSupportedException();
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer) =>
+                Describe(value).WriteTo(writer);
+
+            private static JToken Describe(object value)
+            {
+                switch (value)
+                {
+                    case UnityEngine.Object unityObject:
+                        return unityObject == null
+                            ? JValue.CreateNull()
+                            : new JObject { ["name"] = unityObject.name, ["type"] = unityObject.GetType().Name };
+                    case Vector2 v:
+                        return new JObject { ["x"] = v.x, ["y"] = v.y };
+                    case Vector3 v:
+                        return new JObject { ["x"] = v.x, ["y"] = v.y, ["z"] = v.z };
+                    case Vector4 v:
+                        return new JObject { ["x"] = v.x, ["y"] = v.y, ["z"] = v.z, ["w"] = v.w };
+                    case Vector2Int v:
+                        return new JObject { ["x"] = v.x, ["y"] = v.y };
+                    case Vector3Int v:
+                        return new JObject { ["x"] = v.x, ["y"] = v.y, ["z"] = v.z };
+                    case Quaternion q:
+                        return new JObject { ["x"] = q.x, ["y"] = q.y, ["z"] = q.z, ["w"] = q.w };
+                    case Color c:
+                        return new JObject { ["r"] = c.r, ["g"] = c.g, ["b"] = c.b, ["a"] = c.a };
+                    case Color32 c:
+                        return new JObject { ["r"] = (int)c.r, ["g"] = (int)c.g, ["b"] = (int)c.b, ["a"] = (int)c.a };
+                    case Rect r:
+                        return new JObject { ["x"] = r.x, ["y"] = r.y, ["width"] = r.width, ["height"] = r.height };
+                    case Bounds b:
+                        return new JObject { ["center"] = Describe(b.center), ["size"] = Describe(b.size) };
+                    case Matrix4x4 m:
+                        return new JArray(Enumerable.Range(0, 4).Select(row => new JArray(m[row, 0], m[row, 1], m[row, 2], m[row, 3])));
+                    default:
+                        return new JValue(value.ToString());
+                }
+            }
+        }
+
+        /// <summary>A token writer that refuses a value nested deeper than any reply needs.</summary>
+        /// <remarks>
+        /// Json.NET's MaxDepth applies to reading only, and its loop check stops only a value equal to one
+        /// already being written. A property that returns a different value at every level recurses
+        /// until the stack overflows.
+        /// </remarks>
+        private sealed class DepthLimitedTokenWriter : JTokenWriter
+        {
+            private const int MaxNesting = 32;
+            private int nesting;
+
+            public override void WriteStartObject()
+            {
+                Enter();
+                base.WriteStartObject();
+            }
+
+            public override void WriteStartArray()
+            {
+                Enter();
+                base.WriteStartArray();
+            }
+
+            protected override void WriteEnd(JsonToken token)
+            {
+                nesting--;
+                base.WriteEnd(token);
+            }
+
+            private void Enter()
+            {
+                if (++nesting > MaxNesting)
+                {
+                    throw new JsonSerializationException($"nested more than {MaxNesting} levels deep");
+                }
             }
         }
 

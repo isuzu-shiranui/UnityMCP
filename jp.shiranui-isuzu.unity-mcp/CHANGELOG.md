@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `execute_code` crashed the Editor when its return value contained a Unity value such as a `Color` or a `Vector3`. Json.NET followed properties like `linear` and `normalized`, which return new values of the same type, until the stack overflowed. Unity values are now written as their components and Unity objects as their name and type, and a value nested more than 32 levels deep is returned as text.
+
 ## [4.4.0] - 2026-09-14
 
 ### Added
