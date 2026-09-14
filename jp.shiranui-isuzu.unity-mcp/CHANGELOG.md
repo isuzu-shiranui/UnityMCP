@@ -9,7 +9,7 @@
 - `inspect_read`, `inspect_list` and `inspect_write` take `asset_path`. A write to a prefab saves it and names the scene instances whose override kept their own value. `inspect_list` takes `property_path` to describe one property.
 - `gameobject_add_component` takes `values`, written in the same undo step as the add.
 - Snippets for `execute_code` can call `McpSnippet.PathOf`, `Find`, `IdOf` and `All<T>`.
-- `tools --search <words>` finds a tool by what it does, and `tools <name>...` prints each argument's type, default and meaning. A name that is not a tool lists the nearest ones.
+- `tools --search <words>` finds a tool by what it does, and `tools <name>...` prints each argument's type, default and meaning. A name that is not a tool lists the names close to it, when there are any.
 - `call` takes `--a.b value` for one field of an object argument, and `--args-file` for arguments kept in a JSON file.
 
 ### Changed
