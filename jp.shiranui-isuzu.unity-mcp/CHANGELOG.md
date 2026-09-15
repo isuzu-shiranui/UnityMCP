@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [4.4.1] - 2026-09-15
 
 ### Fixed
 - `execute_code` crashed the Editor when its return value contained a Unity value such as a `Color` or a `Vector3`. Json.NET followed properties like `linear` and `normalized`, which return new values of the same type, until the stack overflowed. Unity values are now written as their components and Unity objects as their name and type, and a value nested more than 32 levels deep is returned as text.
+- When a call's connection dropped, the CLI reported a domain reload that would end within seconds even if the Editor had closed, which led the caller to send the call that closed it again. The CLI now checks whether the Editor's process has ended, and if it has, the error is `editor_exited` and says the call may be what closed the Editor and that the project has to be opened again.
 
 ## [4.4.0] - 2026-09-14
 
