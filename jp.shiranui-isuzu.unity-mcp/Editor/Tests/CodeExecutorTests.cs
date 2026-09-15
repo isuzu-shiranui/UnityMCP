@@ -234,6 +234,32 @@ try {
         }
 
         [Test]
+        public void UnityValuesInsideAReturnedObjectAreWrittenAsTheirData()
+        {
+            // Color.linear returns a new Color, so following the properties of a colour that is not
+            // pure black or white never ends, and the stack overflow closes the Editor.
+            var result = Run(
+                "return new { tint = new UnityEngine.Color(0.04f, 0.04f, 0.05f), position = UnityEngine.Vector3.one, " +
+                "shader = UnityEngine.Shader.Find(\"Unlit/Color\") };");
+
+            Assert.That(result["error"], Is.Null, (string)result["error"]);
+            Assert.That(result["returnValue"]["tint"]["b"].Value<float>(), Is.EqualTo(0.05f));
+            Assert.That(result["returnValue"]["position"]["z"].Value<float>(), Is.EqualTo(1f));
+            Assert.That(result["returnValue"]["shader"]["type"].Value<string>(), Is.EqualTo("Shader"));
+        }
+
+        [Test]
+        public void AValueThatNestsWithoutEndIsRefusedRatherThanFollowed()
+        {
+            // Every level is a new object, so the serializer's reference loop check never matches.
+            var result = Run(
+                "System.Collections.Generic.IEnumerable<object> Nest() { yield return Nest(); } return Nest();");
+
+            Assert.That(result["error"], Is.Null, (string)result["error"]);
+            Assert.That(result["returnValue"].Value<string>(), Does.Contain("not serializable"));
+        }
+
+        [Test]
         public void SeesAssembliesLoadedAfterTheFirstCompilation()
         {
             // A reference list built once and never rebuilt cannot reach anything loaded

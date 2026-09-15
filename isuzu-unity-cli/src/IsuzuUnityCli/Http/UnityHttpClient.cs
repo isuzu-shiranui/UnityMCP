@@ -105,6 +105,20 @@ public sealed class UnityHttpClient
                             e);
                     }
 
+                    // A reload keeps the Editor's process and a crash ends it. Told to wait out a
+                    // reload, a caller sends the call that closed the Editor a second time.
+                    if (await HasExited(instance, cancellation))
+                    {
+                        throw new UnityError(
+                            "editor_exited",
+                            $"The Editor (pid {instance.Pid}) closed while this call was running. If the "
+                            + "call ran code, that code may be what closed it, so do not send it again "
+                            + "unchanged. Open the project in Unity again; the Editor log and Unity's "
+                            + "crash report say why it closed.",
+                            null,
+                            e);
+                    }
+
                     // A connection that dies mid-request rather than being refused outright is
                     // what entering or leaving play mode looks like from here, and this is the one
                     // place text can still reach the caller: the Editor is gone, so its own reply
@@ -161,4 +175,34 @@ public sealed class UnityHttpClient
                 lastException);
         }
     }
+
+    /// <summary>Whether the Editor's process is known to have ended.</summary>
+    /// <remarks>
+    /// A terminated process resets its connections a few milliseconds before the system reports it
+    /// as exited, so the check is repeated for a moment. A pid read from a Windows Editor by a Linux
+    /// client names no process on this side and says nothing either way.
+    /// </remarks>
+    private static async Task<bool> HasExited(InstanceDescriptor instance, CancellationToken cancellation)
+    {
+        if (instance.Pid <= 0 || (!OperatingSystem.IsWindows() && ProjectKey.IsWindowsShaped(instance.ProjectPath)))
+        {
+            return false;
+        }
+
+        var waited = Stopwatch.StartNew();
+
+        while (ProcessLiveness.IsAlive(instance.Pid))
+        {
+            if (waited.ElapsedMilliseconds >= ExitGraceMs)
+            {
+                return false;
+            }
+
+            await Task.Delay(10, cancellation);
+        }
+
+        return true;
+    }
+
+    private const int ExitGraceMs = 500;
 }
