@@ -110,12 +110,47 @@ public sealed class UnityHttpClientTests
     public async Task AWriteDroppedMidRequestExplainsTheReload()
     {
         using var server = new FakeUnityServer().EnqueueDrop();
+        var descriptor = server.Descriptor();
+        // A reload keeps the Editor's process running.
+        descriptor.Pid = Environment.ProcessId;
 
         var e = await Assert.ThrowsAsync<UnityError>(
-            () => Client(budgetMs: 200).PostAsync(server.Descriptor(), "/tools/scene_save", new System.Text.Json.Nodes.JsonObject()));
+            () => Client(budgetMs: 200).PostAsync(descriptor, "/tools/scene_save", new System.Text.Json.Nodes.JsonObject()));
 
         Assert.Contains("rebuilds its domain", e.Message);
         Assert.Contains("not repeated automatically", e.Message);
+    }
+
+    /// <summary>A write whose Editor closed under it says the Editor closed, not that it is reloading.</summary>
+    /// <remarks>
+    /// Told to wait out a reload, an agent opened Unity again and sent the snippet that had closed
+    /// it, which closed it a second time.
+    /// </remarks>
+    [Fact]
+    public async Task AWriteDroppedByAnEditorThatClosedSaysItClosed()
+    {
+        using var server = new FakeUnityServer().EnqueueDrop();
+        var descriptor = server.Descriptor();
+        descriptor.Pid = ExitedProcessId();
+
+        var e = await Assert.ThrowsAsync<UnityError>(
+            () => Client(budgetMs: 200).PostAsync(descriptor, "/tools/execute_code", new System.Text.Json.Nodes.JsonObject()));
+
+        Assert.Equal("editor_exited", e.Code);
+        Assert.Contains("do not send it again", e.Message);
+    }
+
+    private static int ExitedProcessId()
+    {
+        var info = OperatingSystem.IsWindows()
+            ? new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c exit 0")
+            : new System.Diagnostics.ProcessStartInfo("true");
+        info.UseShellExecute = false;
+        info.CreateNoWindow = true;
+
+        using var process = System.Diagnostics.Process.Start(info)!;
+        process.WaitForExit();
+        return process.Id;
     }
 
     [Fact]
