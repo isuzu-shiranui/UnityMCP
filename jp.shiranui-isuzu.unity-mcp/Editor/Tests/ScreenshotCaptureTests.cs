@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 
 using NUnit.Framework;
 
@@ -73,6 +76,39 @@ namespace UnityMCP.Editor.Tests
                     kv.Value.StartsWith("UnityEditor."),
                     $"Mapped type '{kv.Value}' for key '{kv.Key}' should be in the UnityEditor namespace.");
             }
+        }
+
+        /// <summary>
+        /// A render can start compiling variants nothing had used, and the picture it produced then
+        /// holds cyan placeholders, so the capture has to be taken again once that compile ends.
+        /// </summary>
+        [Test]
+        public void ACaptureThatStartsACompileIsTakenAgainOnceTheCompileEnds()
+        {
+            var takes = 0;
+            var checks = 0;
+
+            // Nothing compiling before the first capture; that capture starts a compile seen by the
+            // next three checks, and the second capture starts nothing.
+            bool Compiling() => takes == 1 && checks++ < 3;
+
+            var waits = ScreenshotCapture.TakeWhenCompiled(
+                () => takes++, Compiling, Stopwatch.StartNew(), TimeSpan.FromMinutes(1)).Count();
+
+            Assert.That(takes, Is.EqualTo(2));
+            Assert.That(waits, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ACompileThatNeverEndsStillGetsOneCaptureAtTheLimit()
+        {
+            var takes = 0;
+
+            var waits = ScreenshotCapture.TakeWhenCompiled(
+                () => takes++, () => true, Stopwatch.StartNew(), TimeSpan.Zero).Count();
+
+            Assert.That(takes, Is.EqualTo(1));
+            Assert.That(waits, Is.EqualTo(0));
         }
     }
 }

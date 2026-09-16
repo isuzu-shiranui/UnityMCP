@@ -145,6 +145,60 @@ namespace UnityMCP.Editor.Handlers
                 400);
         }
 
+        /// <summary>How long a capture waits for shader variants before it is taken anyway.</summary>
+        internal static readonly TimeSpan ShaderWaitLimit = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// <see cref="Capture"/> taken once no shader variant is compiling, and taken again whenever
+        /// taking it started a compile.
+        /// </summary>
+        /// <remarks>
+        /// While a variant compiles, whatever draws with it, Camera.Render included, shows a cyan
+        /// placeholder until the variant is ready. A render can itself ask for variants nothing had
+        /// used yet, so a picture taken while nothing was compiling can still hold placeholders, and
+        /// a compile running right after the render is how that shows. The wait gives up frames
+        /// rather than blocking, because compiled variants are only put in place when the Editor ticks.
+        /// </remarks>
+        internal static IEnumerator<FrameStep> CaptureCompiled(JObject parameters)
+        {
+            var waited = Stopwatch.StartNew();
+            JObject shot = null;
+
+            foreach (var step in TakeWhenCompiled(
+                () => shot = Capture(parameters), () => ShaderUtil.anythingCompiling, waited, ShaderWaitLimit))
+            {
+                yield return step;
+            }
+
+            shot["shaderWaitSeconds"] = Math.Round(waited.Elapsed.TotalSeconds, 1);
+
+            if (ShaderUtil.anythingCompiling)
+            {
+                shot["shadersStillCompiling"] = true;
+            }
+
+            yield return FrameStep.Done(shot);
+        }
+
+        /// <summary>
+        /// Runs <paramref name="take"/> once <paramref name="compiling"/> is false, and again for as
+        /// long as it is true straight after, until <paramref name="limit"/> has passed.
+        /// </summary>
+        internal static IEnumerable<FrameStep> TakeWhenCompiled(
+            Action take, Func<bool> compiling, Stopwatch waited, TimeSpan limit)
+        {
+            do
+            {
+                while (compiling() && waited.Elapsed < limit)
+                {
+                    yield return FrameStep.Wait();
+                }
+
+                take();
+            }
+            while (compiling() && waited.Elapsed < limit);
+        }
+
         private static bool IsEditorPanelView(string view)
         {
             if (string.IsNullOrEmpty(view)) return false;
