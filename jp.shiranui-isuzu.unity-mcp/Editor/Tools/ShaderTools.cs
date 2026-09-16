@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 using Newtonsoft.Json.Linq;
 
@@ -37,6 +38,10 @@ namespace UnityMCP.Editor.Tools
             string path = null,
             [McpArg("include_warnings", "Report warnings as well as errors.")]
             bool includeWarnings = false,
+            [McpArg("include_details", "Add each message's full compile context: the platform defines " +
+                                       "and the disabled keywords of the variant it came from. Hundreds " +
+                                       "of characters per message; `pass` already says where it came from.")]
+            bool includeDetails = false,
             [McpArg("limit", "Maximum messages to return.")]
             int limit = 50)
         {
@@ -87,16 +92,27 @@ namespace UnityMCP.Editor.Tools
                         continue;
                     }
 
-                    messages.Add(new JObject
+                    var entry = new JObject
                     {
                         ["shader"] = AssetDatabase.GetAssetPath(shader),
                         ["severity"] = isError ? "error" : "warning",
                         ["message"] = message.message,
-                        ["messageDetails"] = Text(message.messageDetails),
                         ["file"] = message.file,
                         ["line"] = message.line,
                         ["platform"] = message.platform.ToString(),
-                    });
+                    };
+
+                    if (PassLabel(message.messageDetails) is { } pass)
+                    {
+                        entry["pass"] = pass;
+                    }
+
+                    if (includeDetails)
+                    {
+                        entry["messageDetails"] = Text(message.messageDetails);
+                    }
+
+                    messages.Add(entry);
                 }
             }
 
@@ -805,6 +821,53 @@ namespace UnityMCP.Editor.Tools
 
             return described;
         }
+
+        /// <summary>
+        /// Where a message came from, as "Subshader 0 / ForwardLit / fragment", or null when the
+        /// text does not name a variant.
+        /// </summary>
+        /// <remarks>
+        /// Only the first line of messageDetails names the variant. The rest lists the platform
+        /// defines and the disabled keywords it was compiled with, which is the bulk of the reply
+        /// and says nothing about the message. A message that belongs to no single pass, such as one
+        /// from a surface shader's generated code, carries the stage alone.
+        /// </remarks>
+        internal static string PassLabel(string messageDetails)
+        {
+            if (string.IsNullOrEmpty(messageDetails))
+            {
+                return null;
+            }
+
+            var match = PassPattern.Match(messageDetails.Split('\n')[0]);
+
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            var parts = new List<string>();
+
+            if (match.Groups["subshader"].Success)
+            {
+                parts.Add("Subshader " + match.Groups["subshader"].Value);
+            }
+
+            var pass = match.Groups["pass"].Value.Trim();
+
+            if (pass.Length > 0)
+            {
+                parts.Add(pass);
+            }
+
+            parts.Add(match.Groups["stage"].Value.ToLowerInvariant());
+
+            return string.Join(" / ", parts);
+        }
+
+        private static readonly Regex PassPattern = new Regex(
+            @"^Compiling\s+(?:Subshader:\s*(?<subshader>\d+),\s*Pass:\s*(?<pass>[^,]*),\s*)?(?<stage>\w+)\s+program",
+            RegexOptions.Compiled);
 
         /// <summary>
         /// A string as a JSON value, where null becomes a JSON null.
