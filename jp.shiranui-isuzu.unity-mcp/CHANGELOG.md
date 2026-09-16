@@ -8,6 +8,9 @@
 - The bundled skill says how to wait for a job, a compile, an import and Package Manager, and why a hand-written wait loop never sees the end.
 - `capture_screenshot` waits while a shader variant is compiling, and takes the picture again when rendering it started a compile. A variant still compiling draws as a cyan placeholder, so a capture taken meanwhile showed placeholders where the shaders should be. A wait that runs past ten minutes answers with the picture it has and `shadersStillCompiling`.
 
+### Fixed
+- An Editor that closed while answering a call, or whose server was stopped, came back as `non_json` with the advice to wait out a domain reload. When the Editor no longer publishes itself, the error is `editor_exited`.
+
 ## [4.4.1] - 2026-09-15
 
 ### Fixed
