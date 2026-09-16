@@ -95,6 +95,19 @@ u call execute_code --file $env:TEMP\visible.cs
   `u call scene_save` rather than inside the snippet.
 - A compile error names the line and column in your snippet.
 
+## Waiting for Unity
+
+| Waiting for | Do this |
+|---|---|
+| A job (an id from MCP, or exit code 4 here) | `isuzu-unity-cli jobs <id> --wait` in a background shell; it ends when the job does |
+| Scripts to compile | `u verify` |
+| Assets or shaders edited outside Unity | `u call asset_reimport --path <path> --recursive true`, then the call that reads them |
+| Package Manager after a manifest change | No command waits for it: `package_resolve` answers before the resolve and the domain reload that follow. Say what you are waiting for and let the user tell you |
+
+Do not write a wait loop of your own. A request sent to the Editor's port by hand is refused
+without its token, `health` always has a `dialog` key (null when there is none), and the shared
+Editor.log belongs to whichever Editor started last.
+
 ## When a call fails
 
 | Output | Meaning |

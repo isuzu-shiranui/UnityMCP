@@ -4,6 +4,8 @@
 
 ### Changed
 - `shader_errors` returned every message's full compile context, which is mostly the platform defines and disabled keywords of the variant it came from and made up about 70% of the reply. A message now carries `pass`, such as `Subshader 0 / ForwardLit / fragment`, and `include_details` brings the full context back.
+- A call that turns into a job names `isuzu-unity-cli jobs <id> --wait` as the way to hear when it ends, and so do the MCP instructions. Told only to call `job_status`, agents wrote polling loops against the endpoint, which refuses a request without its token, and waited for an answer that never came.
+- The bundled skill says how to wait for a job, a compile, an import and Package Manager, and why a hand-written wait loop never sees the end.
 
 ## [4.4.1] - 2026-09-15
 
