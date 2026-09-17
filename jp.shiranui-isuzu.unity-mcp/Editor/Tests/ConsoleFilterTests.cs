@@ -23,9 +23,60 @@ namespace UnityMCP.Editor.Tests
         private static readonly Type LogEntries =
             typeof(EditorWindow).Assembly.GetType("UnityEditor.LogEntries");
 
+        private const int Collapse = 1;
+        private const int LogLevelWarning = 256;
+        private const int LogLevelError = 512;
+
+        private int? savedFlags;
+
         private static MethodInfo Method(string name)
         {
             return LogEntries?.GetMethod(name, BindingFlags.Public | BindingFlags.Static);
+        }
+
+        /// <summary>Every severity shown and nothing collapsed, whatever the machine's Console had.</summary>
+        /// <remarks>
+        /// The toggles live in EditorPrefs that every Editor on the machine shares, so a Warning
+        /// toggle switched off in an Editor someone is working in starts this one with warnings
+        /// withheld, and a check made while the window should show everything finds them hidden.
+        /// </remarks>
+        [SetUp]
+        public void ShowEverything()
+        {
+            var flags = LogEntries?.GetProperty("consoleFlags", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            var setFlag = Method("SetConsoleFlag");
+
+            if (flags == null || setFlag == null)
+            {
+                return;
+            }
+
+            this.savedFlags = (int)flags.GetValue(null);
+
+            foreach (var bit in new[] { LogLevelLog, LogLevelWarning, LogLevelError })
+            {
+                setFlag.Invoke(null, new object[] { bit, true });
+            }
+
+            setFlag.Invoke(null, new object[] { Collapse, false });
+        }
+
+        [TearDown]
+        public void RestoreTheConsole()
+        {
+            var setFlag = Method("SetConsoleFlag");
+
+            if (this.savedFlags is not int saved || setFlag == null)
+            {
+                return;
+            }
+
+            foreach (var bit in new[] { Collapse, LogLevelLog, LogLevelWarning, LogLevelError })
+            {
+                setFlag.Invoke(null, new object[] { bit, (saved & bit) != 0 });
+            }
+
+            this.savedFlags = null;
         }
 
         [Test]

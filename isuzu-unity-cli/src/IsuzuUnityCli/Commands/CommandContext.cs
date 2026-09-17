@@ -26,7 +26,25 @@ public sealed class CommandContext
     /// <summary>This executable's own path, which the stdio agents record as the command to run.</summary>
     public string ExecutablePath { get; init; } = Environment.ProcessPath ?? "isuzu-unity-cli";
 
-    public UnityHttpClient Client { get; init; } = new();
+    private UnityHttpClient? _client;
+
+    /// <remarks>
+    /// Built on first use from <see cref="ReadDescriptors"/>, so a context given its descriptors in
+    /// memory is not told its Editor has gone because no file on disk names it.
+    /// </remarks>
+    public UnityHttpClient Client
+    {
+        get => _client ??= new UnityHttpClient(published: Publishes);
+        init => _client = value;
+    }
+
+    private bool Publishes(InstanceDescriptor instance)
+    {
+        var key = ProjectKey.Of(instance.ProjectPath);
+
+        return key is null || ReadDescriptors().Any(candidate =>
+            ProjectKey.Of(candidate.ProjectPath) == key && (instance.Pid <= 0 || candidate.Pid == instance.Pid));
+    }
     public CancellationToken Cancellation { get; init; }
 
     /// <summary>

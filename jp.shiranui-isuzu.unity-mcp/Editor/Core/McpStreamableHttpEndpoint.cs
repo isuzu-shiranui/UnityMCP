@@ -45,7 +45,8 @@ namespace UnityMCP.Editor.Core
             "render_ shader_ material_ reflect_ gpu_ test_ build_ project_ editor_ menu_ capture_ execute_ job_ input_ definitions_.\n" +
             "Read console_read_logs before adding instrumentation. Prefer specific tools; execute_code is a last resort and cannot be undone.\n" +
             "Tools depend on installed packages (including Timeline/Recorder). If tools disappear after package changes or reload, reconnect to refresh the list.\n" +
-            "When a call returns a job id, fetch job_status. Do not repeat it: the work is still running.";
+            "When a call returns a job id, fetch job_status, or run isuzu-unity-cli jobs <id> --wait in a background " +
+            "shell to be told when it ends. Do not repeat the call: the work is still running.";
 
         private readonly Func<ToolCatalog> catalog;
         private readonly Func<McpToolDescriptor, JObject, ToolCallOutcome> run;
@@ -284,7 +285,9 @@ namespace UnityMCP.Editor.Core
                 default:
                     var text =
                         $"Still running on the Editor main thread as job {outcome.JobId}. " +
-                        $"Call job_status with job_id \"{outcome.JobId}\" to fetch the result. " +
+                        $"Call job_status with job_id \"{outcome.JobId}\" to fetch the result, or run " +
+                        $"`isuzu-unity-cli jobs {outcome.JobId} --wait` in a background shell to be told when it ends; " +
+                        "a request sent to this endpoint by hand is refused without its token. " +
                         "Do not retry this call; the work is in progress and retrying would run it twice.";
 
                     var notice = this.runningNotice?.Invoke();

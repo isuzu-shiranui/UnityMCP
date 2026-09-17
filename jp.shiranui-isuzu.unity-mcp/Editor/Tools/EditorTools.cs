@@ -21,7 +21,9 @@ namespace UnityMCP.Editor.Tools
             "Capture the Game or Scene view, or an Editor panel, as an image. " +
             "Every view whose name ends in _window, and inspector, hierarchy, project and console, is read " +
             "off the screen and is Windows-only; game and scene render through the camera and work " +
-            "everywhere. A screen-read view returns whatever is drawn in that rectangle, so the call " +
+            "everywhere. The capture waits while a shader variant is compiling, and is taken again when " +
+            "rendering it started a compile, because a variant still compiling draws as a cyan " +
+            "placeholder. A screen-read view returns whatever is drawn in that rectangle, so the call " +
             "is refused when another application is in front of the Editor. It also focuses the " +
             "window first, which raises a docked tab over whatever the person at the Editor was " +
             "looking at. An MCP client receives the picture as an image; the CLI writes it to " +
@@ -63,14 +65,26 @@ namespace UnityMCP.Editor.Tools
                              "window rather than rendered through a camera.")]
             string focus = null)
         {
-            return ScreenshotCapture.Capture(ToolArgs.Of(
+            var request = ToolArgs.Of(
                 ("view", view),
                 ("maxSize", maxSize),
                 ("width", width),
                 ("height", height),
                 ("savePath", savePath),
                 ("camera", camera),
-                ("focus", focus)));
+                ("focus", focus));
+
+            if (!UnityEditor.ShaderUtil.anythingCompiling)
+            {
+                var shot = ScreenshotCapture.Capture(request);
+
+                if (!UnityEditor.ShaderUtil.anythingCompiling)
+                {
+                    return shot;
+                }
+            }
+
+            return new DeferredToolResult(FrameSequencer.Run(ScreenshotCapture.CaptureCompiled(request), "capture_screenshot"));
         }
 
         [McpTool(

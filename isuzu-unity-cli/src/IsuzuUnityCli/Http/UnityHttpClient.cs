@@ -9,10 +9,18 @@ namespace IsuzuUnityCli.Http;
 public sealed class UnityHttpClient
 {
     private readonly RetryOptions _options;
+    private readonly Func<InstanceDescriptor, bool>? _published;
 
-    public UnityHttpClient(RetryOptions? options = null)
+    /// <param name="options">Retry budget and backoff.</param>
+    /// <param name="published">
+    /// Whether an Editor still publishes the descriptor a request went to. A closing Editor withdraws
+    /// its descriptor before it stops listening and a domain reload keeps it, so this is what tells
+    /// the two apart when a reply comes back empty. Without it an empty reply reads as a reload.
+    /// </param>
+    public UnityHttpClient(RetryOptions? options = null, Func<InstanceDescriptor, bool>? published = null)
     {
         _options = options ?? new RetryOptions();
+        _published = published;
     }
 
     public Task<Envelope> GetAsync(InstanceDescriptor instance, string path, CancellationToken cancellation = default)
@@ -72,6 +80,17 @@ public sealed class UnityHttpClient
 
                 if (classification != Classification.Retryable)
                 {
+                    if (string.IsNullOrWhiteSpace(body) && _published is not null && !_published(instance))
+                    {
+                        throw new UnityError(
+                            "editor_exited",
+                            "The Editor stopped answering this call and no longer publishes itself: it is "
+                            + "closing, or its server was stopped in Preferences. The call may not have "
+                            + "finished; open the project again, or start the server, and check the state "
+                            + "before sending it again.",
+                            status);
+                    }
+
                     return Envelope.Parse(status, body);
                 }
 

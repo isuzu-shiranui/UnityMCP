@@ -140,6 +140,28 @@ public sealed class UnityHttpClientTests
         Assert.Contains("do not send it again", e.Message);
     }
 
+    /// <summary>An empty reply is a close only when the Editor no longer publishes itself.</summary>
+    /// <remarks>
+    /// A closing Editor withdraws its descriptor, then answers what is in flight with nothing, and
+    /// that read as a domain reload to wait out. A reload answers the same way but keeps the
+    /// descriptor, and has to stay something to wait out.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, "editor_exited")]
+    [InlineData(true, "non_json")]
+    public async Task AnEmptyReplyIsACloseOnlyWhenTheEditorNoLongerPublishesItself(bool published, string code)
+    {
+        using var server = new FakeUnityServer().Enqueue(200, "");
+        var client = new UnityHttpClient(
+            new RetryOptions { InitialBackoffMs = 20, MaxBackoffMs = 100, BudgetMs = 200, PerAttemptTimeoutMs = 5000 },
+            _ => published);
+
+        var e = await Assert.ThrowsAsync<UnityError>(
+            () => client.PostAsync(server.Descriptor(), "/tools/execute_code", new System.Text.Json.Nodes.JsonObject()));
+
+        Assert.Equal(code, e.Code);
+    }
+
     private static int ExitedProcessId()
     {
         var info = OperatingSystem.IsWindows()
