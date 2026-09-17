@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [4.4.2] - 2026-09-17
 
 ### Changed
 - `shader_errors` returned every message's full compile context, which is mostly the platform defines and disabled keywords of the variant it came from and made up about 70% of the reply. A message now carries `pass`, such as `Subshader 0 / ForwardLit / fragment`, and `include_details` brings the full context back.
