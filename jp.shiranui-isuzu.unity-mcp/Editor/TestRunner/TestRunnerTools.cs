@@ -76,7 +76,7 @@ namespace UnityMCP.Editor.TestRunner
 
             public JArray Results = new JArray();
 
-            public JObject ToJson()
+            public JObject ToJson(JArray results = null)
             {
                 return new JObject
                 {
@@ -92,7 +92,7 @@ namespace UnityMCP.Editor.TestRunner
                     ["inconclusive"] = this.Inconclusive,
                     ["finishedCount"] = this.Finished.Count,
                     ["durationSeconds"] = this.DurationSeconds,
-                    ["results"] = this.Results,
+                    ["results"] = results ?? this.Results,
                 };
             }
 
@@ -417,29 +417,34 @@ namespace UnityMCP.Editor.TestRunner
             [McpArg("limit", "Maximum test entries to return.")]
             int limit = 50)
         {
-            JObject snapshot;
-
             lock (Gate)
             {
-                snapshot = current.ToJson();
+                var results = new JArray();
+                var truncated = false;
+                var maximum = Math.Max(limit, 0);
+
+                // Persist attaches the full result array to a JSON parent. Serializing that
+                // snapshot first would clone every test before discarding most of them.
+                foreach (var result in current.Results.OfType<JObject>())
+                {
+                    if (!includePassed && (string)result["status"] == "passed")
+                    {
+                        continue;
+                    }
+
+                    if (results.Count == maximum)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    results.Add(result.DeepClone());
+                }
+
+                var snapshot = current.ToJson(results);
+                snapshot["truncated"] = truncated;
+                return snapshot;
             }
-
-            var results = (snapshot["results"] as JArray ?? new JArray())
-                .OfType<JObject>()
-                .Where(r => includePassed || (string)r["status"] != "passed")
-                .ToList();
-
-            var truncated = results.Count > Math.Max(limit, 0);
-
-            if (truncated)
-            {
-                results = results.Take(Math.Max(limit, 0)).ToList();
-            }
-
-            snapshot["results"] = new JArray(results.Cast<object>().ToArray());
-            snapshot["truncated"] = truncated;
-
-            return snapshot;
         }
     }
 }
