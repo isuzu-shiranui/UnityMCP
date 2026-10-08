@@ -1,0 +1,85 @@
+name: Sign test
+
+# Builds the Windows binary and has SignPath sign it, without tagging or publishing anything.
+# This is for setting up the SignPath project: the release workflow signs only once
+# SIGNPATH_SIGNING_POLICY_SLUG is set, and until then this is the way to see a request go through
+# with the test certificate. The signed binary is kept as the run's artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      signing-policy:
+        description: SignPath signing policy slug
+        default: test-signing
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(grep -oP '<Version>\K[^<]+' isuzu-unity-cli/src/IsuzuUnityCli/IsuzuUnityCli.csproj)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build the Windows binary
+        shell: bash
+        working-directory: isuzu-unity-cli
+        run: |
+          dotnet publish src/IsuzuUnityCli/IsuzuUnityCli.csproj -c Release -r win-x64 -o ../dist/win-x64
+          mkdir -p ../dist/out
+          mv ../dist/win-x64/isuzu-unity-cli.exe ../dist/out/isuzu-unity-cli-win-x64.exe
+
+      - name: Upload the unsigned binary
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-x64
+          path: dist/out/isuzu-unity-cli-win-x64.exe
+          if-no-files-found: error
+
+      - name: Sign
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ inputs.signing-policy }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: dist/signed
+          parameters: |
+            version: "${{ steps.version.outputs.version }}"
+
+      # The test certificate chains to no trusted root, so the status is not Valid; a signer is
+      # what shows the request went through.
+      - name: The binary is signed
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature dist/signed/isuzu-unity-cli-win-x64.exe
+          if ($null -eq $signature.SignerCertificate) {
+            Write-Error "no Authenticode signature ($($signature.Status))"
+            exit 1
+          }
+          Write-Host "signed by $($signature.SignerCertificate.Subject), status $($signature.Status)"
+
+      - name: Keep the signed binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-win-x64
+          path: dist/signed/isuzu-unity-cli-win-x64.exe
+          if-no-files-found: error

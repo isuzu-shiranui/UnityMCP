@@ -6,6 +6,11 @@
     <AssemblyName>isuzu-unity-cli</AssemblyName>
     <RootNamespace>IsuzuUnityCli</RootNamespace>
     <Version>4.4.2</Version>
+    <!-- The version resource of the Windows binary. SignPath refuses to sign a file whose
+         product name or version differs from what .signpath/artifact-configuration.xml expects,
+         and the SDK would otherwise append the commit hash to the product version. -->
+    <Product>Unity MCP</Product>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>

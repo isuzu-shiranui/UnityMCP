@@ -366,10 +366,57 @@ jobs:
           mv "../dist/$RID/isuzu-unity-cli$EXT" "$OUT/isuzu-unity-cli-$RID$EXT"
           ls -la "$OUT"
 
+      # SignPath signs only what it can trace to this run, so the binary goes to it as a workflow
+      # artifact rather than as a file, and comes back signed over the unsigned one. Every release
+      # waits here until an approver accepts the request on SignPath; the SignPath Foundation
+      # certificate requires that approval, so the timeout leaves room for a person to act.
+      #
+      # Signing is off until SIGNPATH_SIGNING_POLICY_SLUG is set, so the release keeps working
+      # while the SignPath project is being set up.
+      - name: Upload the unsigned Windows binary
+        id: unsigned
+        if: matrix.rid == 'win-x64' && vars.SIGNPATH_SIGNING_POLICY_SLUG != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-win-x64
+          path: dist/out/isuzu-unity-cli-win-x64.exe
+          if-no-files-found: error
+
+      - name: Sign the Windows binary
+        if: steps.unsigned.outcome == 'success'
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 10800
+          output-artifact-directory: dist/signed
+          parameters: |
+            version: "${{ needs.plan.outputs.version }}"
+
+      # A request SignPath completed without signing, or a download that unpacked somewhere
+      # else, would otherwise publish the unsigned binary under a release that claims a signature.
+      - name: Replace the binary with the signed one
+        if: steps.unsigned.outcome == 'success'
+        shell: pwsh
+        working-directory: dist
+        run: |
+          $signed = 'signed/isuzu-unity-cli-win-x64.exe'
+          $signature = Get-AuthenticodeSignature $signed
+          if ($null -eq $signature.SignerCertificate) {
+            Write-Error "$signed carries no Authenticode signature ($($signature.Status))"
+            exit 1
+          }
+          Write-Host "signed by $($signature.SignerCertificate.Subject), status $($signature.Status)"
+          Move-Item -Force $signed 'out/isuzu-unity-cli-win-x64.exe'
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.rid }}
+          name: binary-${{ matrix.rid }}
           path: dist/out/isuzu-unity-cli-*
           if-no-files-found: error
 
@@ -416,6 +463,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/out
+          # Leaves out unsigned-win-x64, whose file has the same name as the signed one.
+          pattern: binary-*
           merge-multiple: true
 
       - name: All binaries arrived
@@ -521,6 +570,9 @@ jobs:
           # A resumed run against a release that already exists rewrites its notes; the action has
           # no option to keep them, and append_body would print them a second time instead.
           generate_release_notes: true
+          # Only a signed release says it is signed.
+          body: >-
+            ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG != '' && '[Code signing policy](https://github.com/isuzu-shiranui/UnityMCP/blob/main/docs/en/code-signing-policy.md): free code signing provided by SignPath.io, certificate by SignPath Foundation.' || '' }}
           draft: false
           prerelease: false
           files: |

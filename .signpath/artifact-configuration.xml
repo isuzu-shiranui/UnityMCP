@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The artifact configuration of the SignPath project for isuzu-unity-cli. SignPath reads its own
+  copy, entered on the project's page; this file is the one to paste there when either changes.
+
+  upload-artifact wraps what it uploads in a zip, so the root is a zip-file holding the bare exe.
+  product-name and product-version are checked against the version resource of the binary, which
+  the SDK writes from <Product> and <Version> in IsuzuUnityCli.csproj; a build that does not carry
+  the version the workflow passes in is refused rather than signed.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="isuzu-unity-cli-win-x64.exe" product-name="Unity MCP" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
